@@ -1,0 +1,294 @@
+<style>
+
+  body { font-family: Arial, sans-serif; max-width: 900px; margin: 40px auto; padding: 0 16px; color: #222; }
+  h2 { margin-bottom: 4px; }
+  .subtitle { color: #666; font-size: 13px; margin-bottom: 24px; }
+  label { display: block; font-weight: bold; margin-top: 14px; margin-bottom: 4px; font-size: 14px; }
+  input, select, textarea { padding: 8px; box-sizing: border-box; font-size: 14px; border: 1px solid #ccc; border-radius: 4px; }
+  button { padding: 8px 14px; font-size: 14px; border: none; border-radius: 4px; background: #1a73e8; color: white; cursor: pointer; }
+  button.secondary { background: #5f6368; }
+  button:disabled { background: #999; cursor: not-allowed; }
+  #message { margin-top: 14px; padding: 10px; border-radius: 4px; font-size: 14px; display: none; }
+  .success { background: #e6f4ea; color: #1e7e34; display: block !important; }
+  .error { background: #fce8e6; color: #c5221f; display: block !important; }
+  #loggedInBar { display:none; font-size: 13px; color:#555; margin-bottom: 10px; }
+  #logoutBtn { width:auto; padding:4px 10px; font-size:12px; background:#666; margin-left:8px; }
+  .lockedNotice { background:#fce8e6; color:#c5221f; padding:14px; border-radius:4px; font-size:14px; }
+  .toolbar { display:flex; gap:10px; align-items:center; margin-bottom: 14px; flex-wrap: wrap; }
+  table { width:100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align:left; padding:8px; border-bottom:1px solid #eee; vertical-align: top; }
+  th { background:#fafafa; }
+  tr:hover { background:#fafcff; }
+  .badge { display:inline-block; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:bold; color:white; }
+  .badgeOpen { background:#c5221f; }
+  .badgeAcknowledged { background:#e8710a; }
+  .badgeActioned { background:#1e7e34; }
+  .badgeDismissed { background:#999; }
+  .emptyNote { color:#888; font-size:13px; font-style:italic; padding:14px 0; }
+  .detailRow td { background:#f8f9fb; }
+  .detailPanel { display:flex; gap:10px; align-items:flex-end; flex-wrap: wrap; padding: 8px 0; }
+  .detailPanel > div { flex: 1; min-width: 180px; }
+  .rowClickable { cursor: pointer; }
+
+</style>
+
+
+<h2>Demand Alerts Dashboard</h2>
+<div class="subtitle">Planning-only. Heads-up requests from Area Incharges &mdash; purely informational, nothing here moves stock. Acting on one still means raising a normal STO separately.</div>
+
+<!-- ====== LOGIN SECTION ====== -->
+<div id="loginSection" style="display:none">
+  <label for="loginEmail">Email</label>
+  <input type="email" id="loginEmail" placeholder="you@test.com" style="width:100%;">
+
+  <label for="loginPassword">Password</label>
+  <input type="password" id="loginPassword" placeholder="Password" style="width:100%;">
+
+  <button id="loginBtn" onclick="login()" style="width:100%; margin-top:20px;">Log In</button>
+</div>
+
+<!-- ====== NOT AUTHORIZED NOTICE ====== -->
+<div id="notAuthorizedNotice" style="display:none;" class="lockedNotice">
+  You're logged in, but only Planning staff (excluding Store Incharge) can view this dashboard. If you believe this is wrong, contact the project owner.
+</div>
+
+<!-- ====== DASHBOARD SECTION ====== -->
+<div id="dashSection" style="display:none;">
+  <div id="loggedInBar"></div>
+
+  <div class="toolbar">
+    <label style="margin:0;">Status</label>
+    <select id="statusFilter" onchange="loadAlerts()">
+      <option value="all">All</option>
+      <option value="Open">Open</option>
+      <option value="Acknowledged">Acknowledged</option>
+      <option value="Actioned">Actioned</option>
+      <option value="Dismissed">Dismissed</option>
+    </select>
+    <button class="secondary" onclick="loadAlerts()">Refresh now</button>
+    <span id="pollNote" style="font-size:12px; color:#888;">Not live &mdash; click Refresh to see new alerts</span>
+  </div>
+
+  <div id="tableWrap">
+    <table>
+      <thead><tr>
+        <th>Date</th><th>Area</th><th>Raised By</th><th>Type</th><th>Material</th><th>Qty</th><th>Remarks</th><th>Status</th>
+      </tr></thead>
+      <tbody id="tableBody"></tbody>
+    </table>
+    <div id="emptyState" class="emptyNote" style="display:none;">No demand alerts match this filter.</div>
+  </div>
+</div>
+
+<div id="message"></div>
+
+
+
+
+<script>
+(function(){
+
+  // TODO: paste your deployed Apps Script Web App URL here
+  const APPS_SCRIPT_URL = Shell.APPS_SCRIPT_URL;
+
+  let currentUser = { email: '', password: '' };
+  let alerts = [];
+  let expandedId = null;
+
+  function showMessage(text, type) {
+    const el = document.getElementById('message');
+    el.textContent = text;
+    el.className = type;
+  }
+  function clearMessage() {
+    const el = document.getElementById('message');
+    el.textContent = '';
+    el.className = '';
+  }
+  function escapeHtml(str) {
+    return String(str).replace(/[&<>"']/g, function (c) {
+      return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
+    });
+  }
+  function hasCommaValueClient(str, target) {
+    if (!str) return false;
+    return String(str).split(',').map(function (s) { return s.trim().toLowerCase(); }).indexOf(target.toLowerCase()) !== -1;
+  }
+
+  /**
+   * Low-level POST with a doGet-retry guard: right after a fresh redeploy,
+   * the Apps Script /exec URL can 302-redirect to a new backend execution
+   * URL, and that hop occasionally downgrades POST to GET -- landing on
+   * doGet() instead of doPost(). Recognizable because doGet's response has
+   * no 'success' field and this exact status/message shape. One silent
+   * retry clears it almost every time.
+   */
+  async function rawPost(body) {
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    if (data && data.status === 'ok' && data.message === 'Apps Script backend is running.') {
+      const retryRes = await fetch(APPS_SCRIPT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(body)
+      });
+      return retryRes.json();
+    }
+    return data;
+  }
+
+  async function callApi(payload) {
+    return rawPost(Object.assign({ email: currentUser.email, password: currentUser.password }, payload));
+  }
+
+  async function login() {
+    const email = document.getElementById('loginEmail').value.trim();
+    const password = document.getElementById('loginPassword').value;
+    clearMessage();
+    if (!email || !password) { showMessage('Please enter email and password.', 'error'); return; }
+
+    const loginBtn = document.getElementById('loginBtn');
+    loginBtn.disabled = true;
+    loginBtn.textContent = 'Logging in...';
+
+    try {
+      const data = await rawPost({ action: 'login', email: email, password: password });
+      if (!data.success) { showMessage(data.message || 'Login failed.', 'error'); return; }
+
+      // Mirrors canManageSTO() server-side: Authorized_Area contains 'Planning'
+      // AND Role does NOT contain 'Store Incharge'. This is client-side UX only --
+      // every backend action re-checks this itself via requireSTOAccess().
+      const isPlanning = hasCommaValueClient(data.authorizedArea, 'Planning') && !hasCommaValueClient(data.role, 'Store Incharge');
+
+      currentUser = { email: email, password: password };
+      document.getElementById('loginSection').style.display = 'none';
+
+      if (!isPlanning) {
+        document.getElementById('notAuthorizedNotice').style.display = 'block';
+        return;
+      }
+
+      document.getElementById('dashSection').style.display = 'block';
+      const bar = document.getElementById('loggedInBar');
+      bar.style.display = 'block';
+      bar.innerHTML = 'Logged in as <b>' + escapeHtml(data.name) + '</b> (' + escapeHtml(data.role) + ')' +
+        '<button id="logoutBtn" onclick="Shell.logout()">Log out</button>';
+
+      loadAlerts();
+    } catch (err) {
+      showMessage('Could not reach the server. Check your connection or the Apps Script URL.', 'error');
+    } finally {
+      loginBtn.disabled = false;
+      loginBtn.textContent = 'Log In';
+    }
+  }
+
+  function statusBadge(status) {
+    const cls = 'badge badge' + String(status || 'Open').replace(/\s+/g, '');
+    return '<span class="' + cls + '">' + escapeHtml(status || 'Open') + '</span>';
+  }
+
+  async function loadAlerts() {
+    try {
+      const status = document.getElementById('statusFilter').value;
+      const data = await callApi({ action: 'getDemandAlerts', status: status });
+      if (!data.success) { showMessage(data.message || 'Could not load alerts.', 'error'); return; }
+      alerts = data.alerts || [];
+      renderTable();
+    } catch (err) {
+      showMessage('Could not reach the server. Check your connection or the Apps Script URL.', 'error');
+    }
+  }
+
+  function renderTable() {
+    const body = document.getElementById('tableBody');
+    const emptyState = document.getElementById('emptyState');
+    if (alerts.length === 0) {
+      body.innerHTML = '';
+      emptyState.style.display = 'block';
+      return;
+    }
+    emptyState.style.display = 'none';
+
+    body.innerHTML = alerts.map(function (a) {
+      const material = a.ucsCode ? (escapeHtml(a.ucsCode) + ' \u2014 ' + escapeHtml(a.itemDescription)) : ('<i>(New)</i> ' + escapeHtml(a.itemDescription));
+      const rows = [
+        '<tr class="rowClickable" onclick="toggleDetail(\'' + a.alertId + '\')">' +
+          '<td>' + escapeHtml(a.dateRaised) + '</td>' +
+          '<td>' + escapeHtml(a.area) + '</td>' +
+          '<td>' + escapeHtml(a.raisedByName) + '</td>' +
+          '<td>' + escapeHtml(a.requestType) + '</td>' +
+          '<td>' + material + '</td>' +
+          '<td>' + escapeHtml(String(a.estimatedQty)) + (a.unit ? ' ' + escapeHtml(a.unit) : '') + '</td>' +
+          '<td>' + escapeHtml(a.remarks || '') + '</td>' +
+          '<td>' + statusBadge(a.status) + '</td>' +
+        '</tr>'
+      ];
+      if (expandedId === a.alertId) {
+        rows.push(
+          '<tr class="detailRow"><td colspan="8"><div class="detailPanel">' +
+            '<div><label>New status</label><select id="statusSelect_' + a.alertId + '">' +
+              ['Open', 'Acknowledged', 'Actioned', 'Dismissed'].map(function (s) {
+                return '<option value="' + s + '"' + (s === a.status ? ' selected' : '') + '>' + s + '</option>';
+              }).join('') +
+            '</select></div>' +
+            '<div style="flex:2;"><label>Planning remarks</label><input type="text" id="remarksInput_' + a.alertId + '" value="' + escapeHtml(a.planningRemarks || '') + '" style="width:100%;"></div>' +
+            '<div style="flex:0 0 auto;"><button onclick="saveStatus(\'' + a.alertId + '\')">Save</button></div>' +
+          '</div>' +
+          (a.lastUpdatedBy ? '<div style="font-size:12px; color:#888; padding-bottom:8px;">Last updated by ' + escapeHtml(a.lastUpdatedBy) + ' on ' + escapeHtml(a.lastUpdatedAt || '') + '</div>' : '') +
+          '</td></tr>'
+        );
+      }
+      return rows.join('');
+    }).join('');
+  }
+
+  function toggleDetail(alertId) {
+    expandedId = (expandedId === alertId) ? null : alertId;
+    renderTable();
+  }
+
+  async function saveStatus(alertId) {
+    clearMessage();
+    const status = document.getElementById('statusSelect_' + alertId).value;
+    const planningRemarks = document.getElementById('remarksInput_' + alertId).value.trim();
+    try {
+      const data = await callApi({ action: 'updateDemandAlertStatus', alertId: alertId, status: status, planningRemarks: planningRemarks });
+      if (data.success) {
+        showMessage(data.message, 'success');
+        expandedId = null;
+        loadAlerts();
+      } else {
+        showMessage(data.message || 'Could not update the alert.', 'error');
+      }
+    } catch (err) {
+      showMessage('Could not reach the server. Check your connection or the Apps Script URL.', 'error');
+    }
+  }
+
+  window.callApi = callApi;
+  window.clearMessage = clearMessage;
+  window.escapeHtml = escapeHtml;
+  window.hasCommaValueClient = hasCommaValueClient;
+  window.loadAlerts = loadAlerts;
+  window.login = login;
+  window.rawPost = rawPost;
+  window.renderTable = renderTable;
+  window.saveStatus = saveStatus;
+  window.showMessage = showMessage;
+  window.statusBadge = statusBadge;
+  window.toggleDetail = toggleDetail;
+
+  // ---- shell auto-login: fill the page's OWN hidden login form and
+  // submit it through the page's OWN unmodified login() function, so every
+  // page's tested role-check / UI-reveal logic runs exactly as before. ----
+  document.getElementById('loginEmail').value = Shell.getUser().email;
+  document.getElementById('loginPassword').value = Shell.getUser().password;
+  login();
+
+})();
+</script>

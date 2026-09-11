@@ -1,0 +1,272 @@
+<style>
+
+  body { font-family: Arial, sans-serif; max-width: 480px; margin: 40px auto; padding: 0 16px; color: #222; }
+  h2 { margin-bottom: 4px; }
+  .subtitle { color: #666; font-size: 13px; margin-bottom: 24px; }
+  label { display: block; font-weight: bold; margin-top: 14px; margin-bottom: 4px; font-size: 14px; }
+  input, select, textarea { width: 100%; padding: 8px; box-sizing: border-box; font-size: 14px; border: 1px solid #ccc; border-radius: 4px; }
+  textarea { min-height: 80px; resize: vertical; }
+  button { margin-top: 20px; width: 100%; padding: 10px; font-size: 15px; border: none; border-radius: 4px; background: #1a73e8; color: white; cursor: pointer; }
+  button:disabled { background: #999; cursor: not-allowed; }
+  #message { margin-top: 14px; padding: 10px; border-radius: 4px; font-size: 14px; display: none; }
+  .success { background: #e6f4ea; color: #1e7e34; display: block !important; }
+  .error { background: #fce8e6; color: #c5221f; display: block !important; }
+  #loggedInBar { display:none; font-size: 13px; color:#555; margin-bottom: 10px; }
+  #logoutBtn { width:auto; padding:4px 10px; font-size:12px; background:#666; margin-left:8px; }
+
+</style>
+
+
+<h2>Add New UCS Code</h2>
+<div class="subtitle">GitHub_SMS-3 Stores Module</div>
+
+<!-- ====== LOGIN SECTION ====== -->
+<div id="loginSection" style="display:none">
+  <label for="loginEmail">Email</label>
+  <input type="email" id="loginEmail" placeholder="you@test.com">
+
+  <label for="loginPassword">Password</label>
+  <input type="password" id="loginPassword" placeholder="Password">
+
+  <button id="loginBtn" onclick="login()">Log In</button>
+</div>
+
+<!-- ====== FORM SECTION (shown after login) ====== -->
+<div id="formSection" style="display:none;">
+  <div id="loggedInBar"></div>
+
+  <label for="ucsCode">UCS Code (exactly 14 digits)</label>
+  <input type="text" id="ucsCode" placeholder="e.g. 50610001000999" maxlength="14" inputmode="numeric" oninput="sanitizeAndValidateUCSCode()" onblur="validateUCSCodeField()">
+  <div id="ucsCodeError" style="color:#c5221f; font-size:12px; margin-top:4px; display:none;"></div>
+
+  <label for="shortText">Short Text</label>
+  <input type="text" id="shortText" placeholder="Short description">
+
+  <label for="longText">Long Text</label>
+  <textarea id="longText" placeholder="Full detailed description"></textarea>
+
+  <label for="unit">Unit</label>
+  <select id="unit">
+    <option value="">Select unit</option>
+  </select>
+
+  <button id="submitBtn" onclick="submitUCSCode()">Submit New Code</button>
+</div>
+
+<div id="message"></div>
+
+
+
+
+<script>
+(function(){
+
+  // TODO: paste your deployed Apps Script Web App URL here
+  const APPS_SCRIPT_URL = Shell.APPS_SCRIPT_URL;
+
+  // Kept only in memory for this page load — not persisted to browser storage.
+  let currentUser = { email: '', password: '' };
+
+  function showMessage(text, type) {
+    const el = document.getElementById('message');
+    el.textContent = text;
+    el.className = type; // 'success' or 'error'
+  }
+
+  function clearMessage() {
+    const el = document.getElementById('message');
+    el.textContent = '';
+    el.className = '';
+  }
+
+  /**
+   * Shared POST helper with a doGet-retry guard: right after a fresh
+   * redeploy, the Apps Script /exec URL can 302-redirect to a new backend
+   * execution URL, and that hop occasionally downgrades POST to GET --
+   * landing on doGet() instead of doPost(). Recognizable because doGet's
+   * response has no 'success' field and this exact status/message shape.
+   * One silent retry clears it almost every time.
+   */
+  async function postToBackend(payload) {
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (data && data.status === 'ok' && data.message === 'Apps Script backend is running.') {
+      const retryRes = await fetch(APPS_SCRIPT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(payload)
+      });
+      return retryRes.json();
+    }
+    return data;
+  }
+
+  async function login() {
+    const email = document.getElementById('loginEmail').value.trim();
+    const password = document.getElementById('loginPassword').value;
+    clearMessage();
+
+    if (!email || !password) {
+      showMessage('Please enter email and password.', 'error');
+      return;
+    }
+
+    const loginBtn = document.getElementById('loginBtn');
+    loginBtn.disabled = true;
+    loginBtn.textContent = 'Logging in...';
+
+    try {
+      const data = await postToBackend({ action: 'login', email, password });
+
+      if (data.success) {
+        currentUser = { email, password };
+        document.getElementById('loginSection').style.display = 'none';
+        document.getElementById('formSection').style.display = 'block';
+        const bar = document.getElementById('loggedInBar');
+        bar.style.display = 'block';
+        bar.innerHTML = 'Logged in as <b>' + data.name + '</b> (' + data.role + ')' +
+          '<button id="logoutBtn" onclick="logout()">Log out</button>';
+        loadUnitOptions();
+      } else {
+        showMessage(data.message || 'Login failed.', 'error');
+      }
+    } catch (err) {
+      showMessage('Could not reach the server. Check your connection or the Apps Script URL.', 'error');
+    } finally {
+      loginBtn.disabled = false;
+      loginBtn.textContent = 'Log In';
+    }
+  }
+
+  // Unit is no longer a hardcoded list here -- it's read live from Options_List's
+  // 'Unit' column, the same source addUCSCode() validates against server-side, and
+  // the same source Admins manage from admin-options.html. Never hardcode units again.
+  async function loadUnitOptions() {
+    const select = document.getElementById('unit');
+    try {
+      const data = await postToBackend({ action: 'getOptionsList', category: 'Unit', email: currentUser.email, password: currentUser.password });
+      if (data.success && Array.isArray(data.values) && data.values.length > 0) {
+        select.innerHTML = '<option value="">Select unit</option>' +
+          data.values.map(function (u) { return '<option value="' + u + '">' + u + '</option>'; }).join('');
+      } else {
+        showMessage(data.message || 'Could not load Unit options from Options_List.', 'error');
+      }
+    } catch (err) {
+      showMessage('Could not reach the server to load Unit options.', 'error');
+    }
+  }
+
+  function logout() {
+    currentUser = { email: '', password: '' };
+    document.getElementById('formSection').style.display = 'none';
+    document.getElementById('loginSection').style.display = 'block';
+    document.getElementById('loginPassword').value = '';
+    clearMessage();
+  }
+
+  function sanitizeAndValidateUCSCode() {
+    const field = document.getElementById('ucsCode');
+    const cleaned = field.value.replace(/[^\d]/g, '');
+    if (cleaned !== field.value) {
+      field.value = cleaned;
+    }
+    validateUCSCodeField();
+  }
+
+  function validateUCSCodeField() {
+    const val = document.getElementById('ucsCode').value.trim();
+    const errEl = document.getElementById('ucsCodeError');
+
+    if (val === '') {
+      errEl.style.display = 'none';
+      return true;
+    }
+    if (!/^\d+$/.test(val)) {
+      errEl.textContent = 'UCS Code can only contain digits — no spaces or special characters.';
+      errEl.style.display = 'block';
+      return false;
+    }
+    if (val.length !== 14) {
+      errEl.textContent = 'UCS Code must be exactly 14 digits. Currently ' + val.length + ' digit(s).';
+      errEl.style.display = 'block';
+      return false;
+    }
+    if (val.charAt(0) === '0') {
+      errEl.textContent = 'UCS Code cannot start with 0.';
+      errEl.style.display = 'block';
+      return false;
+    }
+    errEl.style.display = 'none';
+    return true;
+  }
+
+  async function submitUCSCode() {
+    clearMessage();
+
+    const ucsCode = document.getElementById('ucsCode').value.trim();
+    const shortText = document.getElementById('shortText').value.trim();
+    const longText = document.getElementById('longText').value.trim();
+    const unit = document.getElementById('unit').value;
+
+    if (!ucsCode || !shortText || !longText || !unit) {
+      showMessage('Please fill in all fields.', 'error');
+      return;
+    }
+
+    if (!validateUCSCodeField()) {
+      showMessage('Please fix the UCS Code before submitting.', 'error');
+      return;
+    }
+
+    const submitBtn = document.getElementById('submitBtn');
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Submitting...';
+
+    try {
+      const data = await postToBackend({
+        action: 'addUCSCode',
+        email: currentUser.email,
+        password: currentUser.password,
+        ucsCode, shortText, longText, unit
+      });
+
+      if (data.success) {
+        showMessage(data.message, 'success');
+        document.getElementById('ucsCode').value = '';
+        document.getElementById('shortText').value = '';
+        document.getElementById('longText').value = '';
+        document.getElementById('unit').value = '';
+      } else {
+        showMessage(data.message || 'Submission failed.', 'error');
+      }
+    } catch (err) {
+      showMessage('Could not reach the server. Check your connection or the Apps Script URL.', 'error');
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Submit New Code';
+    }
+  }
+
+  window.clearMessage = clearMessage;
+  window.loadUnitOptions = loadUnitOptions;
+  window.login = login;
+  window.logout = logout;
+  window.postToBackend = postToBackend;
+  window.sanitizeAndValidateUCSCode = sanitizeAndValidateUCSCode;
+  window.showMessage = showMessage;
+  window.submitUCSCode = submitUCSCode;
+  window.validateUCSCodeField = validateUCSCodeField;
+
+  // ---- shell auto-login: fill the page's OWN hidden login form and
+  // submit it through the page's OWN unmodified login() function, so every
+  // page's tested role-check / UI-reveal logic runs exactly as before. ----
+  document.getElementById('loginEmail').value = Shell.getUser().email;
+  document.getElementById('loginPassword').value = Shell.getUser().password;
+  login();
+
+})();
+</script>

@@ -1,0 +1,1034 @@
+<style>
+
+  body { font-family: Arial, sans-serif; max-width: 900px; margin: 40px auto; padding: 0 16px; color: #222; }
+  h2 { margin-bottom: 4px; }
+  .subtitle { color: #666; font-size: 13px; margin-bottom: 24px; }
+  label { display: block; font-weight: bold; margin-top: 14px; margin-bottom: 4px; font-size: 14px; }
+  input, select, textarea { padding: 8px; box-sizing: border-box; font-size: 14px; border: 1px solid #ccc; border-radius: 4px; }
+  input.readonly { background: #f1f3f4; color: #555; }
+  button { padding: 8px 14px; font-size: 14px; border: none; border-radius: 4px; background: #1a73e8; color: white; cursor: pointer; }
+  button.secondary { background: #5f6368; }
+  button.small { padding: 4px 10px; font-size: 12px; }
+  button:disabled { background: #999; cursor: not-allowed; }
+  #message { margin-top: 14px; padding: 10px; border-radius: 4px; font-size: 14px; display: none; }
+  .success { background: #e6f4ea; color: #1e7e34; display: block !important; }
+  .error { background: #fce8e6; color: #c5221f; display: block !important; }
+  #loggedInBar { display:none; font-size: 13px; color:#555; margin-bottom: 10px; }
+  #logoutBtn { width:auto; padding:4px 10px; font-size:12px; background:#666; margin-left:8px; }
+  .fieldError { color:#c5221f; font-size:12px; margin-top:4px; display:none; }
+  .lockedNotice { background:#fce8e6; color:#c5221f; padding:14px; border-radius:4px; font-size:14px; }
+
+  /* ---- Filters ---- */
+  #filterBar { display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; margin-bottom: 16px; }
+  #filterBar > div { display:flex; flex-direction:column; }
+  #filterBar label { margin-top:0; }
+  #searchBox { width: 220px; }
+  #filterBar button { height: 36px; }
+
+  /* ---- Table ---- */
+  .tableWrap { overflow-x: auto; border: 1px solid #e0e0e0; border-radius: 6px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; white-space: nowrap; }
+  th, td { padding: 8px 10px; border-bottom: 1px solid #eee; text-align: left; }
+  th { background: #f8f9fa; font-weight: bold; position: sticky; top: 0; }
+  tr.selectedRow { background: #e8f0fe; }
+  tr.detailRow > td { padding: 0; border-bottom: 2px solid #dadce0; background: #fff; white-space: normal; }
+  .badge { padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: bold; }
+  .badge.pending { background: #fff8e1; color: #b98900; }
+  .badge.received { background: #e6f4ea; color: #1e7e34; }
+  .badge.z04done { background: #e6f4ea; color: #1e7e34; }
+  .badge.z04pending { background: #fce8e6; color: #c5221f; }
+  .badge.s201done { background: #e6f4ea; color: #1e7e34; }
+  .badge.s201partial { background: #fff8e1; color: #b98900; }
+  .badge.s201pending { background: #fce8e6; color: #c5221f; }
+  .badge.s201na { background: #f1f3f4; color: #888; }
+  #emptyState { padding: 24px; text-align: center; color: #666; font-size: 14px; display:none; }
+
+  /* ---- Pagination ---- */
+  #paginationBar { display:flex; align-items:center; justify-content:space-between; margin-top: 12px; font-size: 13px; color:#444; }
+  #paginationBar .pageControls { display:flex; gap:8px; align-items:center; }
+
+  /* ---- Action panel ---- */
+  #actionPanel { display:none; margin: 10px; border: 1px solid #ddd; border-radius: 8px; padding: 16px; background: #fafafa; }
+  #actionPanel h3 { margin-top:0; font-size: 16px; }
+  #actionPanel .contextRow { font-size: 13px; color:#555; margin-bottom: 12px; }
+  #actionPanel .fieldsGrid { display:grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+  .adminWarning { background:#fff8e1; color:#8a6d00; padding:10px; border-radius:4px; font-size:13px; margin-bottom:12px; }
+  .actionBtnRow { display:flex; gap:8px; margin-top: 18px; }
+
+  /* ---- Confirmation step ---- */
+  #confirmPanel { display:none; margin-top: 16px; border: 1px solid #f2c94c; background:#fff8e1; border-radius:6px; padding:14px; }
+  #confirmPanel h4 { margin: 0 0 8px 0; font-size: 14px; }
+  #confirmSummary { font-size: 13px; line-height: 1.6; margin-bottom: 12px; }
+  #confirmSummary b { color:#222; }
+
+  #loadingRow { text-align:center; padding: 18px; color:#666; font-size: 13px; }
+
+</style>
+
+
+<h2>STO Dashboard</h2>
+<div class="subtitle">GitHub_SMS-3 Stores Module &mdash; Browse, search &amp; receive STOs</div>
+
+<!-- ====== LOGIN SECTION ====== -->
+<div id="loginSection" style="display:none">
+  <label for="loginEmail">Email</label>
+  <input type="email" id="loginEmail" placeholder="you@test.com" style="width:100%;">
+
+  <label for="loginPassword">Password</label>
+  <input type="password" id="loginPassword" placeholder="Password" style="width:100%;">
+
+  <button id="loginBtn" onclick="login()" style="margin-top:20px; width:100%;">Log In</button>
+</div>
+
+<!-- ====== NOT AUTHORIZED NOTICE ====== -->
+<div id="notAuthorizedNotice" style="display:none;" class="lockedNotice">
+  You're logged in, but only Planning staff (excluding Store Incharge) can view the STO dashboard. If you believe this is wrong, contact the project owner.
+</div>
+
+<!-- ====== DASHBOARD SECTION ====== -->
+<div id="dashboardSection" style="display:none;">
+  <div id="loggedInBar"></div>
+
+  <div id="filterBar">
+    <div>
+      <label for="startDate">From</label>
+      <input type="date" id="startDate" onchange="onFilterChange()">
+    </div>
+    <div>
+      <label for="endDate">To</label>
+      <input type="date" id="endDate" onchange="onFilterChange()">
+    </div>
+    <div>
+      <label for="searchBox">Search (STO No or UCS Code)</label>
+      <input type="text" id="searchBox" placeholder="Type any part of either..." oninput="onSearchInput()">
+    </div>
+    <div>
+      <label for="statusFilter">Status</label>
+      <select id="statusFilter" onchange="onFilterChange()">
+        <option value="all">All</option>
+        <option value="pending">Pending only</option>
+        <option value="received">Received only</option>
+      </select>
+    </div>
+    <div>
+      <label for="z04Filter">Z04</label>
+      <select id="z04Filter" onchange="onFilterChange()">
+        <option value="all">All</option>
+        <option value="z04pending">Z04 Pending only</option>
+        <option value="z04done">Z04 Done only</option>
+      </select>
+    </div>
+    <div>
+      <label for="status201Filter">201</label>
+      <select id="status201Filter" onchange="onFilterChange()">
+        <option value="all">All</option>
+        <option value="201pending">201 Pending only</option>
+        <option value="201partial">201 Partial only</option>
+        <option value="201done">201 Done only</option>
+      </select>
+    </div>
+    <div>
+      <button type="button" class="secondary" onclick="clearFilters()">Clear filters</button>
+    </div>
+    <div>
+      <button type="button" onclick="loadPage(currentPage)">Refresh</button>
+    </div>
+  </div>
+  <div id="dateRangeError" class="fieldError"></div>
+
+  <div class="tableWrap">
+    <table>
+      <thead>
+        <tr>
+          <th></th>
+          <th>STO Date</th>
+          <th>STO No</th>
+          <th>UCS Code</th>
+          <th>Item Description</th>
+          <th>Qty</th>
+          <th>Unit</th>
+          <th style="text-align:center;">Status</th>
+          <th style="text-align:center;">Z04</th>
+          <th style="text-align:center;">201</th>
+        </tr>
+      </thead>
+      <tbody id="tableBody"></tbody>
+    </table>
+    <div id="loadingRow" style="display:none;">Loading&hellip;</div>
+    <div id="emptyState">No STOs match the current filters.</div>
+  </div>
+
+  <div id="paginationBar">
+    <div id="showingText">Showing 0 of 0</div>
+    <div class="pageControls">
+      <button type="button" class="secondary small" onclick="goToPage(currentPage - 1)" id="prevPageBtn">Prev</button>
+      <span id="pageIndicator">Page 1 of 1</span>
+      <button type="button" class="secondary small" onclick="goToPage(currentPage + 1)" id="nextPageBtn">Next</button>
+    </div>
+  </div>
+
+  <!-- Parking lot: home for #actionPanel when no row is selected, and where it's
+       moved back to before the table body is ever cleared/re-rendered, so the
+       node (and its listeners) survive across page loads instead of being
+       destroyed by tbody.innerHTML = ''. -->
+  <div id="actionPanelParkingLot" style="display:none;">
+  <!-- ====== ACTION PANEL (populated based on selected row, then moved to sit directly under it) ====== -->
+  <div id="actionPanel">
+    <h3 id="actionPanelTitle"></h3>
+    <div class="contextRow" id="actionPanelContext"></div>
+
+    <!-- ====== Z04 SECTION (own sub-block, independent of Received status) ====== -->
+    <div id="z04Section"></div>
+
+    <!-- ====== 201 SECTION (own sub-block, shows every release once Z04 is done) ====== -->
+    <div id="s201Section"></div>
+
+    <!-- Pending row: receive form -->
+    <div id="receiveForm" style="display:none;">
+      <div class="fieldsGrid">
+        <div>
+          <label for="receivedQty">Received Qty</label>
+          <input type="number" id="receivedQty" min="1" step="1" style="width:100%;" oninput="validateReceiveFields()">
+          <div id="receivedQtyError" class="fieldError"></div>
+        </div>
+        <div>
+          <label for="receivedDate">Received Date</label>
+          <input type="date" id="receivedDate" style="width:100%;" oninput="validateReceiveFields()">
+          <div id="receivedDateError" class="fieldError"></div>
+        </div>
+      </div>
+      <label for="referencePO">Reference PO / Department</label>
+      <input type="text" id="referencePO" placeholder="e.g. TPIE, BRG, or a PO number" style="width:100%;" oninput="validateReceiveFields()">
+      <div class="actionBtnRow">
+        <button type="button" id="reviewReceiveBtn" disabled onclick="reviewAction('receive')">Review &amp; Confirm</button>
+        <button type="button" class="secondary" onclick="closeActionPanel()">Cancel</button>
+      </div>
+    </div>
+
+    <!-- Locked row, admin: correction form -->
+    <div id="correctForm" style="display:none;">
+      <div class="adminWarning">You're editing an already-received STO. This correction is logged in the audit trail with the old and new values.</div>
+      <div class="fieldsGrid">
+        <div>
+          <label for="correctQty">Received Qty</label>
+          <input type="number" id="correctQty" min="1" step="1" style="width:100%;" oninput="validateCorrectFields()">
+          <div id="correctQtyError" class="fieldError"></div>
+        </div>
+        <div>
+          <label for="correctDate">Received Date</label>
+          <input type="date" id="correctDate" style="width:100%;" oninput="validateCorrectFields()">
+          <div id="correctDateError" class="fieldError"></div>
+        </div>
+      </div>
+      <label for="correctPO">Reference PO / Department</label>
+      <input type="text" id="correctPO" style="width:100%;" oninput="validateCorrectFields()">
+      <div class="actionBtnRow">
+        <button type="button" id="reviewCorrectBtn" disabled onclick="reviewAction('correct')">Review &amp; Confirm</button>
+        <button type="button" class="secondary" onclick="closeActionPanel()">Cancel</button>
+      </div>
+    </div>
+
+    <!-- Locked row, non-admin: read-only -->
+    <div id="lockedReadOnly" style="display:none;">
+      <div id="lockedReadOnlyDetails" style="font-size:13px; color:#333; margin-bottom:10px;"></div>
+      <p style="font-size:13px; color:#555;">This STO has already been received and locked. Only an Approver can correct these details.</p>
+      <div class="actionBtnRow">
+        <button type="button" class="secondary" onclick="closeActionPanel()">Close</button>
+      </div>
+    </div>
+
+    <!-- ====== CONFIRMATION STEP ====== -->
+    <div id="confirmPanel">
+      <h4>Confirm before saving</h4>
+      <div id="confirmSummary"></div>
+      <div class="actionBtnRow">
+        <button type="button" id="confirmSaveBtn" onclick="doSave()">Yes, save</button>
+        <button type="button" class="secondary" onclick="cancelConfirm()">Go back</button>
+      </div>
+    </div>
+  </div>
+  </div>
+</div>
+
+<div id="message"></div>
+
+
+
+
+<script>
+(function(){
+
+  // TODO: paste your deployed Apps Script Web App URL here (same one used by the other pages)
+  const APPS_SCRIPT_URL = Shell.APPS_SCRIPT_URL;
+
+  let currentUser = { email: '', password: '' };
+  let isAdminUser = false;
+
+  const PAGE_SIZE = 20;
+  let currentPage = 1;
+  let totalPages = 1;
+  let totalCount = 0;
+  let currentRows = [];       // rows currently rendered, indexed by position
+  let selectedIndex = null;   // index into currentRows of the selected row
+  let pendingSaveAction = null; // 'receive' | 'correct', set right before confirm step
+  let listRequestInFlight = null; // Symbol guard against out-of-order responses
+
+  function showMessage(text, type) {
+    const el = document.getElementById('message');
+    el.textContent = text;
+    el.className = type;
+  }
+  function clearMessage() {
+    const el = document.getElementById('message');
+    el.textContent = '';
+    el.className = '';
+  }
+
+  /**
+   * Client-side mirror of the backend's hasCommaValue(): case-insensitive on
+   * purpose, to match Code.gs exactly and avoid re-breaking on any future
+   * casing drift in Authorized_Area/Role.
+   */
+  function hasCommaValueClient(str, target) {
+    if (!str) return false;
+    const targetLower = String(target).toLowerCase();
+    return String(str).split(',').map(function (s) { return s.trim().toLowerCase(); }).indexOf(targetLower) !== -1;
+  }
+
+  async function callApi(payload) {
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload)
+    });
+    return res.json();
+  }
+
+  function todayLocalISO() {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return y + '-' + m + '-' + day;
+  }
+
+  // ====== LOGIN ======
+  async function login() {
+    const email = document.getElementById('loginEmail').value.trim();
+    const password = document.getElementById('loginPassword').value;
+    clearMessage();
+
+    if (!email || !password) {
+      showMessage('Please enter email and password.', 'error');
+      return;
+    }
+
+    const loginBtn = document.getElementById('loginBtn');
+    loginBtn.disabled = true;
+    loginBtn.textContent = 'Logging in...';
+
+    try {
+      const data = await callApi({ action: 'login', email, password });
+
+      if (!data.success) {
+        showMessage(data.message || 'Login failed.', 'error');
+        return;
+      }
+
+      // Case-insensitive, mirroring Code.gs's canManageSTO()/hasCommaValue() exactly --
+      // a literal case-sensitive check here previously rejected every Planning user
+      // once Authorized_Area was standardized to 'PLANNING' in the sheet, even though
+      // the backend check was already case-insensitive. Never reintroduce a
+      // case-sensitive comparison here.
+      const canManageSTO = hasCommaValueClient(data.authorizedArea, 'Planning') &&
+        !hasCommaValueClient(data.role, 'Store Incharge');
+
+      if (!canManageSTO) {
+        document.getElementById('loginSection').style.display = 'none';
+        document.getElementById('notAuthorizedNotice').style.display = 'block';
+        return;
+      }
+
+      currentUser = { email, password };
+      isAdminUser = !!data.isAdmin;
+
+      document.getElementById('loginSection').style.display = 'none';
+      document.getElementById('dashboardSection').style.display = 'block';
+
+      const bar = document.getElementById('loggedInBar');
+      bar.style.display = 'block';
+      bar.innerHTML = 'Logged in as <b>' + data.name + '</b> (' + data.role + ')' +
+        (isAdminUser ? ' &mdash; Approver' : '') +
+        '<button id="logoutBtn" onclick="Shell.logout()">Log out</button>';
+
+      document.getElementById('endDate').max = todayLocalISO();
+      loadPage(1);
+    } catch (err) {
+      showMessage('Could not reach the server. Check your connection or the Apps Script URL.', 'error');
+    } finally {
+      loginBtn.disabled = false;
+      loginBtn.textContent = 'Log In';
+    }
+  }
+
+  // ====== FILTERS ======
+  function validateDateRange() {
+    const start = document.getElementById('startDate').value;
+    const end = document.getElementById('endDate').value;
+    const errEl = document.getElementById('dateRangeError');
+    if (start && end && start > end) {
+      errEl.textContent = '"From" date cannot be after "To" date.';
+      errEl.style.display = 'block';
+      return false;
+    }
+    errEl.style.display = 'none';
+    return true;
+  }
+
+  let searchDebounceTimer = null;
+  function onSearchInput() {
+    clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(function () { loadPage(1); }, 400);
+  }
+
+  function onFilterChange() {
+    if (!validateDateRange()) return;
+    loadPage(1);
+  }
+
+  function clearFilters() {
+    document.getElementById('startDate').value = '';
+    document.getElementById('endDate').value = '';
+    document.getElementById('endDate').max = todayLocalISO();
+    document.getElementById('searchBox').value = '';
+    document.getElementById('statusFilter').value = 'all';
+    document.getElementById('z04Filter').value = 'all';
+    document.getElementById('status201Filter').value = 'all';
+    document.getElementById('dateRangeError').style.display = 'none';
+    loadPage(1);
+  }
+
+  // ====== LOAD / RENDER LIST ======
+  async function loadPage(page) {
+    if (!validateDateRange()) return;
+    closeActionPanel();
+    clearMessage();
+
+    document.getElementById('loadingRow').style.display = 'block';
+    document.getElementById('emptyState').style.display = 'none';
+
+    const thisRequest = Symbol();
+    listRequestInFlight = thisRequest;
+
+    const payload = {
+      action: 'getSTOList',
+      email: currentUser.email,
+      password: currentUser.password,
+      page: page,
+      pageSize: PAGE_SIZE
+    };
+    const startDate = document.getElementById('startDate').value;
+    const endDate = document.getElementById('endDate').value;
+    const search = document.getElementById('searchBox').value.trim();
+    const status = document.getElementById('statusFilter').value;
+    const z04Status = document.getElementById('z04Filter').value;
+    const status201 = document.getElementById('status201Filter').value;
+    if (startDate) payload.startDate = startDate;
+    if (endDate) payload.endDate = endDate;
+    if (search) payload.search = search;
+    if (status && status !== 'all') payload.status = status;
+    if (z04Status && z04Status !== 'all') payload.z04Status = z04Status;
+    if (status201 && status201 !== 'all') payload.status201 = status201;
+
+    try {
+      const data = await callApi(payload);
+      if (listRequestInFlight !== thisRequest) return; // a newer request already superseded this one
+
+      if (!data.success) {
+        showMessage(data.message || 'Could not load the STO list.', 'error');
+        currentRows = [];
+        renderTable();
+        return;
+      }
+
+      currentRows = data.rows || [];
+      currentPage = data.currentPage || 1;
+      totalPages = data.totalPages || 1;
+      totalCount = data.totalCount || 0;
+      renderTable();
+      updatePaginationBar();
+    } catch (err) {
+      if (listRequestInFlight !== thisRequest) return;
+      showMessage('Could not reach the server (network issue). Please check your connection and try again.', 'error');
+    } finally {
+      if (listRequestInFlight === thisRequest) {
+        document.getElementById('loadingRow').style.display = 'none';
+      }
+    }
+  }
+
+  function renderTable() {
+    const tbody = document.getElementById('tableBody');
+    detachActionPanel(); // must happen BEFORE clearing tbody, or the node (and its listeners) is destroyed
+    tbody.innerHTML = '';
+    selectedIndex = null;
+    detailRowEl = null;
+
+    if (currentRows.length === 0) {
+      document.getElementById('emptyState').style.display = 'block';
+      return;
+    }
+    document.getElementById('emptyState').style.display = 'none';
+
+    currentRows.forEach(function (row, idx) {
+      const tr = document.createElement('tr');
+      tr.id = 'row-' + idx;
+
+      const selectTd = document.createElement('td');
+      const radio = document.createElement('input');
+      radio.type = 'radio';
+      radio.name = 'rowSelect';
+      radio.value = idx;
+      radio.onchange = function () { selectRow(idx); };
+      selectTd.appendChild(radio);
+      tr.appendChild(selectTd);
+
+      const cells = [
+        row.stoDate, row.stoNo, row.ucsCode, row.itemDescription, row.qty, row.unit
+      ];
+      cells.forEach(function (val) {
+        const td = document.createElement('td');
+        td.textContent = val;
+        tr.appendChild(td);
+      });
+
+      const statusTd = document.createElement('td');
+      statusTd.style.textAlign = 'center';
+      const badge = document.createElement('span');
+      badge.className = 'badge ' + (row.pending ? 'pending' : 'received');
+      badge.textContent = row.pending ? 'Pending' : 'Received';
+      statusTd.appendChild(badge);
+      tr.appendChild(statusTd);
+
+      const z04Td = document.createElement('td');
+      z04Td.style.textAlign = 'center';
+      const z04Badge = document.createElement('span');
+      z04Badge.className = 'badge ' + (row.z04Done ? 'z04done' : 'z04pending');
+      z04Badge.textContent = row.z04Done ? 'Done' : 'Pending';
+      if (row.z04Done) {
+        // View-only: shows the already-saved Z04 details inline, on this same
+        // page/session -- no new tab, no second login. Kept deliberately, unlike
+        // the "Pending" state below, which used to open add-z04.html in a new
+        // tab and was removed because it forced a second login on every hop
+        // (worse still inside a future PWA, where window.open() typically kicks
+        // the user out to the system browser entirely). See PROJECT_STATUS.md.
+        z04Badge.style.cursor = 'pointer';
+        z04Badge.title = 'Click to view the Z04 details';
+        z04Badge.onclick = function (e) {
+          e.stopPropagation(); // don't double-fire row selection
+          const radio = tr.querySelector('input[name="rowSelect"]');
+          if (radio) radio.checked = true;
+          selectRow(idx);
+        };
+      }
+      z04Td.appendChild(z04Badge);
+      tr.appendChild(z04Td);
+
+      // 201 status: badge only, no qty/remaining figures shown in the table --
+      // clicking it (when Done or Partial) opens the same on-page detail panel
+      // as the Z04 badge, listing the actual 201 entries. Not clickable for
+      // Pending/N/A since there's nothing recorded yet to show.
+      const s201Td = document.createElement('td');
+      s201Td.style.textAlign = 'center';
+      const s201Badge = document.createElement('span');
+      const s201Labels = { done: 'Done', partial: 'Partial', pending: 'Pending', na: '\u2014' };
+      const status201 = row.status201 || 'na';
+      s201Badge.className = 'badge s201' + status201;
+      s201Badge.textContent = s201Labels[status201] || '\u2014';
+      if (status201 === 'done' || status201 === 'partial') {
+        s201Badge.style.cursor = 'pointer';
+        s201Badge.title = 'Click to view the 201 release entries';
+        s201Badge.onclick = function (e) {
+          e.stopPropagation(); // don't double-fire row selection
+          const radio = tr.querySelector('input[name="rowSelect"]');
+          if (radio) radio.checked = true;
+          selectRow(idx);
+        };
+      } else if (status201 === 'na') {
+        s201Badge.title = 'Not applicable until this STO is Z04\u2019d.';
+      }
+      s201Td.appendChild(s201Badge);
+      tr.appendChild(s201Td);
+
+      tbody.appendChild(tr);
+    });
+  }
+
+  const TABLE_COLUMN_COUNT = 10; // select, STO Date, STO No, UCS Code, Item Description, Qty, Unit, Status, Z04, 201
+
+  function updatePaginationBar() {
+    const start = totalCount === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
+    const end = Math.min(currentPage * PAGE_SIZE, totalCount);
+    document.getElementById('showingText').textContent = 'Showing ' + start + '\u2013' + end + ' of ' + totalCount;
+    document.getElementById('pageIndicator').textContent = 'Page ' + currentPage + ' of ' + totalPages;
+    document.getElementById('prevPageBtn').disabled = currentPage <= 1;
+    document.getElementById('nextPageBtn').disabled = currentPage >= totalPages;
+  }
+
+  function goToPage(page) {
+    if (page < 1 || page > totalPages || page === currentPage) return;
+    loadPage(page);
+  }
+
+  // ====== ROW SELECTION / ACTION PANEL (rendered directly under the clicked row) ======
+  let detailRowEl = null; // the injected <tr> currently hosting #actionPanel, or null
+
+  function detachActionPanel() {
+    document.getElementById('actionPanelParkingLot').appendChild(document.getElementById('actionPanel'));
+    if (detailRowEl && detailRowEl.parentNode) detailRowEl.parentNode.removeChild(detailRowEl);
+    detailRowEl = null;
+  }
+
+  function selectRow(idx) {
+    document.querySelectorAll('#tableBody tr').forEach(function (tr) { tr.classList.remove('selectedRow'); });
+    detachActionPanel();
+
+    const tr = document.getElementById('row-' + idx);
+    if (tr) tr.classList.add('selectedRow');
+
+    selectedIndex = idx;
+    const row = currentRows[idx];
+
+    // Build a full-width row directly beneath the selected one and move
+    // #actionPanel into it, instead of a fixed panel at the bottom of the page.
+    detailRowEl = document.createElement('tr');
+    detailRowEl.className = 'detailRow';
+    const detailTd = document.createElement('td');
+    detailTd.colSpan = TABLE_COLUMN_COUNT;
+    detailRowEl.appendChild(detailTd);
+    if (tr && tr.parentNode) tr.parentNode.insertBefore(detailRowEl, tr.nextSibling);
+    detailTd.appendChild(document.getElementById('actionPanel'));
+
+    openActionPanel(row);
+    detailRowEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  function openActionPanel(row) {
+    cancelConfirm();
+    document.getElementById('actionPanel').style.display = 'block';
+    document.getElementById('receiveForm').style.display = 'none';
+    document.getElementById('correctForm').style.display = 'none';
+    document.getElementById('lockedReadOnly').style.display = 'none';
+
+    document.getElementById('actionPanelContext').textContent =
+      'STO ' + row.stoNo + ' \u2014 UCS ' + row.ucsCode + ' \u2014 ' + row.itemDescription + ' \u2014 Qty ' + row.qty + ' ' + row.unit;
+
+    renderZ04Section(row);
+    renderS201Section(row);
+
+    if (row.pending) {
+      document.getElementById('actionPanelTitle').textContent = 'Receive Material';
+      document.getElementById('receiveForm').style.display = 'block';
+      document.getElementById('receivedQty').value = '';
+      document.getElementById('receivedDate').value = todayLocalISO();
+      document.getElementById('receivedDate').max = todayLocalISO();
+      document.getElementById('receivedDate').min = row.stoDate;
+      document.getElementById('referencePO').value = '';
+      ['receivedQtyError', 'receivedDateError'].forEach(function (id) { document.getElementById(id).style.display = 'none'; });
+      validateReceiveFields();
+    } else if (isAdminUser) {
+      document.getElementById('actionPanelTitle').textContent = 'Correct Received Info (Admin)';
+      document.getElementById('correctForm').style.display = 'block';
+      document.getElementById('correctQty').value = row.receivedQty;
+      document.getElementById('correctDate').value = row.receivedDate;
+      document.getElementById('correctDate').max = todayLocalISO();
+      document.getElementById('correctDate').min = row.stoDate;
+      document.getElementById('correctPO').value = row.referencePO;
+      ['correctQtyError', 'correctDateError'].forEach(function (id) { document.getElementById(id).style.display = 'none'; });
+      validateCorrectFields();
+    } else {
+      document.getElementById('actionPanelTitle').textContent = 'STO Details';
+      document.getElementById('lockedReadOnlyDetails').innerHTML =
+        '<b>Received Qty:</b> ' + row.receivedQty + ' ' + row.unit + '<br>' +
+        '<b>Received Date:</b> ' + row.receivedDate + '<br>' +
+        '<b>Reference PO:</b> ' + row.referencePO;
+      document.getElementById('lockedReadOnly').style.display = 'block';
+    }
+  }
+
+  // ====== Z04 SUB-SECTION: on-demand detail lookup / raise link ======
+  let z04DetailRequestInFlight = null;
+
+  function renderZ04Section(row) {
+    const box = document.getElementById('z04Section');
+    box.innerHTML = '';
+
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'border:1px solid #ddd; border-radius:6px; padding:10px 12px; margin-bottom:14px; background:#fff;';
+
+    const heading = document.createElement('div');
+    heading.style.cssText = 'font-weight:bold; font-size:13px; margin-bottom:6px;';
+    heading.textContent = 'Z04';
+    wrap.appendChild(heading);
+
+    if (!row.z04Done) {
+      const p = document.createElement('div');
+      p.style.cssText = 'font-size:13px; color:#555;';
+      p.innerHTML = 'Not yet raised. Note this STO No — <b>' + row.stoNo + '</b> — and enter it in the Z04 entry sheet from the menu.';
+      wrap.appendChild(p);
+      box.appendChild(wrap);
+      return;
+    }
+
+    const loadingEl = document.createElement('div');
+    loadingEl.style.cssText = 'font-size:13px; color:#666;';
+    loadingEl.textContent = 'Loading Z04 details\u2026';
+    wrap.appendChild(loadingEl);
+    box.appendChild(wrap);
+
+    const thisRequest = Symbol();
+    z04DetailRequestInFlight = thisRequest;
+
+    callApi({
+      action: 'getZ04DetailsForSTO',
+      email: currentUser.email,
+      password: currentUser.password,
+      stoNo: row.stoNo
+    }).then(function (data) {
+      if (z04DetailRequestInFlight !== thisRequest) return; // superseded by a newer row selection
+      if (!data.success || !data.z04) {
+        loadingEl.textContent = data.message || 'Could not load Z04 details for this STO.';
+        return;
+      }
+      const z04 = data.z04;
+      loadingEl.remove();
+      const grid = document.createElement('div');
+      grid.style.cssText = 'font-size:13px; color:#333; display:grid; grid-template-columns: 1fr 1fr; gap:4px 14px;';
+      grid.innerHTML =
+        '<div><b>Date of Receipt:</b> ' + z04.dateOfReceipt + '</div>' +
+        '<div><b>Qty Received:</b> ' + z04.qtyReceived + '</div>' +
+        '<div><b>Mat Doc No:</b> ' + z04.matDocNo + '</div>' +
+        '<div><b>Received By:</b> ' + (z04.matReceivedBy || '\u2014') + '</div>';
+      wrap.appendChild(grid);
+    }).catch(function () {
+      if (z04DetailRequestInFlight !== thisRequest) return;
+      loadingEl.textContent = 'Could not reach the server while loading Z04 details.';
+    });
+  }
+
+  // ====== 201 SUB-SECTION: on-demand entry list (mirrors renderZ04Section) ======
+  let s201RequestInFlight = null;
+
+  function renderS201Section(row) {
+    const box = document.getElementById('s201Section');
+    box.innerHTML = '';
+
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'border:1px solid #ddd; border-radius:6px; padding:10px 12px; margin-bottom:14px; background:#fff;';
+
+    const heading = document.createElement('div');
+    heading.style.cssText = 'font-weight:bold; font-size:13px; margin-bottom:6px;';
+    heading.textContent = '201';
+    wrap.appendChild(heading);
+
+    if (!row.z04Done) {
+      const p = document.createElement('div');
+      p.style.cssText = 'font-size:13px; color:#555;';
+      p.textContent = 'Not applicable yet \u2014 this STO hasn\u2019t been Z04\u2019d.';
+      wrap.appendChild(p);
+      box.appendChild(wrap);
+      return;
+    }
+    if (row.status201 === 'pending') {
+      const p = document.createElement('div');
+      p.style.cssText = 'font-size:13px; color:#555;';
+      p.textContent = 'Z04\u2019d, but no 201 has been released against it yet.';
+      wrap.appendChild(p);
+      box.appendChild(wrap);
+      return;
+    }
+
+    const loadingEl = document.createElement('div');
+    loadingEl.style.cssText = 'font-size:13px; color:#666;';
+    loadingEl.textContent = 'Loading 201 entries\u2026';
+    wrap.appendChild(loadingEl);
+    box.appendChild(wrap);
+
+    const thisRequest = Symbol();
+    s201RequestInFlight = thisRequest;
+
+    callApi({
+      action: 'getS201EntriesForSTO',
+      email: currentUser.email,
+      password: currentUser.password,
+      stoNo: row.stoNo
+    }).then(function (data) {
+      if (s201RequestInFlight !== thisRequest) return; // superseded by a newer row selection
+      if (!data.success) {
+        loadingEl.textContent = data.message || 'Could not load 201 entries for this STO.';
+        return;
+      }
+      loadingEl.remove();
+
+      const summary = document.createElement('div');
+      summary.style.cssText = 'font-size:13px; color:#333; margin-bottom:8px;';
+      summary.innerHTML = '<b>' + data.totalReleased + '</b> of <b>' + data.qtyRecievedZ04 + '</b> released &mdash; ' +
+        (data.remaining > 0 ? data.remaining + ' remaining' : 'fully drawn down');
+      wrap.appendChild(summary);
+
+      const table = document.createElement('table');
+      table.style.cssText = 'width:100%; font-size:12px; border-collapse:collapse;';
+      table.innerHTML =
+        '<thead><tr>' +
+        '<th style="text-align:left; padding:4px 6px; border-bottom:1px solid #eee;">Date</th>' +
+        '<th style="text-align:left; padding:4px 6px; border-bottom:1px solid #eee;">Qty</th>' +
+        '<th style="text-align:left; padding:4px 6px; border-bottom:1px solid #eee;">Mat Doc No</th>' +
+        '<th style="text-align:left; padding:4px 6px; border-bottom:1px solid #eee;">Released To</th>' +
+        '</tr></thead>';
+      const tbody = document.createElement('tbody');
+      (data.entries || []).forEach(function (entry) {
+        const tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td style="padding:4px 6px; border-bottom:1px solid #f5f5f5;">' + entry.dateOfRelease + '</td>' +
+          '<td style="padding:4px 6px; border-bottom:1px solid #f5f5f5;">' + entry.qtyReleased + '</td>' +
+          '<td style="padding:4px 6px; border-bottom:1px solid #f5f5f5;">' + entry.matDocNo + '</td>' +
+          '<td style="padding:4px 6px; border-bottom:1px solid #f5f5f5;">' + entry.releasedToArea + '</td>';
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      wrap.appendChild(table);
+    }).catch(function () {
+      if (s201RequestInFlight !== thisRequest) return;
+      loadingEl.textContent = 'Could not reach the server while loading 201 entries.';
+    });
+  }
+
+  function closeActionPanel() {
+    detachActionPanel();
+    document.querySelectorAll('#tableBody tr').forEach(function (tr) { tr.classList.remove('selectedRow'); });
+    document.querySelectorAll('input[name="rowSelect"]').forEach(function (r) { r.checked = false; });
+    selectedIndex = null;
+    cancelConfirm();
+  }
+
+  // ====== FIELD VALIDATION (mirrors add-sto.html logic) ======
+  function validateReceiveFields() {
+    const row = currentRows[selectedIndex];
+    const qtyRaw = document.getElementById('receivedQty').value;
+    const dateVal = document.getElementById('receivedDate').value;
+    const poVal = document.getElementById('referencePO').value.trim();
+
+    let ok = true;
+
+    const qtyErrEl = document.getElementById('receivedQtyError');
+    if (qtyRaw === '') {
+      qtyErrEl.style.display = 'none';
+      ok = false;
+    } else {
+      const n = Number(qtyRaw);
+      if (!Number.isInteger(n) || n <= 0) {
+        qtyErrEl.textContent = 'Must be a positive whole number.';
+        qtyErrEl.style.display = 'block';
+        ok = false;
+      } else if (row && n > Number(row.qty)) {
+        qtyErrEl.textContent = 'Cannot exceed the requested Qty (' + row.qty + ').';
+        qtyErrEl.style.display = 'block';
+        ok = false;
+      } else {
+        qtyErrEl.style.display = 'none';
+      }
+    }
+
+    const dateErrEl = document.getElementById('receivedDateError');
+    if (!dateVal) {
+      dateErrEl.style.display = 'none';
+      ok = false;
+    } else if (dateVal > todayLocalISO()) {
+      dateErrEl.textContent = 'Cannot be in the future.';
+      dateErrEl.style.display = 'block';
+      ok = false;
+    } else if (row && dateVal < row.stoDate) {
+      dateErrEl.textContent = 'Cannot be earlier than the STO Date (' + row.stoDate + ').';
+      dateErrEl.style.display = 'block';
+      ok = false;
+    } else {
+      dateErrEl.style.display = 'none';
+    }
+
+    if (!poVal) ok = false;
+
+    document.getElementById('reviewReceiveBtn').disabled = !ok;
+    return ok;
+  }
+
+  function validateCorrectFields() {
+    const row = currentRows[selectedIndex];
+    const qtyRaw = document.getElementById('correctQty').value;
+    const dateVal = document.getElementById('correctDate').value;
+    const poVal = document.getElementById('correctPO').value.trim();
+
+    let ok = true;
+
+    const qtyErrEl = document.getElementById('correctQtyError');
+    if (qtyRaw === '') {
+      qtyErrEl.style.display = 'none';
+      ok = false;
+    } else {
+      const n = Number(qtyRaw);
+      if (!Number.isInteger(n) || n <= 0) {
+        qtyErrEl.textContent = 'Must be a positive whole number.';
+        qtyErrEl.style.display = 'block';
+        ok = false;
+      } else if (row && n > Number(row.qty)) {
+        qtyErrEl.textContent = 'Cannot exceed the requested Qty (' + row.qty + ').';
+        qtyErrEl.style.display = 'block';
+        ok = false;
+      } else {
+        qtyErrEl.style.display = 'none';
+      }
+    }
+
+    const dateErrEl = document.getElementById('correctDateError');
+    if (!dateVal) {
+      dateErrEl.style.display = 'none';
+      ok = false;
+    } else if (dateVal > todayLocalISO()) {
+      dateErrEl.textContent = 'Cannot be in the future.';
+      dateErrEl.style.display = 'block';
+      ok = false;
+    } else if (row && dateVal < row.stoDate) {
+      dateErrEl.textContent = 'Cannot be earlier than the STO Date (' + row.stoDate + ').';
+      dateErrEl.style.display = 'block';
+      ok = false;
+    } else {
+      dateErrEl.style.display = 'none';
+    }
+
+    if (!poVal) ok = false;
+
+    document.getElementById('reviewCorrectBtn').disabled = !ok;
+    return ok;
+  }
+
+  // ====== CONFIRMATION STEP ======
+  function reviewAction(kind) {
+    const row = currentRows[selectedIndex];
+    if (!row) return;
+
+    pendingSaveAction = kind;
+    let qty, date, po;
+    if (kind === 'receive') {
+      if (!validateReceiveFields()) return;
+      qty = document.getElementById('receivedQty').value;
+      date = document.getElementById('receivedDate').value;
+      po = document.getElementById('referencePO').value.trim();
+    } else {
+      if (!validateCorrectFields()) return;
+      qty = document.getElementById('correctQty').value;
+      date = document.getElementById('correctDate').value;
+      po = document.getElementById('correctPO').value.trim();
+    }
+
+    const summaryHtml =
+      '<div><b>STO No:</b> ' + row.stoNo + '</div>' +
+      '<div><b>UCS Code:</b> ' + row.ucsCode + ' (' + row.itemDescription + ')</div>' +
+      '<div><b>Received Qty:</b> ' + qty + ' ' + row.unit + '</div>' +
+      '<div><b>Received Date:</b> ' + date + '</div>' +
+      '<div><b>Reference PO:</b> ' + po + '</div>' +
+      (kind === 'correct'
+        ? '<div style="margin-top:8px; color:#8a6d00;">This will overwrite the previously recorded received details and be logged in the audit trail.</div>'
+        : '<div style="margin-top:8px; color:#8a6d00;">Once saved, this STO will be locked. Only an Approver can correct it afterward.</div>');
+
+    document.getElementById('confirmSummary').innerHTML = summaryHtml;
+    document.getElementById('confirmPanel').style.display = 'block';
+    document.getElementById('confirmPanel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  function cancelConfirm() {
+    pendingSaveAction = null;
+    document.getElementById('confirmPanel').style.display = 'none';
+  }
+
+  async function doSave() {
+    const row = currentRows[selectedIndex];
+    if (!row || !pendingSaveAction) return;
+
+    const confirmBtn = document.getElementById('confirmSaveBtn');
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = 'Saving...';
+
+    try {
+      let payload;
+      if (pendingSaveAction === 'receive') {
+        payload = {
+          action: 'receiveSTOMaterial',
+          email: currentUser.email,
+          password: currentUser.password,
+          stoNo: row.stoNo,
+          receivedQty: Number(document.getElementById('receivedQty').value),
+          receivedDate: document.getElementById('receivedDate').value,
+          referencePO: document.getElementById('referencePO').value.trim()
+        };
+      } else {
+        payload = {
+          action: 'editSTOReceivedInfo',
+          email: currentUser.email,
+          password: currentUser.password,
+          stoNo: row.stoNo,
+          receivedQty: Number(document.getElementById('correctQty').value),
+          receivedDate: document.getElementById('correctDate').value,
+          referencePO: document.getElementById('correctPO').value.trim()
+        };
+      }
+
+      const data = await callApi(payload);
+      if (data.success) {
+        showMessage(data.message, 'success');
+        closeActionPanel();
+        loadPage(currentPage);
+      } else {
+        showMessage(data.message || 'Could not save this update.', 'error');
+      }
+    } catch (err) {
+      showMessage('Could not reach the server. Check your connection or the Apps Script URL.', 'error');
+    } finally {
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = 'Yes, save';
+    }
+  }
+
+  window.callApi = callApi;
+  window.cancelConfirm = cancelConfirm;
+  window.clearFilters = clearFilters;
+  window.clearMessage = clearMessage;
+  window.closeActionPanel = closeActionPanel;
+  window.detachActionPanel = detachActionPanel;
+  window.doSave = doSave;
+  window.goToPage = goToPage;
+  window.hasCommaValueClient = hasCommaValueClient;
+  window.loadPage = loadPage;
+  window.login = login;
+  window.onFilterChange = onFilterChange;
+  window.onSearchInput = onSearchInput;
+  window.openActionPanel = openActionPanel;
+  window.renderS201Section = renderS201Section;
+  window.renderTable = renderTable;
+  window.renderZ04Section = renderZ04Section;
+  window.reviewAction = reviewAction;
+  window.selectRow = selectRow;
+  window.showMessage = showMessage;
+  window.todayLocalISO = todayLocalISO;
+  window.updatePaginationBar = updatePaginationBar;
+  window.validateCorrectFields = validateCorrectFields;
+  window.validateDateRange = validateDateRange;
+  window.validateReceiveFields = validateReceiveFields;
+
+  // ---- shell auto-login: fill the page's OWN hidden login form and
+  // submit it through the page's OWN unmodified login() function, so every
+  // page's tested role-check / UI-reveal logic runs exactly as before. ----
+  document.getElementById('loginEmail').value = Shell.getUser().email;
+  document.getElementById('loginPassword').value = Shell.getUser().password;
+  login();
+
+})();
+</script>
