@@ -1,0 +1,388 @@
+<style>
+
+  body { font-family: Arial, sans-serif; max-width: 560px; margin: 40px auto; padding: 0 16px; color: #222; }
+  h2 { margin-bottom: 4px; }
+  .subtitle { color: #666; font-size: 13px; margin-bottom: 24px; }
+  label { display: block; font-weight: bold; margin-top: 14px; margin-bottom: 4px; font-size: 14px; }
+  input, select, textarea { width: 100%; padding: 8px; box-sizing: border-box; font-size: 14px; border: 1px solid #ccc; border-radius: 4px; }
+  textarea { min-height: 60px; resize: vertical; }
+  button { margin-top: 20px; width: 100%; padding: 10px; font-size: 15px; border: none; border-radius: 4px; background: #1a73e8; color: white; cursor: pointer; }
+  button.secondary { background: #5f6368; }
+  button.small { width: auto; padding: 6px 12px; font-size: 13px; margin-top: 8px; }
+  button:disabled { background: #999; cursor: not-allowed; }
+  #message { margin-top: 14px; padding: 10px; border-radius: 4px; font-size: 14px; display: none; }
+  .success { background: #e6f4ea; color: #1e7e34; display: block !important; }
+  .error { background: #fce8e6; color: #c5221f; display: block !important; }
+  #loggedInBar { display:none; font-size: 13px; color:#555; margin-bottom: 10px; }
+  #logoutBtn { width:auto; padding:4px 10px; font-size:12px; background:#666; margin-left:8px; }
+  .lockedNotice { background:#fce8e6; color:#c5221f; padding:14px; border-radius:4px; font-size:14px; }
+  .typeToggle { display:flex; gap:8px; margin-top:8px; }
+  .typeBtn { flex:1; padding:10px; text-align:center; border:1px solid #ccc; border-radius:4px; cursor:pointer; font-size:14px; }
+  .typeBtn.active { background:#1a73e8; color:white; border-color:#1a73e8; }
+  #itemSearchWrap { position: relative; }
+  #itemSuggestions { display:none; position:absolute; z-index:10; background:white; border:1px solid #ccc; border-radius:4px; max-height:220px; overflow-y:auto; width:100%; box-shadow: 0 2px 6px rgba(0,0,0,0.15); }
+  .suggestionItem { padding:8px 10px; cursor:pointer; border-bottom:1px solid #f0f0f0; }
+  .suggestionItem:hover { background:#f5f5f5; }
+  .suggestionItem .code { font-size:12px; color:#666; }
+  .pickedBox { background:#f1f8ff; border:1px solid #cfe3fc; border-radius:4px; padding:10px; margin-top:10px; display:none; }
+  .historySection { margin-top: 40px; }
+  table { width:100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid #eee; }
+  th { background:#fafafa; }
+  .badge { display:inline-block; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:bold; color:white; }
+  .badgeOpen { background:#c5221f; }
+  .badgeAcknowledged { background:#e8710a; }
+  .badgeActioned { background:#1e7e34; }
+  .badgeDismissed { background:#999; }
+  .emptyNote { color:#888; font-size:13px; font-style:italic; padding:10px 0; }
+
+</style>
+
+
+<h2>Raise Demand Alert</h2>
+<div class="subtitle">Give Planning a heads-up before you actually raise a requisition &mdash; this does not move any stock or start an approval chain.</div>
+
+<!-- ====== LOGIN SECTION ====== -->
+<div id="loginSection" style="display:none">
+  <label for="loginEmail">Email</label>
+  <input type="email" id="loginEmail" placeholder="you@test.com">
+
+  <label for="loginPassword">Password</label>
+  <input type="password" id="loginPassword" placeholder="Password">
+
+  <button id="loginBtn" onclick="login()">Log In</button>
+</div>
+
+<!-- ====== NOT AUTHORIZED NOTICE ====== -->
+<div id="notAuthorizedNotice" style="display:none;" class="lockedNotice">
+  You're logged in, but you're not the Area Incharge for any area, so you can't raise a demand alert. If you believe this is wrong, contact the project owner.
+</div>
+
+<!-- ====== FORM SECTION ====== -->
+<div id="formSection" style="display:none;">
+  <div id="loggedInBar"></div>
+
+  <label for="areaSelect">Area</label>
+  <select id="areaSelect"></select>
+
+  <label>What do you need?</label>
+  <div class="typeToggle">
+    <div class="typeBtn active" id="btnExisting" onclick="setRequestType('Existing UCS Code')">More of an existing material</div>
+    <div class="typeBtn" id="btnNew" onclick="setRequestType('New Material')">A brand-new material</div>
+  </div>
+
+  <!-- Existing UCS Code mode -->
+  <div id="existingBlock">
+    <label for="itemSearchBox" style="margin-top:20px;">Search by UCS Code or keywords</label>
+    <div id="itemSearchWrap">
+      <input type="text" id="itemSearchBox" placeholder="e.g. bearing 6210, or a UCS code" autocomplete="off" oninput="onItemSearchInput()">
+      <div id="itemSuggestions"></div>
+    </div>
+    <div class="pickedBox" id="pickedExisting">
+      <div><b>Picked:</b> <span id="pickedExistingText"></span></div>
+    </div>
+  </div>
+
+  <!-- New Material mode -->
+  <div id="newBlock" style="display:none;">
+    <label for="newDescription">Description</label>
+    <textarea id="newDescription" placeholder="What is it, and what's it for?"></textarea>
+    <div style="font-size:12px; color:#777; margin-top:4px;">No Unit needed here &mdash; Planning will assign it properly once the material actually gets a UCS Code.</div>
+  </div>
+
+  <label for="estimatedQty">Estimated quantity you'll need</label>
+  <input type="number" id="estimatedQty" min="1" step="1" placeholder="Rough figure is fine">
+
+  <label for="remarks">Remarks (why, and roughly when)</label>
+  <textarea id="remarks" placeholder="e.g. expecting 3 more cranes to need this bearing by next month"></textarea>
+
+  <button id="submitBtn" onclick="submitAlert()">Submit Alert</button>
+</div>
+
+<div id="message"></div>
+
+<!-- ====== MY AREA'S ALERTS ====== -->
+<div class="historySection" id="historySection" style="display:none;">
+  <h3 style="margin-bottom:4px;">My Area's Demand Alerts</h3>
+  <button class="small secondary" onclick="loadMyAlerts()">Refresh</button>
+  <div id="historyBody"><div class="emptyNote">Loading...</div></div>
+</div>
+
+
+
+
+<script>
+(function(){
+
+  // TODO: paste your deployed Apps Script Web App URL here
+  const APPS_SCRIPT_URL = Shell.APPS_SCRIPT_URL;
+
+  let currentUser = { email: '', password: '' };
+  let inchargeAreas = [];
+  let requestType = 'Existing UCS Code';
+  let allMaterials = [];
+  let currentSuggestions = [];
+  let pickedItem = null; // { ucsCode, itemDescription, unit }
+
+  function showMessage(text, type) {
+    const el = document.getElementById('message');
+    el.textContent = text;
+    el.className = type;
+  }
+  function clearMessage() {
+    const el = document.getElementById('message');
+    el.textContent = '';
+    el.className = '';
+  }
+  function escapeHtml(str) {
+    return String(str).replace(/[&<>"']/g, function (c) {
+      return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
+    });
+  }
+  function hasCommaValueClient(str, target) {
+    if (!str) return false;
+    return String(str).split(',').map(function (s) { return s.trim(); }).indexOf(target) !== -1;
+  }
+
+  async function callApi(payload) {
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(Object.assign({ email: currentUser.email, password: currentUser.password }, payload))
+    });
+    const data = await res.json();
+    // Known Apps Script quirk: right after a redeploy, the /exec URL can 302-redirect
+    // to a fresh backend URL, and that one hop sometimes downgrades POST to GET --
+    // landing on doGet() instead of doPost(). Recognizable because doGet's response
+    // has no 'success' field and carries this exact status/message shape. One silent
+    // retry clears it almost every time; if it doesn't, the caller still sees a normal
+    // { success:false } shape either way.
+    if (data && data.status === 'ok' && data.message === 'Apps Script backend is running.') {
+      const retryRes = await fetch(APPS_SCRIPT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(Object.assign({ email: currentUser.email, password: currentUser.password }, payload))
+      });
+      return retryRes.json();
+    }
+    return data;
+  }
+
+  async function login() {
+    const email = document.getElementById('loginEmail').value.trim();
+    const password = document.getElementById('loginPassword').value;
+    clearMessage();
+    if (!email || !password) { showMessage('Please enter email and password.', 'error'); return; }
+
+    const loginBtn = document.getElementById('loginBtn');
+    loginBtn.disabled = true;
+    loginBtn.textContent = 'Logging in...';
+
+    try {
+      const res = await fetch(APPS_SCRIPT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'login', email: email, password: password })
+      });
+      const data = await res.json();
+      if (!data.success) { showMessage(data.message || 'Login failed.', 'error'); return; }
+
+      currentUser = { email: email, password: password };
+      const myAreas = String(data.authorizedArea || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+      const isIncharge = hasCommaValueClient(data.role, 'Area Incharge');
+      inchargeAreas = isIncharge ? myAreas : [];
+
+      document.getElementById('loginSection').style.display = 'none';
+
+      if (inchargeAreas.length === 0) {
+        document.getElementById('notAuthorizedNotice').style.display = 'block';
+        return;
+      }
+
+      document.getElementById('formSection').style.display = 'block';
+      document.getElementById('historySection').style.display = 'block';
+      const bar = document.getElementById('loggedInBar');
+      bar.style.display = 'block';
+      bar.innerHTML = 'Logged in as <b>' + escapeHtml(data.name) + '</b> (' + escapeHtml(data.role) + ')' +
+        '<button id="logoutBtn" onclick="Shell.logout()">Log out</button>';
+
+      const areaSelect = document.getElementById('areaSelect');
+      areaSelect.innerHTML = inchargeAreas.map(function (a) {
+        return '<option value="' + escapeHtml(a) + '">' + escapeHtml(a) + '</option>';
+      }).join('');
+
+      loadMaterials();
+      loadMyAlerts();
+    } catch (err) {
+      showMessage('Could not reach the server. Check your connection or the Apps Script URL.', 'error');
+    } finally {
+      loginBtn.disabled = false;
+      loginBtn.textContent = 'Log In';
+    }
+  }
+
+  function setRequestType(type) {
+    requestType = type;
+    document.getElementById('btnExisting').className = 'typeBtn' + (type === 'Existing UCS Code' ? ' active' : '');
+    document.getElementById('btnNew').className = 'typeBtn' + (type === 'New Material' ? ' active' : '');
+    document.getElementById('existingBlock').style.display = type === 'Existing UCS Code' ? 'block' : 'none';
+    document.getElementById('newBlock').style.display = type === 'New Material' ? 'block' : 'none';
+  }
+
+  // ---- Existing-material search (mirrors raise-requisition.html's combo box) ----
+  async function loadMaterials() {
+    try {
+      const data = await callApi({ action: 'getUCSSearchData' });
+      if (data.success) {
+        allMaterials = data.items.map(function (m) {
+          return {
+            ucsCode: m.ucsCode, shortText: m.shortText, unit: m.unit,
+            haystack: (m.ucsCode + ' ' + m.shortText + ' ' + (m.longText || '')).toLowerCase()
+          };
+        });
+      } else {
+        showMessage('Could not load the material list: ' + (data.message || 'unknown error') + '. The search box will show "No matches" for everything until this is fixed.', 'error');
+      }
+    } catch (err) {
+      showMessage('Could not reach the server to load the material list. The search box will show "No matches" for everything until this is fixed.', 'error');
+    }
+  }
+
+  function onItemSearchInput() {
+    const raw = document.getElementById('itemSearchBox').value.trim().toLowerCase();
+    const box = document.getElementById('itemSuggestions');
+    if (!raw) { box.style.display = 'none'; return; }
+    const tokens = raw.split(/\s+/).filter(Boolean);
+    currentSuggestions = allMaterials.filter(function (m) {
+      return tokens.every(function (t) { return m.haystack.indexOf(t) !== -1; });
+    }).slice(0, 25);
+
+    if (currentSuggestions.length === 0) {
+      box.innerHTML = '<div class="suggestionItem" style="color:#888;">No matches.</div>';
+      box.style.display = 'block';
+      return;
+    }
+    box.innerHTML = currentSuggestions.map(function (m, idx) {
+      return '<div class="suggestionItem" onclick="pickSuggestion(' + idx + ')">' +
+        '<div class="code">' + escapeHtml(m.ucsCode) + ' &middot; ' + escapeHtml(m.unit) + '</div>' +
+        '<div>' + escapeHtml(m.shortText) + '</div></div>';
+    }).join('');
+    box.style.display = 'block';
+  }
+
+  function pickSuggestion(idx) {
+    const m = currentSuggestions[idx];
+    if (!m) return;
+    pickedItem = { ucsCode: m.ucsCode, itemDescription: m.shortText, unit: m.unit };
+    document.getElementById('itemSuggestions').style.display = 'none';
+    document.getElementById('itemSearchBox').value = '';
+    document.getElementById('pickedExisting').style.display = 'block';
+    document.getElementById('pickedExistingText').textContent = m.ucsCode + ' \u2014 ' + m.shortText + ' (' + m.unit + ')';
+  }
+
+  document.addEventListener('click', function (e) {
+    const wrap = document.getElementById('itemSearchWrap');
+    if (wrap && !wrap.contains(e.target)) document.getElementById('itemSuggestions').style.display = 'none';
+  });
+
+  async function submitAlert() {
+    clearMessage();
+    const area = document.getElementById('areaSelect').value;
+    const qty = Number(document.getElementById('estimatedQty').value);
+    const remarks = document.getElementById('remarks').value.trim();
+
+    if (!area) { showMessage('Select an area.', 'error'); return; }
+    if (!qty || qty <= 0) { showMessage('Enter a positive estimated quantity.', 'error'); return; }
+
+    const payload = { action: 'submitDemandAlert', area: area, requestType: requestType, estimatedQty: qty, remarks: remarks };
+
+    if (requestType === 'Existing UCS Code') {
+      if (!pickedItem) { showMessage('Search for and pick the material you need more of.', 'error'); return; }
+      payload.ucsCode = pickedItem.ucsCode;
+    } else {
+      const desc = document.getElementById('newDescription').value.trim();
+      if (!desc) { showMessage('Describe the new material.', 'error'); return; }
+      payload.itemDescription = desc;
+    }
+
+    const submitBtn = document.getElementById('submitBtn');
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Submitting...';
+
+    try {
+      const data = await callApi(payload);
+      if (data.success) {
+        showMessage(data.message, 'success');
+        pickedItem = null;
+        document.getElementById('pickedExisting').style.display = 'none';
+        document.getElementById('newDescription').value = '';
+        document.getElementById('estimatedQty').value = '';
+        document.getElementById('remarks').value = '';
+        loadMyAlerts();
+      } else {
+        showMessage(data.message || 'Could not submit the alert.', 'error');
+      }
+    } catch (err) {
+      showMessage('Could not reach the server. Check your connection or the Apps Script URL.', 'error');
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Submit Alert';
+    }
+  }
+
+  function statusBadge(status) {
+    const cls = 'badge badge' + String(status || 'Open').replace(/\s+/g, '');
+    return '<span class="' + cls + '">' + escapeHtml(status || 'Open') + '</span>';
+  }
+
+  async function loadMyAlerts() {
+    const body = document.getElementById('historyBody');
+    body.innerHTML = '<div class="emptyNote">Loading...</div>';
+    try {
+      const data = await callApi({ action: 'getMyDemandAlerts' });
+      if (!data.success) { body.innerHTML = '<div class="emptyNote">' + escapeHtml(data.message || 'Could not load.') + '</div>'; return; }
+      if (!data.alerts || data.alerts.length === 0) { body.innerHTML = '<div class="emptyNote">No demand alerts yet for your area(s).</div>'; return; }
+
+      body.innerHTML = '<table><thead><tr>' +
+        '<th>Date</th><th>Area</th><th>Type</th><th>Material</th><th>Qty</th><th>Status</th><th>Planning Remarks</th>' +
+        '</tr></thead><tbody>' +
+        data.alerts.map(function (a) {
+          const material = a.ucsCode ? (a.ucsCode + ' \u2014 ' + a.itemDescription) : ('(New) ' + a.itemDescription);
+          return '<tr>' +
+            '<td>' + escapeHtml(a.dateRaised) + '</td>' +
+            '<td>' + escapeHtml(a.area) + '</td>' +
+            '<td>' + escapeHtml(a.requestType) + '</td>' +
+            '<td>' + escapeHtml(material) + '</td>' +
+            '<td>' + escapeHtml(String(a.estimatedQty)) + (a.unit ? ' ' + escapeHtml(a.unit) : '') + '</td>' +
+            '<td>' + statusBadge(a.status) + '</td>' +
+            '<td>' + escapeHtml(a.planningRemarks || '') + '</td>' +
+            '</tr>';
+        }).join('') + '</tbody></table>';
+    } catch (err) {
+      body.innerHTML = '<div class="emptyNote">Could not reach the server.</div>';
+    }
+  }
+
+  window.callApi = callApi;
+  window.clearMessage = clearMessage;
+  window.escapeHtml = escapeHtml;
+  window.hasCommaValueClient = hasCommaValueClient;
+  window.loadMaterials = loadMaterials;
+  window.loadMyAlerts = loadMyAlerts;
+  window.login = login;
+  window.onItemSearchInput = onItemSearchInput;
+  window.pickSuggestion = pickSuggestion;
+  window.setRequestType = setRequestType;
+  window.showMessage = showMessage;
+  window.statusBadge = statusBadge;
+  window.submitAlert = submitAlert;
+
+  // ---- shell auto-login: fill the page's OWN hidden login form and
+  // submit it through the page's OWN unmodified login() function, so every
+  // page's tested role-check / UI-reveal logic runs exactly as before. ----
+  document.getElementById('loginEmail').value = Shell.getUser().email;
+  document.getElementById('loginPassword').value = Shell.getUser().password;
+  login();
+
+})();
+</script>

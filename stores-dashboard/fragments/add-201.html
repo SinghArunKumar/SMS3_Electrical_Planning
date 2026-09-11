@@ -1,0 +1,694 @@
+<style>
+
+  body { font-family: Arial, sans-serif; max-width: 480px; margin: 40px auto; padding: 0 16px; color: #222; }
+  h2 { margin-bottom: 4px; }
+  .subtitle { color: #666; font-size: 13px; margin-bottom: 24px; }
+  label { display: block; font-weight: bold; margin-top: 14px; margin-bottom: 4px; font-size: 14px; }
+  input, select, textarea { width: 100%; padding: 8px; box-sizing: border-box; font-size: 14px; border: 1px solid #ccc; border-radius: 4px; }
+  input.readonly { background: #f1f3f4; color: #555; }
+  button { margin-top: 20px; width: 100%; padding: 10px; font-size: 15px; border: none; border-radius: 4px; background: #1a73e8; color: white; cursor: pointer; }
+  button.secondary { background: #5f6368; }
+  button:disabled { background: #999; cursor: not-allowed; }
+  #message { margin-top: 14px; padding: 10px; border-radius: 4px; font-size: 14px; display: none; }
+  .success { background: #e6f4ea; color: #1e7e34; display: block !important; }
+  .error { background: #fce8e6; color: #c5221f; display: block !important; }
+  #loggedInBar { display:none; font-size: 13px; color:#555; margin-bottom: 10px; }
+  #logoutBtn { width:auto; padding:4px 10px; font-size:12px; background:#666; margin-left:8px; }
+  .fieldError { color:#c5221f; font-size:12px; margin-top:4px; display:none; }
+  .fieldHint { color:#666; font-size:12px; margin-top:4px; }
+  .lockedNotice { background:#fce8e6; color:#c5221f; padding:14px; border-radius:4px; font-size:14px; }
+
+  /* ---- STO combo-box (type-ahead + dropdown) ---- */
+  #stoNoWrap { position: relative; }
+  #stoNoRow { display:flex; gap:8px; align-items:center; }
+  #stoNoRow input { flex:1; }
+  #refreshStosBtn { width:auto; padding:8px 10px; font-size:12px; background:#5f6368; margin-top:0; white-space:nowrap; }
+  #stoSuggestions {
+    display:none; position:absolute; top:100%; left:0; right:0; z-index:10;
+    background:#fff; border:1px solid #ccc; border-top:none; border-radius:0 0 4px 4px;
+    max-height:240px; overflow-y:auto; box-shadow:0 2px 6px rgba(0,0,0,0.12);
+  }
+  .stoSuggestionItem { padding:8px 10px; cursor:pointer; font-size:13px; border-bottom:1px solid #eee; }
+  .stoSuggestionItem:last-child { border-bottom:none; }
+  .stoSuggestionItem .stoMain { font-weight:bold; }
+  .stoSuggestionItem .stoSub { color:#666; font-size:12px; }
+  .stoSuggestionItem.highlighted { background:#e8f0fe; }
+  .stoSuggestionItem:hover { background:#f1f3f4; }
+  #stoListStatus { font-size:12px; color:#666; margin-top:4px; }
+
+  /* ---- Auto-filled context block, shown once a valid Z04'd STO is selected ---- */
+  #stoContextBox { display:none; margin-top:14px; border:1px solid #ddd; border-radius:6px; padding:12px; background:#fafafa; }
+  #stoContextBox .contextGrid { display:grid; grid-template-columns: 1fr 1fr; gap:10px 14px; }
+  #stoContextBox label { margin-top:0; }
+  #remainingBadge { grid-column: 1 / -1; margin-top: 4px; padding: 8px 10px; border-radius: 4px; font-size: 13px; font-weight: bold; background:#e8f0fe; color:#1a73e8; }
+
+</style>
+
+
+<h2>Create 201 Entry</h2>
+<div class="subtitle">GitHub_SMS-3 Stores Module &mdash; Electrical Planning</div>
+
+<!-- ====== LOGIN SECTION ====== -->
+<div id="loginSection" style="display:none">
+  <label for="loginEmail">Email</label>
+  <input type="email" id="loginEmail" placeholder="you@test.com">
+
+  <label for="loginPassword">Password</label>
+  <input type="password" id="loginPassword" placeholder="Password">
+
+  <button id="loginBtn" onclick="login()">Log In</button>
+</div>
+
+<!-- ====== NOT AUTHORIZED NOTICE ====== -->
+<div id="notAuthorizedNotice" style="display:none;" class="lockedNotice">
+  You're logged in, but only Planning staff (excluding Store Incharge) can create 201 entries. If you believe this is wrong, contact the project owner.
+</div>
+
+<!-- ====== FORM SECTION ====== -->
+<div id="formSection" style="display:none;">
+  <div id="loggedInBar"></div>
+
+  <div id="stoNoWrap">
+    <label for="stoNo">STO No (type to search, or click to browse)</label>
+    <div id="stoNoRow">
+      <input type="text" id="stoNo" placeholder="Type or click to see Z04'd STOs with balance remaining" autocomplete="off"
+             oninput="onSTONoInput()" onfocus="onSTONoFocus()" onkeydown="onSTONoKeydown(event)" onblur="onSTONoBlur()">
+      <button type="button" id="refreshStosBtn" onclick="refreshEligibleSTOs()">&#8635; Refresh</button>
+    </div>
+    <div id="stoSuggestions"></div>
+    <div id="stoNoError" class="fieldError"></div>
+    <div id="stoListStatus"></div>
+  </div>
+
+  <!-- Auto-filled once a valid, eligible (Z04'd, balance remaining) STO is selected -->
+  <div id="stoContextBox">
+    <div class="contextGrid">
+      <div>
+        <label>STO Date</label>
+        <input type="text" id="displaySTODate" class="readonly" readonly>
+      </div>
+      <div>
+        <label>UCS Code</label>
+        <input type="text" id="displayUCSCode" class="readonly" readonly>
+      </div>
+      <div style="grid-column: 1 / -1;">
+        <label>Item Description</label>
+        <input type="text" id="displayItemDescription" class="readonly" readonly>
+      </div>
+      <div>
+        <label>Unit</label>
+        <input type="text" id="displayUnit" class="readonly" readonly>
+      </div>
+      <div>
+        <label>Qty Received (Z04)</label>
+        <input type="text" id="displayQtyRecievedZ04" class="readonly" readonly>
+      </div>
+      <div>
+        <label>Date of Receipt (Z04)</label>
+        <input type="text" id="displayDateOfReceiptZ04" class="readonly" readonly>
+      </div>
+      <div>
+        <label>Already Released</label>
+        <input type="text" id="displayAlreadyReleased" class="readonly" readonly>
+      </div>
+      <div id="remainingBadge"></div>
+    </div>
+  </div>
+
+  <label for="qtyReleased">Qty Released</label>
+  <input type="number" id="qtyReleased" min="1" step="1" oninput="onQtyReleasedInput()">
+  <div id="qtyReleasedError" class="fieldError"></div>
+
+  <label for="matDocNo">Mat Doc No (SAP reference, exactly 10 digits)</label>
+  <input type="text" id="matDocNo" placeholder="e.g. 1245781240" maxlength="10" inputmode="numeric"
+         oninput="onMatDocNoInput()" onblur="onMatDocNoInput()">
+  <div id="matDocNoError" class="fieldError"></div>
+  <div id="matDocNoDuplicateError" class="fieldError"></div>
+  <div class="fieldHint">Shared number range with Z04 &mdash; checked against both S_Z04 and S_201.</div>
+
+  <label for="dateOfRelease">Date of Release</label>
+  <input type="date" id="dateOfRelease" oninput="validateDateOfReleaseField(); validateAll();">
+  <div id="dateOfReleaseError" class="fieldError"></div>
+
+  <label for="releasedToArea">Released to Area</label>
+  <select id="releasedToArea" onchange="validateAll()">
+    <option value="">Select an area&hellip;</option>
+  </select>
+  <div id="releasedToAreaError" class="fieldError"></div>
+
+  <button id="submitBtn" onclick="submit201()" disabled>Save 201 Entry</button>
+</div>
+
+<div id="message"></div>
+
+
+
+
+<script>
+(function(){
+
+  // TODO: paste your deployed Apps Script Web App URL here (same one used by the other pages)
+  const APPS_SCRIPT_URL = Shell.APPS_SCRIPT_URL;
+  const RECENT_N = 20; // how many "most recent eligible STOs" to show when the field is empty
+  const AREA_CATEGORY = 'Area_201'; // Options_List column this page's dropdown reads from
+
+  let currentUser = { email: '', password: '' };
+
+  // ---- STO combo-box state ----
+  let eligibleSTOs = [];     // full cached list from getEligibleZ04sFor201, newest-Z04'd-first
+  let filteredSTOs = [];     // whatever's currently shown in the dropdown
+  let highlightedIndex = -1; // keyboard nav position within filteredSTOs
+  let selectedSTO = null;    // the matched object once the operator picks one
+
+  // ---- Mat Doc No live-check state ----
+  let matDocNoConfirmedUnique = false;
+  let matDocNoCheckInFlight = null;
+
+  function showMessage(text, type) {
+    const el = document.getElementById('message');
+    el.textContent = text;
+    el.className = type;
+  }
+  function clearMessage() {
+    const el = document.getElementById('message');
+    el.textContent = '';
+    el.className = '';
+  }
+
+  /**
+   * Client-side mirror of the backend's hasCommaValue(): case-insensitive on
+   * purpose, to match Code.gs exactly and avoid re-breaking on any future
+   * casing drift in Authorized_Area/Role.
+   */
+  function hasCommaValueClient(str, target) {
+    if (!str) return false;
+    const targetLower = String(target).toLowerCase();
+    return String(str).split(',').map(function (s) { return s.trim().toLowerCase(); }).indexOf(targetLower) !== -1;
+  }
+
+  async function callApi(payload) {
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload)
+    });
+    return res.json();
+  }
+
+  function todayLocalISO() {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return y + '-' + m + '-' + day;
+  }
+
+  // ====== LOGIN ======
+  async function login() {
+    const email = document.getElementById('loginEmail').value.trim();
+    const password = document.getElementById('loginPassword').value;
+    clearMessage();
+
+    if (!email || !password) {
+      showMessage('Please enter email and password.', 'error');
+      return;
+    }
+
+    const loginBtn = document.getElementById('loginBtn');
+    loginBtn.disabled = true;
+    loginBtn.textContent = 'Logging in...';
+
+    try {
+      const data = await callApi({ action: 'login', email, password });
+
+      if (!data.success) {
+        showMessage(data.message || 'Login failed.', 'error');
+        return;
+      }
+
+      // Case-insensitive, mirroring Code.gs's canManageSTO()/hasCommaValue() exactly --
+      // a literal case-sensitive check here previously rejected every Planning user
+      // once Authorized_Area was standardized to 'PLANNING' in the sheet, even though
+      // the backend check was already case-insensitive. Never reintroduce a
+      // case-sensitive comparison here.
+      const canManageSTO = hasCommaValueClient(data.authorizedArea, 'Planning') &&
+        !hasCommaValueClient(data.role, 'Store Incharge');
+
+      if (!canManageSTO) {
+        document.getElementById('loginSection').style.display = 'none';
+        document.getElementById('notAuthorizedNotice').style.display = 'block';
+        return;
+      }
+
+      currentUser = { email, password };
+      document.getElementById('loginSection').style.display = 'none';
+      document.getElementById('formSection').style.display = 'block';
+      document.getElementById('dateOfRelease').max = todayLocalISO();
+
+      const bar = document.getElementById('loggedInBar');
+      bar.style.display = 'block';
+      bar.innerHTML = 'Logged in as <b>' + data.name + '</b> (' + data.role + ')' +
+        '<button id="logoutBtn" onclick="Shell.logout()">Log out</button>';
+
+      await Promise.all([fetchEligibleSTOs(), fetchAreaOptions()]);
+    } catch (err) {
+      showMessage('Could not reach the server. Check your connection or the Apps Script URL.', 'error');
+    } finally {
+      loginBtn.disabled = false;
+      loginBtn.textContent = 'Log In';
+    }
+  }
+
+  // ====== RELEASED-TO-AREA DROPDOWN (from Options_List) ======
+  async function fetchAreaOptions() {
+    try {
+      const data = await callApi({
+        action: 'getOptionsList',
+        email: currentUser.email,
+        password: currentUser.password,
+        category: AREA_CATEGORY
+      });
+      const select = document.getElementById('releasedToArea');
+      if (!data.success) {
+        showMessage(data.message || 'Could not load the Released to Area list.', 'error');
+        return;
+      }
+      (data.values || []).forEach(function (v) {
+        const opt = document.createElement('option');
+        opt.value = v;
+        opt.textContent = v;
+        select.appendChild(opt);
+      });
+    } catch (err) {
+      showMessage('Could not reach the server while loading area options (network issue).', 'error');
+    }
+  }
+
+  // ====== ELIGIBLE STO LIST (fetch + cache) ======
+  async function fetchEligibleSTOs() {
+    document.getElementById('stoListStatus').textContent = 'Loading Z04\'d STOs with balance remaining...';
+    try {
+      const data = await callApi({
+        action: 'getEligibleZ04sFor201',
+        email: currentUser.email,
+        password: currentUser.password
+      });
+      if (!data.success) {
+        document.getElementById('stoListStatus').textContent = '';
+        showMessage(data.message || 'Could not load the list of eligible STOs.', 'error');
+        return;
+      }
+      eligibleSTOs = data.stos || [];
+      document.getElementById('stoListStatus').textContent =
+        eligibleSTOs.length + ' STO(s) with balance remaining. Showing the ' + Math.min(RECENT_N, eligibleSTOs.length) + ' most recent by default -- type to search all of them.';
+
+      // If a previously selected STO no longer appears (someone else just exhausted
+      // its balance, or it dropped off for any other reason), clear the stale
+      // selection rather than silently letting the operator submit against
+      // outdated context.
+      if (selectedSTO && !eligibleSTOs.some(function (s) { return s.stoNo === selectedSTO.stoNo; })) {
+        showMessage('STO ' + selectedSTO.stoNo + ' is no longer eligible (its balance may have just been fully released by someone else). Please pick another.', 'error');
+        clearSTOSelection();
+      }
+    } catch (err) {
+      document.getElementById('stoListStatus').textContent = '';
+      showMessage('Could not reach the server while loading eligible STOs (network issue).', 'error');
+    }
+  }
+
+  async function refreshEligibleSTOs() {
+    clearMessage();
+    await fetchEligibleSTOs();
+  }
+
+  // ====== STO COMBO-BOX BEHAVIOR ======
+  function onSTONoFocus() {
+    const typed = document.getElementById('stoNo').value.trim();
+    if (!typed) {
+      filteredSTOs = eligibleSTOs.slice(0, RECENT_N);
+    } else {
+      filteredSTOs = filterSTOs(typed);
+    }
+    renderSuggestions();
+  }
+
+  function onSTONoInput() {
+    // Typing invalidates any previous selection until they pick again.
+    if (selectedSTO) clearSTOSelection();
+    document.getElementById('stoNoError').style.display = 'none';
+
+    const typed = document.getElementById('stoNo').value.trim();
+    if (!typed) {
+      filteredSTOs = eligibleSTOs.slice(0, RECENT_N);
+    } else {
+      filteredSTOs = filterSTOs(typed);
+    }
+    highlightedIndex = -1;
+    renderSuggestions();
+    validateAll();
+  }
+
+  function filterSTOs(typed) {
+    const digitsOnly = typed.replace(/[^\d]/g, '');
+    if (!digitsOnly) return eligibleSTOs.slice(0, RECENT_N);
+    return eligibleSTOs.filter(function (s) { return s.stoNo.indexOf(digitsOnly) !== -1; });
+  }
+
+  function renderSuggestions() {
+    const box = document.getElementById('stoSuggestions');
+    box.innerHTML = '';
+
+    if (filteredSTOs.length === 0) {
+      box.style.display = 'none';
+      return;
+    }
+
+    filteredSTOs.forEach(function (s, idx) {
+      const item = document.createElement('div');
+      item.className = 'stoSuggestionItem' + (idx === highlightedIndex ? ' highlighted' : '');
+      item.onmousedown = function (e) { e.preventDefault(); selectSTO(s); }; // mousedown fires before blur
+      item.innerHTML =
+        '<div class="stoMain">' + s.stoNo + '</div>' +
+        '<div class="stoSub">' + s.stoDate + ' &middot; ' + s.itemDescription + ' &middot; Remaining ' + s.remaining + ' of ' + s.qtyRecievedZ04 + ' ' + s.unit + '</div>';
+      box.appendChild(item);
+    });
+
+    box.style.display = 'block';
+  }
+
+  function hideSuggestions() {
+    document.getElementById('stoSuggestions').style.display = 'none';
+    highlightedIndex = -1;
+  }
+
+  function onSTONoKeydown(e) {
+    if (filteredSTOs.length === 0) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      highlightedIndex = Math.min(highlightedIndex + 1, filteredSTOs.length - 1);
+      renderSuggestions();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      highlightedIndex = Math.max(highlightedIndex - 1, 0);
+      renderSuggestions();
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (highlightedIndex >= 0 && highlightedIndex < filteredSTOs.length) {
+        selectSTO(filteredSTOs[highlightedIndex]);
+      }
+    } else if (e.key === 'Escape') {
+      hideSuggestions();
+    }
+  }
+
+  function selectSTO(s) {
+    selectedSTO = s;
+    document.getElementById('stoNo').value = s.stoNo;
+    hideSuggestions();
+
+    document.getElementById('displaySTODate').value = s.stoDate;
+    document.getElementById('displayUCSCode').value = s.ucsCode;
+    document.getElementById('displayItemDescription').value = s.itemDescription;
+    document.getElementById('displayUnit').value = s.unit;
+    document.getElementById('displayQtyRecievedZ04').value = s.qtyRecievedZ04;
+    document.getElementById('displayDateOfReceiptZ04').value = s.dateOfReceiptZ04;
+    document.getElementById('displayAlreadyReleased').value = s.alreadyReleased;
+    document.getElementById('remainingBadge').textContent = 'Remaining to release: ' + s.remaining + ' ' + s.unit;
+    document.getElementById('stoContextBox').style.display = 'block';
+
+    document.getElementById('dateOfRelease').min = toISODate(s.dateOfReceiptZ04);
+    document.getElementById('stoNoError').style.display = 'none';
+
+    document.getElementById('qtyReleased').max = s.remaining;
+    validateQtyReleasedField();
+    validateAll();
+  }
+
+  function clearSTOSelection() {
+    selectedSTO = null;
+    document.getElementById('stoContextBox').style.display = 'none';
+    document.getElementById('dateOfRelease').removeAttribute('min');
+    document.getElementById('qtyReleased').removeAttribute('max');
+    validateAll();
+  }
+
+  function onSTONoBlur() {
+    // Small delay so a click on a suggestion (mousedown already handled it) isn't
+    // wiped out by the blur firing first.
+    setTimeout(function () {
+      hideSuggestions();
+      const typed = document.getElementById('stoNo').value.trim();
+      if (typed && (!selectedSTO || selectedSTO.stoNo !== typed)) {
+        document.getElementById('stoNoError').textContent = 'Not a valid, eligible STO. Pick one from the list, or hit Refresh if it was just Z04\'d.';
+        document.getElementById('stoNoError').style.display = 'block';
+      }
+      validateAll();
+    }, 150);
+  }
+
+  // Converts a DD/MM/YYYY-ish or already-ISO date string coming back from the
+  // server into 'YYYY-MM-DD' for use as a native <input type="date"> min/value.
+  // formatDateOut() on the backend already returns 'YYYY-MM-DD', so this is a
+  // defensive passthrough in case that ever changes.
+  function toISODate(str) {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+    return str;
+  }
+
+  // ====== QTY RELEASED VALIDATION ======
+  function onQtyReleasedInput() {
+    validateQtyReleasedField();
+    validateAll();
+  }
+
+  function validateQtyReleasedField() {
+    const raw = document.getElementById('qtyReleased').value;
+    const errEl = document.getElementById('qtyReleasedError');
+
+    if (raw === '') { errEl.style.display = 'none'; return false; }
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n <= 0) {
+      errEl.textContent = 'Qty Released must be a whole number greater than zero.';
+      errEl.style.display = 'block';
+      return false;
+    }
+    if (selectedSTO && n > Number(selectedSTO.remaining)) {
+      errEl.textContent = 'Qty Released cannot exceed the remaining balance (' + selectedSTO.remaining + ').';
+      errEl.style.display = 'block';
+      return false;
+    }
+    errEl.style.display = 'none';
+    return true;
+  }
+
+  // ====== MAT DOC NO: SANITIZE + FORMAT + LIVE UNIQUENESS CHECK ======
+  async function onMatDocNoInput() {
+    const field = document.getElementById('matDocNo');
+    const cleaned = field.value.replace(/[^\d]/g, '');
+    if (cleaned !== field.value) field.value = cleaned;
+
+    matDocNoConfirmedUnique = false;
+    // Dedicated, independent boxes for format vs. duplicate -- per the project's
+    // own "flash and vanish" bug pattern, the format check below must NEVER touch
+    // the duplicate box, and vice versa.
+    const formatOk = validateMatDocNoFormat();
+    document.getElementById('matDocNoDuplicateError').style.display = 'none';
+    validateAll();
+
+    if (!formatOk || field.value.length !== 10) return;
+
+    const matDocNo = field.value;
+    const thisCheck = Symbol();
+    matDocNoCheckInFlight = thisCheck;
+
+    try {
+      const data = await callApi({
+        action: 'checkMatDocNoExists',
+        email: currentUser.email,
+        password: currentUser.password,
+        matDocNo: matDocNo
+      });
+      if (matDocNoCheckInFlight !== thisCheck) return; // superseded by a newer keystroke
+
+      if (!data.success) {
+        showMessage(data.message || 'Could not check this Mat Doc No right now. Please try again.', 'error');
+        return;
+      }
+      clearMessage();
+
+      const dupEl = document.getElementById('matDocNoDuplicateError');
+      if (data.exists) {
+        dupEl.textContent = 'Mat Doc No ' + matDocNo + ' already exists. Mat Doc Nos must be unique.';
+        dupEl.style.display = 'block';
+        matDocNoConfirmedUnique = false;
+      } else {
+        dupEl.style.display = 'none';
+        matDocNoConfirmedUnique = true;
+      }
+    } catch (err) {
+      showMessage('Could not check Mat Doc No uniqueness right now (network issue). Please check your connection and try again.', 'error');
+    } finally {
+      validateAll();
+    }
+  }
+
+  function validateMatDocNoFormat() {
+    const val = document.getElementById('matDocNo').value.trim();
+    const errEl = document.getElementById('matDocNoError');
+    if (val === '') { errEl.style.display = 'none'; return false; }
+    if (val.length !== 10) {
+      errEl.textContent = 'Mat Doc No must be exactly 10 digits. Currently ' + val.length + ' digit(s).';
+      errEl.style.display = 'block';
+      return false;
+    }
+    if (val.charAt(0) === '0') {
+      errEl.textContent = 'Mat Doc No cannot start with 0.';
+      errEl.style.display = 'block';
+      return false;
+    }
+    errEl.style.display = 'none';
+    return true;
+  }
+
+  // ====== DATE OF RELEASE VALIDATION ======
+  function validateDateOfReleaseField() {
+    const val = document.getElementById('dateOfRelease').value;
+    const errEl = document.getElementById('dateOfReleaseError');
+    if (!val) { errEl.style.display = 'none'; return false; }
+    if (val > todayLocalISO()) {
+      errEl.textContent = 'Date of Release cannot be in the future.';
+      errEl.style.display = 'block';
+      return false;
+    }
+    if (selectedSTO && val < toISODate(selectedSTO.dateOfReceiptZ04)) {
+      errEl.textContent = 'Date of Release cannot be earlier than the Z04 Date of Receipt (' + selectedSTO.dateOfReceiptZ04 + ').';
+      errEl.style.display = 'block';
+      return false;
+    }
+    errEl.style.display = 'none';
+    return true;
+  }
+
+  // ====== SAVE BUTTON ENABLE/DISABLE ======
+  function validateAll() {
+    const stoOk = !!selectedSTO && document.getElementById('stoNo').value.trim() === selectedSTO.stoNo;
+
+    const qtyRaw = document.getElementById('qtyReleased').value;
+    const qtyOk = validateQtyReleasedField() && qtyRaw !== '';
+
+    const matDocOk = validateMatDocNoFormat() && document.getElementById('matDocNo').value.length === 10 && matDocNoConfirmedUnique;
+
+    const dateOk = validateDateOfReleaseField() && !!document.getElementById('dateOfRelease').value;
+
+    const areaOk = !!document.getElementById('releasedToArea').value;
+
+    const allOk = stoOk && qtyOk && matDocOk && dateOk && areaOk;
+    document.getElementById('submitBtn').disabled = !allOk;
+    return allOk;
+  }
+
+  // ====== SUBMIT ======
+  async function submit201() {
+    clearMessage();
+
+    if (!validateAll()) {
+      const missing = [];
+      if (!selectedSTO || document.getElementById('stoNo').value.trim() !== selectedSTO.stoNo) missing.push('a valid, eligible STO No');
+      const qtyRaw = document.getElementById('qtyReleased').value;
+      if (qtyRaw === '' || !validateQtyReleasedField()) missing.push('a valid Qty Released');
+      if (!validateMatDocNoFormat() || document.getElementById('matDocNo').value.length !== 10) {
+        missing.push('a valid 10-digit Mat Doc No');
+      } else if (!matDocNoConfirmedUnique) {
+        missing.push('a unique Mat Doc No (still checking, or a duplicate was found)');
+      }
+      if (!document.getElementById('dateOfRelease').value || !validateDateOfReleaseField()) missing.push('a valid Date of Release');
+      if (!document.getElementById('releasedToArea').value) missing.push('a Released to Area');
+      showMessage('Please fix: ' + missing.join(', '), 'error');
+      return;
+    }
+
+    const submitBtn = document.getElementById('submitBtn');
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Saving...';
+
+    try {
+      const payload = {
+        action: 'addS201Entry',
+        email: currentUser.email,
+        password: currentUser.password,
+        stoNo: selectedSTO.stoNo,
+        qtyReleased: Number(document.getElementById('qtyReleased').value),
+        matDocNo: document.getElementById('matDocNo').value.trim(),
+        dateOfRelease: document.getElementById('dateOfRelease').value,
+        releasedToArea: document.getElementById('releasedToArea').value
+      };
+
+      const data = await callApi(payload);
+
+      if (data.success) {
+        showMessage(data.message, 'success');
+        resetForm();
+        await fetchEligibleSTOs(); // an exhausted STO must disappear; a partial one's numbers must refresh
+      } else {
+        showMessage(data.message || 'Could not save this 201 entry.', 'error');
+      }
+    } catch (err) {
+      showMessage('Could not reach the server. Check your connection or the Apps Script URL.', 'error');
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Save 201 Entry';
+      validateAll();
+    }
+  }
+
+  function resetForm() {
+    document.getElementById('stoNo').value = '';
+    clearSTOSelection();
+    document.getElementById('qtyReleased').value = '';
+    document.getElementById('matDocNo').value = '';
+    document.getElementById('dateOfRelease').value = '';
+    document.getElementById('releasedToArea').value = '';
+    matDocNoConfirmedUnique = false;
+    ['stoNoError', 'qtyReleasedError', 'matDocNoError', 'matDocNoDuplicateError', 'dateOfReleaseError', 'releasedToAreaError'].forEach(function (id) {
+      document.getElementById(id).style.display = 'none';
+    });
+    validateAll();
+  }
+
+  window.callApi = callApi;
+  window.clearMessage = clearMessage;
+  window.clearSTOSelection = clearSTOSelection;
+  window.fetchAreaOptions = fetchAreaOptions;
+  window.fetchEligibleSTOs = fetchEligibleSTOs;
+  window.filterSTOs = filterSTOs;
+  window.hasCommaValueClient = hasCommaValueClient;
+  window.hideSuggestions = hideSuggestions;
+  window.login = login;
+  window.onMatDocNoInput = onMatDocNoInput;
+  window.onQtyReleasedInput = onQtyReleasedInput;
+  window.onSTONoBlur = onSTONoBlur;
+  window.onSTONoFocus = onSTONoFocus;
+  window.onSTONoInput = onSTONoInput;
+  window.onSTONoKeydown = onSTONoKeydown;
+  window.refreshEligibleSTOs = refreshEligibleSTOs;
+  window.renderSuggestions = renderSuggestions;
+  window.resetForm = resetForm;
+  window.selectSTO = selectSTO;
+  window.showMessage = showMessage;
+  window.submit201 = submit201;
+  window.toISODate = toISODate;
+  window.todayLocalISO = todayLocalISO;
+  window.validateAll = validateAll;
+  window.validateDateOfReleaseField = validateDateOfReleaseField;
+  window.validateMatDocNoFormat = validateMatDocNoFormat;
+  window.validateQtyReleasedField = validateQtyReleasedField;
+
+  // ---- shell auto-login: fill the page's OWN hidden login form and
+  // submit it through the page's OWN unmodified login() function, so every
+  // page's tested role-check / UI-reveal logic runs exactly as before. ----
+  document.getElementById('loginEmail').value = Shell.getUser().email;
+  document.getElementById('loginPassword').value = Shell.getUser().password;
+  login();
+
+})();
+</script>
