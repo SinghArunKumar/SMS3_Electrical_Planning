@@ -12,6 +12,7 @@
   .error { background: #fce8e6; color: #c5221f; display: block !important; }
   #loggedInBar { display:none; font-size: 13px; color:#555; margin-bottom: 10px; }
   #logoutBtn { width:auto; padding:4px 10px; font-size:12px; background:#666; margin-left:8px; }
+  .lockedNotice { background:#fce8e6; color:#c5221f; padding:14px; border-radius:4px; font-size:14px; }
 
 </style>
 
@@ -28,6 +29,11 @@
   <input type="password" id="loginPassword" placeholder="Password">
 
   <button id="loginBtn" onclick="Page.login()">Log In</button>
+</div>
+
+<!-- ====== NOT AUTHORIZED NOTICE ====== -->
+<div id="notAuthorizedNotice" style="display:none;" class="lockedNotice">
+  You're logged in, but only Planning staff (excluding Store Incharge) can add UCS Codes. If you believe this is wrong, contact the project owner.
 </div>
 
 <!-- ====== FORM SECTION (shown after login) ====== -->
@@ -65,6 +71,14 @@
 
   // Kept only in memory for this page load — not persisted to browser storage.
   let currentUser = { email: '', password: '' };
+
+  // Mirrors Code.gs's hasCommaValue()/canManageSTO() exactly -- case-
+  // insensitive comparison, same as every other Planning-gated page.
+  function hasCommaValueClient(str, target) {
+    if (!str) return false;
+    const targetLower = String(target).toLowerCase();
+    return String(str).split(',').map(function (s) { return s.trim().toLowerCase(); }).indexOf(targetLower) !== -1;
+  }
 
   function showMessage(text, type) {
     const el = document.getElementById('message');
@@ -124,6 +138,15 @@
       if (data.success) {
         currentUser = { email, password };
         document.getElementById('loginSection').style.display = 'none';
+
+        const canManageSTO = hasCommaValueClient(data.authorizedArea, 'Planning') &&
+          !hasCommaValueClient(data.role, 'Store Incharge');
+
+        if (!canManageSTO) {
+          document.getElementById('notAuthorizedNotice').style.display = 'block';
+          return;
+        }
+
         document.getElementById('formSection').style.display = 'block';
         const bar = document.getElementById('loggedInBar');
         bar.style.display = 'block';
@@ -162,6 +185,7 @@
   function logout() {
     currentUser = { email: '', password: '' };
     document.getElementById('formSection').style.display = 'none';
+    document.getElementById('notAuthorizedNotice').style.display = 'none';
     document.getElementById('loginSection').style.display = 'block';
     document.getElementById('loginPassword').value = '';
     clearMessage();
@@ -254,6 +278,7 @@
     APPS_SCRIPT_URL: { get: function(){ return APPS_SCRIPT_URL; }, set: function(v){ APPS_SCRIPT_URL = v; }, enumerable: true, configurable: true },
     clearMessage: { get: function(){ return clearMessage; }, set: function(v){ clearMessage = v; }, enumerable: true, configurable: true },
     currentUser: { get: function(){ return currentUser; }, set: function(v){ currentUser = v; }, enumerable: true, configurable: true },
+    hasCommaValueClient: { get: function(){ return hasCommaValueClient; }, set: function(v){ hasCommaValueClient = v; }, enumerable: true, configurable: true },
     loadUnitOptions: { get: function(){ return loadUnitOptions; }, set: function(v){ loadUnitOptions = v; }, enumerable: true, configurable: true },
     login: { get: function(){ return login; }, set: function(v){ login = v; }, enumerable: true, configurable: true },
     logout: { get: function(){ return logout; }, set: function(v){ logout = v; }, enumerable: true, configurable: true },
