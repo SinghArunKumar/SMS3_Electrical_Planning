@@ -1,0 +1,263 @@
+<style>
+
+  h2 { margin-bottom: 4px; }
+  .subtitle { color: #666; font-size: 13px; margin-bottom: 24px; }
+  label { display: block; font-weight: bold; margin-top: 14px; margin-bottom: 4px; font-size: 14px; }
+  input { width: 100%; padding: 8px; box-sizing: border-box; font-size: 14px; border: 1px solid #ccc; border-radius: 4px; }
+  button { padding: 8px 14px; font-size: 14px; border: none; border-radius: 4px; background: #1a73e8; color: white; cursor: pointer; }
+  button.secondary { background: #5f6368; }
+  button:disabled { background: #999; cursor: not-allowed; }
+  #message { margin-top: 14px; padding: 10px; border-radius: 4px; font-size: 14px; display: none; }
+  .success { background: #e6f4ea; color: #1e7e34; display: block !important; }
+  .error { background: #fce8e6; color: #c5221f; display: block !important; }
+  #loggedInBar { display:none; font-size: 13px; color:#555; margin-bottom: 10px; }
+  #logoutBtn { width:auto; padding:4px 10px; font-size:12px; background:#666; margin-left:8px; }
+  .lockedNotice { background:#fce8e6; color:#c5221f; padding:14px; border-radius:4px; font-size:14px; }
+  #emptyState { padding:30px; text-align:center; color:#666; font-size:14px; display:none; }
+  #loadingState { padding:30px; text-align:center; color:#666; font-size:14px; }
+
+  /* ---- Slip cards ---- */
+  .slipCard { border:1px solid #ddd; border-radius:8px; margin-bottom:18px; overflow:hidden; }
+  .slipCardHeader { background:#f8f9fa; padding:12px 16px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px; }
+  .slipCardHeader .slipId { font-weight:bold; font-family:'Courier New', monospace; font-size:14px; }
+  .slipCardHeader .meta { font-size:12px; color:#666; }
+  .tableWrap { overflow-x:auto; }
+  table { border-collapse:collapse; width:100%; font-size:13px; }
+  th, td { padding:8px 10px; border-bottom:1px solid #eee; text-align:left; }
+  th { background:#fafafa; font-weight:bold; }
+  td input[type="number"] { width:90px; padding:5px; }
+  .qtyErr { color:#c5221f; font-size:11px; margin-top:2px; }
+  .slipCardFooter { padding:12px 16px; display:flex; justify-content:flex-end; gap:8px; align-items:center; }
+  .slipCardFooter .cardMessage { font-size:12px; color:#c5221f; margin-right:auto; }
+
+</style>
+
+
+<h2>Sanction Dashboard</h2>
+<div class="subtitle">GitHub_SMS-3 Stores Module &mdash; sanction (or adjust) requisition slips already approved by Area Incharges</div>
+
+<!-- ====== LOGIN SECTION ====== -->
+<div id="loginSection" style="display:none">
+  <label for="loginEmail">Email</label>
+  <input type="email" id="loginEmail" placeholder="you@test.com">
+  <label for="loginPassword">Password</label>
+  <input type="password" id="loginPassword" placeholder="Password">
+  <button id="loginBtn" onclick="Page.login()" style="margin-top:20px; width:100%;">Log In</button>
+</div>
+
+<!-- ====== NOT AUTHORIZED NOTICE ====== -->
+<div id="notAuthorizedNotice" style="display:none;" class="lockedNotice">
+  You're logged in, but only Approvers can view this dashboard. If you believe this is wrong, contact the project owner.
+</div>
+
+<!-- ====== DASHBOARD SECTION ====== -->
+<div id="dashboardSection" style="display:none;">
+  <div id="loggedInBar"></div>
+  <button class="secondary" onclick="Page.loadPending()" style="width:auto;">&#8635; Refresh</button>
+  <div id="loadingState">Loading pending sanctions&hellip;</div>
+  <div id="emptyState">No requisitions are currently pending sanction.</div>
+  <div id="slipsContainer"></div>
+</div>
+
+<div id="message"></div>
+
+
+
+
+<script>
+(function(){
+
+  // TODO: paste your deployed Apps Script Web App URL here
+  const APPS_SCRIPT_URL = Shell.APPS_SCRIPT_URL;
+
+  let currentUser = { email: '', password: '' };
+
+  function showMessage(text, type) {
+    const el = document.getElementById('message');
+    el.textContent = text; el.className = type;
+  }
+  function clearMessage() {
+    const el = document.getElementById('message');
+    el.textContent = ''; el.className = '';
+  }
+  function escapeHtml(str) {
+    return String(str == null ? '' : str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  /**
+   * Client-side mirror of the backend's hasCommaValue(): case-insensitive on
+   * purpose, matching Code.gs exactly.
+   */
+  function hasCommaValueClient(str, target) {
+    if (!str) return false;
+    const targetLower = String(target).toLowerCase();
+    return String(str).split(',').map(function (s) { return s.trim().toLowerCase(); }).indexOf(targetLower) !== -1;
+  }
+
+  async function callApi(payload) {
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(Object.assign({ email: currentUser.email, password: currentUser.password }, payload))
+    });
+    return res.json();
+  }
+
+  async function login() {
+    const email = document.getElementById('loginEmail').value.trim();
+    const password = document.getElementById('loginPassword').value;
+    clearMessage();
+    if (!email || !password) { showMessage('Please enter email and password.', 'error'); return; }
+
+    const loginBtn = document.getElementById('loginBtn');
+    loginBtn.disabled = true; loginBtn.textContent = 'Logging in...';
+    try {
+      const data = await callApi({ action: 'login', email: email, password: password });
+      if (!data.success) { showMessage(data.message || 'Login failed.', 'error'); return; }
+      currentUser = { email: email, password: password };
+      document.getElementById('loginSection').style.display = 'none';
+
+      if (!hasCommaValueClient(data.role, 'Approver')) {
+        document.getElementById('notAuthorizedNotice').style.display = 'block';
+        return;
+      }
+      document.getElementById('dashboardSection').style.display = 'block';
+      const bar = document.getElementById('loggedInBar');
+      bar.style.display = 'block';
+      bar.innerHTML = 'Logged in as <b>' + escapeHtml(data.name) + '</b> (Approver)' +
+        '<button id="logoutBtn" onclick="Shell.logout()">Log out</button>';
+      loadPending();
+    } catch (err) {
+      showMessage('Could not reach the server. Check your connection or the Apps Script URL.', 'error');
+    } finally {
+      loginBtn.disabled = false; loginBtn.textContent = 'Log In';
+    }
+  }
+
+  function groupBySlip(items) {
+    const bySlip = {};
+    items.forEach(function (it) {
+      if (!bySlip[it.slipId]) bySlip[it.slipId] = { slipId: it.slipId, area: it.area, raisedByName: it.raisedByName, slipDate: it.slipDate, items: [] };
+      bySlip[it.slipId].items.push(it);
+    });
+    return Object.values(bySlip).sort(function (a, b) { return a.slipId.localeCompare(b.slipId); });
+  }
+
+  async function loadPending() {
+    clearMessage();
+    document.getElementById('loadingState').style.display = 'block';
+    document.getElementById('emptyState').style.display = 'none';
+    document.getElementById('slipsContainer').innerHTML = '';
+    try {
+      const data = await callApi({ action: 'getPendingSanctions' });
+      document.getElementById('loadingState').style.display = 'none';
+      if (!data.success) { showMessage(data.message || 'Could not load pending sanctions.', 'error'); return; }
+
+      const slips = groupBySlip(data.items);
+      if (slips.length === 0) { document.getElementById('emptyState').style.display = 'block'; return; }
+      renderSlips(slips);
+    } catch (err) {
+      document.getElementById('loadingState').style.display = 'none';
+      showMessage('Could not reach the server. Check your connection or the Apps Script URL.', 'error');
+    }
+  }
+
+  function renderSlips(slips) {
+    const container = document.getElementById('slipsContainer');
+    container.innerHTML = slips.map(function (slip) {
+      const rows = slip.items.map(function (it) {
+        return '<tr data-detail-id="' + escapeHtml(it.detailId) + '">' +
+          '<td>' + escapeHtml(it.ucsCode) + '</td>' +
+          '<td>' + escapeHtml(it.itemDescription) + '</td>' +
+          '<td>' + escapeHtml(it.unit) + '</td>' +
+          '<td' + (Number(it.qtyApproved) > Number(it.availableAtPlanning) ? ' style="color:#c0392b;font-weight:600;"' : '') + '>' + it.availableAtPlanning + '</td>' +
+          '<td>' + it.qtyApproved + '</td>' +
+          '<td><input type="number" min="0" step="1" max="' + it.qtyApproved + '" value="' + it.qtyApproved + '" ' +
+            'data-max="' + it.qtyApproved + '" oninput="Page.validateQtyInput(this)"><div class="qtyErr" style="display:none;"></div></td>' +
+          '</tr>';
+      }).join('');
+      return '<div class="slipCard" data-slip-id="' + escapeHtml(slip.slipId) + '">' +
+        '<div class="slipCardHeader"><span class="slipId">' + escapeHtml(slip.slipId) + '</span>' +
+        '<span class="meta">Area: ' + escapeHtml(slip.area) + ' &nbsp;|&nbsp; Raised by ' + escapeHtml(slip.raisedByName) + ' on ' + escapeHtml(slip.slipDate) + '</span></div>' +
+        '<div class="tableWrap"><table><thead><tr><th>UCS Code</th><th>Description</th><th>Unit</th><th>Available at Planning</th><th>Approved</th><th>Sanctioned</th></tr></thead>' +
+        '<tbody>' + rows + '</tbody></table></div>' +
+        '<div class="slipCardFooter"><span class="cardMessage"></span>' +
+        '<button onclick="Page.sanctionSlip(this)">Sanction Slip</button></div></div>';
+    }).join('');
+  }
+
+  function validateQtyInput(input) {
+    const max = Number(input.getAttribute('data-max'));
+    const errEl = input.nextElementSibling;
+    const val = input.value;
+    const n = Number(val);
+    if (val === '' || !Number.isInteger(n) || n < 0) {
+      errEl.textContent = 'Must be zero or a positive whole number.'; errEl.style.display = 'block';
+      return false;
+    }
+    if (n > max) {
+      errEl.textContent = 'Cannot exceed ' + max + '.'; errEl.style.display = 'block';
+      return false;
+    }
+    errEl.style.display = 'none';
+    return true;
+  }
+
+  async function sanctionSlip(btn) {
+    const card = btn.closest('.slipCard');
+    const slipId = card.getAttribute('data-slip-id');
+    const cardMsg = card.querySelector('.cardMessage');
+    cardMsg.textContent = '';
+
+    const rows = card.querySelectorAll('tbody tr');
+    const items = [];
+    let allValid = true;
+    rows.forEach(function (row) {
+      const input = row.querySelector('input[type="number"]');
+      if (!validateQtyInput(input)) allValid = false;
+      items.push({ detailId: row.getAttribute('data-detail-id'), qtySanctioned: Number(input.value) });
+    });
+    if (!allValid) { cardMsg.textContent = 'Fix the highlighted quantities first.'; return; }
+
+    btn.disabled = true;
+    const original = btn.textContent;
+    btn.textContent = 'Sanctioning...';
+    try {
+      const data = await callApi({ action: 'sanctionRequisition', slipId: slipId, items: items });
+      if (data.success) {
+        showMessage(data.message, 'success');
+        card.remove();
+        if (!document.querySelector('.slipCard')) document.getElementById('emptyState').style.display = 'block';
+      } else {
+        cardMsg.textContent = data.message || 'Could not sanction this slip.';
+      }
+    } catch (err) {
+      cardMsg.textContent = 'Could not reach the server.';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = original;
+    }
+  }
+
+  window.Page = {
+    callApi: callApi,
+    clearMessage: clearMessage,
+    escapeHtml: escapeHtml,
+    groupBySlip: groupBySlip,
+    hasCommaValueClient: hasCommaValueClient,
+    loadPending: loadPending,
+    login: login,
+    renderSlips: renderSlips,
+    sanctionSlip: sanctionSlip,
+    showMessage: showMessage,
+    validateQtyInput: validateQtyInput
+  };
+
+  // ---- shell auto-login: fill the page's OWN hidden login form and
+  // submit it through the page's OWN unmodified login() function, so every
+  // page's tested role-check / UI-reveal logic runs exactly as before. ----
+  document.getElementById('loginEmail').value = Shell.getUser().email;
+  document.getElementById('loginPassword').value = Shell.getUser().password;
+  login();
+
+})();
+</script>

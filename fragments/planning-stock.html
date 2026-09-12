@@ -1,0 +1,824 @@
+<style>
+
+  h2 { margin-bottom: 4px; }
+  .subtitle { color: #666; font-size: 13px; margin-bottom: 24px; }
+  label { display: block; font-weight: bold; margin-top: 14px; margin-bottom: 4px; font-size: 14px; }
+  input, select { padding: 8px; box-sizing: border-box; font-size: 14px; border: 1px solid #ccc; border-radius: 4px; }
+  button { padding: 8px 14px; font-size: 14px; border: none; border-radius: 4px; background: #1a73e8; color: white; cursor: pointer; }
+  button.secondary { background: #5f6368; }
+  button.small { padding: 4px 10px; font-size: 12px; }
+  button:disabled { background: #999; cursor: not-allowed; }
+  #message { margin-top: 14px; padding: 10px; border-radius: 4px; font-size: 14px; display: none; }
+  .success { background: #e6f4ea; color: #1e7e34; display: block !important; }
+  .error { background: #fce8e6; color: #c5221f; display: block !important; }
+  #loggedInBar { display:none; font-size: 13px; color:#555; margin-bottom: 10px; }
+  #logoutBtn { width:auto; padding:4px 10px; font-size:12px; background:#666; margin-left:8px; }
+  mark { background: #fff3a0; padding: 0 1px; border-radius: 2px; }
+
+  /* ---- Status strip ---- */
+  #statusStrip { display:flex; flex-wrap:wrap; align-items:center; gap:14px; font-size:12px; color:#666; margin-bottom:14px; }
+  #statusStrip .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:#1e7e34; margin-right:5px; vertical-align:middle; }
+  #statusStrip .dot.stale { background:#c5221f; }
+  #summaryText { font-size:12px; color:#666; }
+
+  /* ---- Filters ---- */
+  #filterBar { display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; margin-bottom: 16px; }
+  #filterBar > div { display:flex; flex-direction:column; }
+  #filterBar label { margin-top:0; }
+  #searchBox { width: 260px; }
+  #filterBar button { height: 36px; }
+  #zeroOnlyWrap { flex-direction:row !important; align-items:center; gap:6px; }
+  #zeroOnlyWrap label { margin:0; font-weight:normal; font-size:13px; }
+
+  /* ---- Table ---- */
+  .tableWrap { overflow-x: auto; border: 1px solid #e0e0e0; border-radius: 6px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { padding: 8px 10px; border-bottom: 1px solid #eee; text-align: left; }
+  td.num, th.num { text-align: right; white-space: nowrap; }
+  th { background: #f8f9fa; font-weight: bold; position: sticky; top: 0; cursor: pointer; user-select: none; white-space: nowrap; }
+  th.num { cursor: pointer; }
+  th .sortArrow { font-size: 10px; color: #1a73e8; margin-left: 3px; }
+  tr:hover { background: #fafbff; }
+  tr.zeroBalance td { color: #c5221f; }
+  tr.zeroBalance td.num.balanceCol { font-weight: bold; }
+  .code { font-family: 'Courier New', monospace; font-size: 12px; }
+  #emptyState, #loadingRow { padding: 24px; text-align: center; color: #666; font-size: 14px; display:none; }
+  .planningBadge { display:inline-block; background:#e8f0fe; color:#1a73e8; font-size:11px; font-weight:bold; padding:2px 8px; border-radius:10px; margin-left:8px; vertical-align:middle; }
+  .clickableCode { color: #1a73e8; cursor: pointer; text-decoration: underline; text-decoration-style: dotted; }
+  .clickableCode:hover { color: #0b47a1; }
+
+  /* ---- History drill-down modal ---- */
+  #historyOverlay { display:none; position: fixed; top:0; left:0; right:0; bottom:0; background: rgba(0,0,0,0.45); align-items: flex-start; justify-content: center; padding: 30px 16px; z-index: 20; overflow-y: auto; }
+  #historyCard { background: white; border-radius: 10px; max-width: 900px; width: 100%; padding: 22px; box-shadow: 0 8px 30px rgba(0,0,0,0.3); }
+  #historyCard .historyHead { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom: 10px; }
+  #historyCode { font-family: 'Courier New', monospace; font-weight: bold; font-size: 17px; color: #1a73e8; }
+  #historyDesc { font-size: 13px; color: #555; margin-top:2px; }
+  #historyCloseBtn { background:#666; padding:6px 12px; }
+
+  #historyFilterBar { display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; margin: 14px 0; padding: 12px; background:#f8f9fa; border-radius:6px; }
+  #historyFilterBar > div { display:flex; flex-direction:column; }
+  #historyFilterBar label { font-size:12px; margin:0 0 4px 0; }
+  #historyFilterBar select, #historyFilterBar input { font-size:13px; padding:6px; }
+  #historyFilterBar button { height:32px; font-size:12px; }
+
+  #chartWrap { overflow-x:auto; border:1px solid #eee; border-radius:6px; padding:10px 4px; margin-bottom:10px; }
+  #chartLegend { font-size:12px; color:#555; margin-bottom:6px; }
+  #chartLegend .swatch { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:4px; vertical-align:middle; }
+  #rangeTotals { font-size:12px; color:#444; margin-bottom:12px; }
+
+  #historyTabs { display:flex; gap:4px; border-bottom: 2px solid #eee; margin-bottom: 10px; flex-wrap:wrap; }
+  .historyTabBtn { background:none; color:#555; border-radius:6px 6px 0 0; padding:8px 12px; font-size:13px; }
+  .historyTabBtn.active { background:#e8f0fe; color:#1a73e8; font-weight:bold; }
+  #historyTabContent { min-height: 80px; }
+  #historyTabContent table { font-size:12px; }
+  #historyExportBtn { margin-top: 8px; }
+  .naNotice { padding: 16px; text-align:center; color:#888; font-size:13px; background:#fafafa; border-radius:6px; }
+  #historyLoading, #historyError { padding: 20px; text-align:center; font-size: 13px; }
+  #historyError { color:#c5221f; }
+
+</style>
+
+
+<h2>Planning Stock Dashboard</h2>
+<div class="subtitle">GitHub_SMS-3 Stores Module &mdash; live Received / Released / Balance for every UCS Code at Planning</div>
+
+<!-- ====== LOGIN SECTION ====== -->
+<div id="loginSection" style="display:none">
+  <label for="loginEmail">Email</label>
+  <input type="email" id="loginEmail" placeholder="you@test.com" style="width:100%;">
+
+  <label for="loginPassword">Password</label>
+  <input type="password" id="loginPassword" placeholder="Password" style="width:100%;">
+
+  <button id="loginBtn" onclick="Page.login()" style="margin-top:20px; width:100%;">Log In</button>
+</div>
+
+<!-- ====== DASHBOARD SECTION ====== -->
+<div id="dashboardSection" style="display:none;">
+  <div id="loggedInBar"></div>
+
+  <div id="statusStrip">
+    <span><span class="dot" id="liveDot"></span><span id="liveText">Live</span></span>
+    <span>Last updated: <b id="lastUpdated">&mdash;</b></span>
+    <span id="summaryText"></span>
+  </div>
+
+  <div id="filterBar">
+    <div>
+      <label for="searchBox">Search (UCS Code or description)</label>
+      <input type="text" id="searchBox" placeholder="Type any part of either..." oninput="Page.onSearchInput()">
+    </div>
+    <div id="zeroOnlyWrap">
+      <input type="checkbox" id="zeroOnlyCheck" onchange="currentPage=1; Page.renderTable();">
+      <label for="zeroOnlyCheck">Zero / negative balance only</label>
+    </div>
+    <div>
+      <button type="button" class="secondary" onclick="Page.clearFilters()">Clear filters</button>
+    </div>
+    <div>
+      <button type="button" onclick="Page.loadStock(true)">Refresh Now</button>
+    </div>
+    <div id="exportCsvWrap" style="display:none;">
+      <button type="button" class="secondary" onclick="Page.exportMainCsv()">Export CSV</button>
+    </div>
+    <div>
+      <button type="button" class="secondary small" onclick="Page.forceSnapshotRefresh()" id="snapshotBtn">Also update spreadsheet snapshot</button>
+    </div>
+  </div>
+
+  <div class="tableWrap">
+    <table>
+      <thead>
+        <tr>
+          <th onclick="Page.setSort('ucsCode')">UCS Code<span class="sortArrow" id="arrow-ucsCode"></span></th>
+          <th onclick="Page.setSort('itemDescription')">Item Description<span class="sortArrow" id="arrow-itemDescription"></span></th>
+          <th>Unit</th>
+          <th class="num" onclick="Page.setSort('received')">Received<span class="sortArrow" id="arrow-received"></span></th>
+          <th class="num" onclick="Page.setSort('released')">Released<span class="sortArrow" id="arrow-released"></span></th>
+          <th class="num" onclick="Page.setSort('balance')">Balance<span class="sortArrow" id="arrow-balance"></span></th>
+        </tr>
+      </thead>
+      <tbody id="tableBody"></tbody>
+    </table>
+    <div id="loadingRow">Loading&hellip;</div>
+    <div id="emptyState">No UCS Codes match the current filters.</div>
+  </div>
+
+  <div id="pagerBar" style="display:flex; align-items:center; gap:10px; margin-top:10px; font-size:13px; color:#555;">
+    <button type="button" class="secondary small" onclick="Page.prevPage()" id="prevPageBtn">&larr; Prev</button>
+    <span id="pageIndicator">Page 1 of 1</span>
+    <button type="button" class="secondary small" onclick="Page.nextPage()" id="nextPageBtn">Next &rarr;</button>
+  </div>
+</div>
+
+<div id="message"></div>
+
+<!-- ====== HISTORY DRILL-DOWN MODAL (Planning-area staff only) ====== -->
+<div id="historyOverlay" onclick="if(event.target===this) Page.closeHistory()">
+  <div id="historyCard">
+    <div class="historyHead">
+      <div>
+        <div id="historyCode"></div>
+        <div id="historyDesc"></div>
+      </div>
+      <button type="button" id="historyCloseBtn" onclick="Page.closeHistory()">Close</button>
+    </div>
+
+    <div id="historyFilterBar">
+      <div>
+        <label for="historyAreaSelect">Area (release side only)</label>
+        <select id="historyAreaSelect">
+          <option value="">All areas</option>
+        </select>
+      </div>
+      <div>
+        <label for="historyFromDate">From</label>
+        <input type="date" id="historyFromDate">
+      </div>
+      <div>
+        <label for="historyToDate">To</label>
+        <input type="date" id="historyToDate">
+      </div>
+      <div>
+        <button type="button" onclick="Page.applyHistoryFilters()">Apply</button>
+      </div>
+      <div>
+        <button type="button" class="secondary" onclick="Page.clearHistoryFilters()">Clear</button>
+      </div>
+    </div>
+
+    <div id="historyLoading" style="display:none;">Loading history&hellip;</div>
+    <div id="historyError" style="display:none;"></div>
+
+    <div id="historyBody" style="display:none;">
+      <div id="chartLegend">
+        <span class="swatch" style="background:#1e7e34;"></span>Received (Z04)
+        &nbsp;&nbsp;<span class="swatch" style="background:#e07b00;"></span>Released (201 + Issues)
+        &nbsp;&nbsp;<span style="color:#888;">&mdash; monthly, per current filters</span>
+      </div>
+      <div id="chartWrap"></div>
+      <div id="rangeTotals"></div>
+
+      <div id="historyTabs"></div>
+      <div id="historyTabContent"></div>
+      <button type="button" class="secondary small" id="historyExportBtn" onclick="Page.exportHistoryTabCsv()">Export this tab to CSV</button>
+    </div>
+  </div>
+</div>
+
+
+
+
+<script>
+(function(){
+
+  // TODO: paste your deployed Apps Script Web App URL here (same one used by the other pages)
+  const APPS_SCRIPT_URL = Shell.APPS_SCRIPT_URL;
+
+  const POLL_INTERVAL_MS = 8000; // 5-10s "near-real-time" polling, per project's decided architecture
+
+  let currentUser = { email: '', password: '' };
+  let allItems = [];          // full list from getPlanningStockList, cached and re-filtered client-side
+  const PAGE_SIZE = 50;
+  let currentPage = 1;
+  let sortKey = 'ucsCode';
+  let sortDir = 'asc';        // 'asc' | 'desc'
+  let pollTimer = null;
+  let listRequestInFlight = null; // guard against an in-flight request being overtaken by a newer one
+  let lastRenderedRows = [];  // mirrors the table currently on screen, for CSV export
+  let isPlanningStaff = false; // client-side UI gate only -- the real gate is server-side on getUCSCodeHistory
+
+  // History modal state
+  let historyUcsCode = null;
+  let historyData = null;     // last successful getUCSCodeHistory response
+  let historyActiveTab = 'sto';
+  const HISTORY_TABS = [
+    { key: 'sto', label: 'STOs' },
+    { key: 'z04', label: 'Z04s' },
+    { key: 's201', label: '201s' },
+    { key: 'issues', label: 'Planning Issue Sheet' },
+    { key: 'localIssue', label: 'Local Issue Sheet' }
+  ];
+
+  /** Mirrors Code.gs's hasCommaValue() -- splits a comma-separated field and checks membership. */
+  // Case-insensitive, mirroring Code.gs's hasCommaValue() exactly -- this was
+  // previously a literal case-sensitive check that silently rejected every
+  // Planning user once Authorized_Area was standardized to 'PLANNING' in the
+  // sheet (isPlanningStaff, the Planning badge, clickable UCS Codes, and CSV
+  // export were all gated on this and quietly disabled for everyone).
+  function hasCommaValue(str, target) {
+    if (!str) return false;
+    const targetLower = String(target).toLowerCase();
+    return String(str).split(',').map(function (s) { return s.trim().toLowerCase(); }).indexOf(targetLower) !== -1;
+  }
+
+  function showMessage(text, type) {
+    const el = document.getElementById('message');
+    el.textContent = text;
+    el.className = type;
+  }
+  function clearMessage() {
+    const el = document.getElementById('message');
+    el.textContent = '';
+    el.className = '';
+  }
+
+  async function callApi(payload) {
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(Object.assign({ email: currentUser.email, password: currentUser.password }, payload))
+    });
+    return res.json();
+  }
+
+  function escapeHtml(str) {
+    return String(str == null ? '' : str)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function highlight(text, tokens) {
+    let out = escapeHtml(text);
+    tokens.forEach(function (t) {
+      if (!t) return;
+      const re = new RegExp('(' + t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'ig');
+      out = out.replace(re, '<mark>$1</mark>');
+    });
+    return out;
+  }
+
+  // ====== LOGIN ======
+  async function login() {
+    const email = document.getElementById('loginEmail').value.trim();
+    const password = document.getElementById('loginPassword').value;
+    clearMessage();
+
+    if (!email || !password) {
+      showMessage('Please enter email and password.', 'error');
+      return;
+    }
+
+    const loginBtn = document.getElementById('loginBtn');
+    loginBtn.disabled = true;
+    loginBtn.textContent = 'Logging in...';
+
+    try {
+      const data = await callApi({ action: 'login', email, password });
+
+      if (!data.success) {
+        showMessage(data.message || 'Login failed.', 'error');
+        return;
+      }
+
+      currentUser = { email, password };
+      isPlanningStaff = hasCommaValue(data.authorizedArea, 'Planning');
+
+      document.getElementById('loginSection').style.display = 'none';
+      document.getElementById('dashboardSection').style.display = 'block';
+      document.getElementById('exportCsvWrap').style.display = isPlanningStaff ? 'flex' : 'none';
+
+      const bar = document.getElementById('loggedInBar');
+      bar.style.display = 'block';
+      bar.innerHTML = 'Logged in as <b>' + escapeHtml(data.name) + '</b> (' + escapeHtml(data.role) + ')' +
+        (isPlanningStaff ? '<span class="planningBadge">Planning Staff \u2014 history &amp; export unlocked</span>' : '') +
+        '<button id="logoutBtn" onclick="Shell.logout()">Log out</button>';
+
+      loadStock(true);
+      pollTimer = setInterval(function () { loadStock(false); }, POLL_INTERVAL_MS); Shell.registerInterval(pollTimer);
+    } catch (err) {
+      showMessage('Could not reach the server. Check your connection or the Apps Script URL.', 'error');
+    } finally {
+      loginBtn.disabled = false;
+      loginBtn.textContent = 'Log In';
+    }
+  }
+
+  function logout() {
+    if (pollTimer) clearInterval(pollTimer);
+    location.reload();
+  }
+
+  // ====== LOAD (polled + manual) ======
+  async function loadStock(showSpinner) {
+    const dot = document.getElementById('liveDot');
+    const liveText = document.getElementById('liveText');
+
+    if (showSpinner) {
+      document.getElementById('loadingRow').style.display = allItems.length ? 'none' : 'block';
+    }
+
+    const thisRequest = Symbol();
+    listRequestInFlight = thisRequest;
+
+    try {
+      const data = await callApi({ action: 'getPlanningStockList' });
+      if (listRequestInFlight !== thisRequest) return; // superseded by a newer poll
+
+      document.getElementById('loadingRow').style.display = 'none';
+
+      if (!data.success) {
+        dot.classList.add('stale');
+        liveText.textContent = 'Update failed';
+        showMessage(data.message || 'Could not load Planning Stock.', 'error');
+        return;
+      }
+
+      allItems = data.items || [];
+      dot.classList.remove('stale');
+      liveText.textContent = 'Live';
+      document.getElementById('lastUpdated').textContent = new Date().toLocaleTimeString();
+      clearMessage();
+      renderTable();
+    } catch (err) {
+      if (listRequestInFlight !== thisRequest) return;
+      document.getElementById('loadingRow').style.display = 'none';
+      dot.classList.add('stale');
+      liveText.textContent = 'Connection issue';
+      // Keep the last-known table showing; polling will retry on its own, so no need to escalate this to a blocking error every 8s.
+    }
+  }
+
+  async function forceSnapshotRefresh() {
+    const btn = document.getElementById('snapshotBtn');
+    btn.disabled = true;
+    btn.textContent = 'Updating snapshot...';
+    try {
+      const data = await callApi({ action: 'refreshPlanningStock' });
+      if (data.success) {
+        showMessage('Spreadsheet snapshot (PLNG_STOCK sheet) updated. This dashboard was already live and does not need it, but it keeps the sheet itself current for anyone browsing it directly.', 'success');
+      } else {
+        showMessage(data.message || 'Could not update the spreadsheet snapshot.', 'error');
+      }
+    } catch (err) {
+      showMessage('Could not reach the server. Check your connection or the Apps Script URL.', 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Also update spreadsheet snapshot';
+    }
+  }
+
+  // ====== FILTER / SORT / RENDER (all client-side over the cached list) ======
+  let searchDebounceTimer = null;
+  function onSearchInput() {
+    clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(function () { currentPage = 1; renderTable(); }, 150);
+  }
+
+  function clearFilters() {
+    document.getElementById('searchBox').value = '';
+    document.getElementById('zeroOnlyCheck').checked = false;
+    currentPage = 1;
+    renderTable();
+  }
+
+  function setSort(key) {
+    if (sortKey === key) {
+      sortDir = (sortDir === 'asc') ? 'desc' : 'asc';
+    } else {
+      sortKey = key;
+      sortDir = 'asc';
+    }
+    currentPage = 1;
+    renderTable();
+  }
+
+  function prevPage() {
+    if (currentPage > 1) { currentPage--; renderTable(); }
+  }
+  function nextPage() {
+    const totalPages = Math.max(1, Math.ceil(lastRenderedRows.length / PAGE_SIZE));
+    if (currentPage < totalPages) { currentPage++; renderTable(); }
+  }
+
+  function updateSortArrows() {
+    ['ucsCode', 'itemDescription', 'received', 'released', 'balance'].forEach(function (k) {
+      document.getElementById('arrow-' + k).textContent = '';
+    });
+    document.getElementById('arrow-' + sortKey).textContent = (sortDir === 'asc') ? '\u25B2' : '\u25BC';
+  }
+
+  function renderTable() {
+    updateSortArrows();
+
+    const raw = document.getElementById('searchBox').value.trim().toLowerCase();
+    const tokens = raw ? raw.split(/\s+/).filter(Boolean) : [];
+    const zeroOnly = document.getElementById('zeroOnlyCheck').checked;
+
+    let rows = allItems.filter(function (m) {
+      if (zeroOnly && Number(m.balance) > 0) return false;
+      if (!tokens.length) return true;
+      const haystack = (m.ucsCode + ' ' + m.itemDescription).toLowerCase();
+      return tokens.every(function (t) { return haystack.indexOf(t) !== -1; });
+    });
+
+    rows.sort(function (a, b) {
+      let av = a[sortKey], bv = b[sortKey];
+      if (sortKey === 'received' || sortKey === 'released' || sortKey === 'balance') {
+        av = Number(av) || 0; bv = Number(bv) || 0;
+        return sortDir === 'asc' ? av - bv : bv - av;
+      }
+      av = String(av || '').toLowerCase(); bv = String(bv || '').toLowerCase();
+      if (av < bv) return sortDir === 'asc' ? -1 : 1;
+      if (av > bv) return sortDir === 'asc' ? 1 : -1;
+      return 0;
+    });
+
+    const tbody = document.getElementById('tableBody');
+    const emptyEl = document.getElementById('emptyState');
+
+    lastRenderedRows = rows; // FULL filtered/sorted set -- CSV export uses this, not just the visible page
+
+    const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+    if (currentPage > totalPages) currentPage = totalPages;
+    const pageStart = (currentPage - 1) * PAGE_SIZE;
+    const pageRows = rows.slice(pageStart, pageStart + PAGE_SIZE);
+
+    document.getElementById('pageIndicator').textContent = 'Page ' + currentPage + ' of ' + totalPages;
+    document.getElementById('prevPageBtn').disabled = currentPage <= 1;
+    document.getElementById('nextPageBtn').disabled = currentPage >= totalPages;
+
+    if (rows.length === 0) {
+      tbody.innerHTML = '';
+      emptyEl.style.display = 'block';
+    } else {
+      emptyEl.style.display = 'none';
+      tbody.innerHTML = pageRows.map(function (m) {
+        const bal = Number(m.balance) || 0;
+        const rowClass = bal <= 0 ? 'zeroBalance' : '';
+        const codeCell = isPlanningStaff
+          ? '<span class="clickableCode" onclick="Page.openHistory(\'' + escapeHtml(m.ucsCode).replace(/'/g, "\\'") + '\')" title="Click for full history">' + highlight(m.ucsCode, tokens) + '</span>'
+          : highlight(m.ucsCode, tokens);
+        return '<tr class="' + rowClass + '">' +
+          '<td class="code">' + codeCell + '</td>' +
+          '<td>' + highlight(m.itemDescription, tokens) + '</td>' +
+          '<td>' + escapeHtml(m.unit) + '</td>' +
+          '<td class="num">' + Number(m.received || 0).toLocaleString() + '</td>' +
+          '<td class="num">' + Number(m.released || 0).toLocaleString() + '</td>' +
+          '<td class="num balanceCol">' + bal.toLocaleString() + '</td>' +
+          '</tr>';
+      }).join('');
+    }
+
+    const zeroCount = allItems.filter(function (m) { return Number(m.balance) <= 0; }).length;
+    document.getElementById('summaryText').textContent =
+      rows.length + ' of ' + allItems.length + ' UCS Codes shown \u2014 ' + zeroCount + ' at zero/negative balance';
+  }
+
+  // ====== HISTORY DRILL-DOWN MODAL (Planning-area staff only, server-enforced) ======
+
+  function openHistory(ucsCode) {
+    if (!isPlanningStaff) return; // defensive -- codes aren't clickable otherwise, but never trust the DOM alone
+    historyUcsCode = ucsCode;
+    historyActiveTab = 'sto';
+    document.getElementById('historyAreaSelect').innerHTML = '<option value="">All areas</option>';
+    document.getElementById('historyFromDate').value = '';
+    document.getElementById('historyToDate').value = '';
+    document.getElementById('historyOverlay').style.display = 'flex';
+    document.getElementById('historyBody').style.display = 'none';
+    document.getElementById('historyError').style.display = 'none';
+    document.getElementById('historyCode').textContent = ucsCode;
+    document.getElementById('historyDesc').textContent = '';
+    fetchHistory();
+  }
+
+  function closeHistory() {
+    document.getElementById('historyOverlay').style.display = 'none';
+    historyUcsCode = null;
+    historyData = null;
+  }
+
+  function applyHistoryFilters() {
+    const from = document.getElementById('historyFromDate').value;
+    const to = document.getElementById('historyToDate').value;
+    if (from && to && from > to) {
+      showMessage('"From" date cannot be after "To" date.', 'error');
+      return;
+    }
+    fetchHistory();
+  }
+
+  function clearHistoryFilters() {
+    document.getElementById('historyAreaSelect').value = '';
+    document.getElementById('historyFromDate').value = '';
+    document.getElementById('historyToDate').value = '';
+    fetchHistory();
+  }
+
+  async function fetchHistory() {
+    if (!historyUcsCode) return;
+    document.getElementById('historyLoading').style.display = 'block';
+    document.getElementById('historyError').style.display = 'none';
+    document.getElementById('historyBody').style.display = 'none';
+
+    const payload = { action: 'getUCSCodeHistory', ucsCode: historyUcsCode };
+    const area = document.getElementById('historyAreaSelect').value;
+    const from = document.getElementById('historyFromDate').value;
+    const to = document.getElementById('historyToDate').value;
+    if (area) payload.area = area;
+    if (from) payload.fromDate = from;
+    if (to) payload.toDate = to;
+
+    try {
+      const data = await callApi(payload);
+      document.getElementById('historyLoading').style.display = 'none';
+
+      if (!data.success) {
+        const errEl = document.getElementById('historyError');
+        errEl.textContent = data.message || 'Could not load history for this UCS Code.';
+        errEl.style.display = 'block';
+        return;
+      }
+
+      historyData = data;
+      document.getElementById('historyDesc').textContent = (data.itemDescription || '') + (data.unit ? ' (' + data.unit + ')' : '');
+      populateAreaOptions(data);
+      renderHistoryBody(data);
+      document.getElementById('historyBody').style.display = 'block';
+    } catch (err) {
+      document.getElementById('historyLoading').style.display = 'none';
+      const errEl = document.getElementById('historyError');
+      errEl.textContent = 'Could not reach the server. Check your connection or the Apps Script URL.';
+      errEl.style.display = 'block';
+    }
+  }
+
+  /** Builds the area dropdown from whatever areas actually appear in the release-side data -- avoids a second endpoint/gate just for a filter list. */
+  function populateAreaOptions(data) {
+    const select = document.getElementById('historyAreaSelect');
+    const current = select.value;
+    const areas = {};
+    (data.s201 || []).forEach(function (r) { if (r.releasedToArea) areas[r.releasedToArea] = true; });
+    (data.issues || []).forEach(function (r) { if (r.area) areas[r.area] = true; });
+    const sorted = Object.keys(areas).sort();
+    select.innerHTML = '<option value="">All areas</option>' +
+      sorted.map(function (a) { return '<option value="' + escapeHtml(a) + '">' + escapeHtml(a) + '</option>'; }).join('');
+    if (sorted.indexOf(current) !== -1) select.value = current;
+  }
+
+  function renderHistoryBody(data) {
+    document.getElementById('chartWrap').innerHTML = buildChartSvg(data.chart);
+
+    const totalReceived = (data.z04 || []).reduce(function (s, r) { return s + (Number(r.qtyReceived) || 0); }, 0);
+    const totalReleased201 = (data.s201 || []).reduce(function (s, r) { return s + (Number(r.qtyReleased) || 0); }, 0);
+    const totalIssued = (data.issues || []).reduce(function (s, r) { return s + (Number(r.issueQty) || 0); }, 0);
+    document.getElementById('rangeTotals').innerHTML =
+      'In current filters &mdash; Received: <b>' + totalReceived.toLocaleString() + '</b> &nbsp;|&nbsp; ' +
+      'Released (201): <b>' + totalReleased201.toLocaleString() + '</b> &nbsp;|&nbsp; ' +
+      'Issued to shop: <b>' + totalIssued.toLocaleString() + '</b>';
+
+    renderHistoryTabs(data);
+    renderHistoryTabContent(data);
+  }
+
+  function renderHistoryTabs(data) {
+    const counts = {
+      sto: (data.sto || []).length,
+      z04: (data.z04 || []).length,
+      s201: (data.s201 || []).length,
+      issues: (data.issues || []).length,
+      localIssue: data.localIssue && data.localIssue.available ? (data.localIssue.rows || []).length : null
+    };
+    document.getElementById('historyTabs').innerHTML = HISTORY_TABS.map(function (t) {
+      const activeClass = (t.key === historyActiveTab) ? ' active' : '';
+      const countLabel = counts[t.key] === null ? '' : ' (' + counts[t.key] + ')';
+      return '<button type="button" class="historyTabBtn' + activeClass + '" onclick="Page.switchHistoryTab(\'' + t.key + '\')">' + t.label + countLabel + '</button>';
+    }).join('');
+  }
+
+  function switchHistoryTab(key) {
+    historyActiveTab = key;
+    if (historyData) {
+      renderHistoryTabs(historyData);
+      renderHistoryTabContent(historyData);
+    }
+  }
+
+  const TAB_COLUMNS = {
+    sto: [
+      { key: 'stoNo', label: 'STO No' }, { key: 'stoDate', label: 'STO Date' },
+      { key: 'qty', label: 'Qty' }, { key: 'unit', label: 'Unit' },
+      { key: 'receivedQty', label: 'Received Qty' }, { key: 'receivedDate', label: 'Received Date' },
+      { key: 'referencePO', label: 'Reference PO' }
+    ],
+    z04: [
+      { key: 'stoNo', label: 'STO No' }, { key: 'dateOfReceipt', label: 'Date of Receipt' },
+      { key: 'qtyReceived', label: 'Qty Received' }, { key: 'matDocNo', label: 'Mat Doc No' },
+      { key: 'receivedBy', label: 'Received By' }
+    ],
+    s201: [
+      { key: 'stoNo', label: 'STO No' }, { key: 'qtyReleased', label: 'Qty Released' },
+      { key: 'matDocNo', label: 'Mat Doc No' }, { key: 'dateOfRelease', label: 'Date of Release' },
+      { key: 'releasedToArea', label: 'Released To Area' }
+    ],
+    issues: [
+      { key: 'issueDate', label: 'Issue Date' }, { key: 'issueQty', label: 'Issue Qty' },
+      { key: 'issuedTo', label: 'Issued To' }, { key: 'area', label: 'Area' },
+      { key: 'reqSlipNumber', label: 'Req Slip Number' }
+    ],
+    localIssue: [
+      { key: 'issueDate', label: 'Issue Date' }, { key: 'area', label: 'Area' },
+      { key: 'consumedQty', label: 'Consumed Qty' }, { key: 'issuedTo', label: 'Issued To' },
+      { key: 'remarks', label: 'Remarks' }, { key: 'issuedByName', label: 'Issued By' }
+    ]
+  };
+
+  function renderHistoryTabContent(data) {
+    const container = document.getElementById('historyTabContent');
+    const key = historyActiveTab;
+
+    if (key === 'localIssue' && (!data.localIssue || !data.localIssue.available)) {
+      // Genuinely unavailable (shouldn't happen now that Local Issue is live,
+      // but kept as a safety fallback rather than assuming the shape).
+      container.innerHTML = '<div class="naNotice">Local Issue history is not available right now.</div>';
+      document.getElementById('historyExportBtn').style.display = 'none';
+      return;
+    }
+
+    const rows = key === 'localIssue' ? (data.localIssue.rows || []) : (data[key] || []);
+    const columns = TAB_COLUMNS[key];
+    document.getElementById('historyExportBtn').style.display = rows.length ? 'inline-block' : 'none';
+
+    if (rows.length === 0) {
+      container.innerHTML = '<div class="naNotice">No ' + HISTORY_TABS.find(function (t) { return t.key === key; }).label + ' entries for this UCS Code under the current filters.</div>';
+      return;
+    }
+
+    container.innerHTML = '<div class="tableWrap"><table><thead><tr>' +
+      columns.map(function (c) { return '<th>' + escapeHtml(c.label) + '</th>'; }).join('') +
+      '</tr></thead><tbody>' +
+      rows.map(function (r) {
+        return '<tr>' + columns.map(function (c) {
+          const v = r[c.key];
+          return '<td>' + (v === null || v === undefined || v === '' ? '&mdash;' : escapeHtml(v)) + '</td>';
+        }).join('') + '</tr>';
+      }).join('') +
+      '</tbody></table></div>';
+  }
+
+  function exportHistoryTabCsv() {
+    if (!isPlanningStaff || !historyData) return;
+    const key = historyActiveTab;
+    const rows = key === 'localIssue' ? (historyData.localIssue.rows || []) : (historyData[key] || []);
+    const columns = TAB_COLUMNS[key];
+    if (!rows.length) return;
+    const csv = toCsv(rows, columns);
+    const tabLabel = HISTORY_TABS.find(function (t) { return t.key === key; }).label.replace(/\s+/g, '_');
+    downloadCsv(historyUcsCode + '_' + tabLabel + '.csv', csv);
+  }
+
+  // ====== SIMPLE HAND-ROLLED SVG BAR CHART (no external chart library, matches the project's plain-JS approach) ======
+  function buildChartSvg(chart) {
+    const labels = (chart && chart.labels) || [];
+    const received = (chart && chart.received) || [];
+    const released = (chart && chart.released) || [];
+
+    if (labels.length === 0) {
+      return '<div class="naNotice">No dated Z04/201/Issue records in this range to chart.</div>';
+    }
+
+    const maxVal = Math.max(1, Math.max.apply(null, received), Math.max.apply(null, released));
+    const barWidth = 14, barGap = 4, groupGap = 22, leftPad = 34, topPad = 10, chartH = 150, bottomPad = 34;
+    const groupWidth = barWidth * 2 + barGap;
+    const width = leftPad + labels.length * (groupWidth + groupGap) + 10;
+    const height = topPad + chartH + bottomPad;
+
+    function barH(v) { return Math.round((v / maxVal) * chartH); }
+
+    let bars = '';
+    labels.forEach(function (lab, i) {
+      const gx = leftPad + i * (groupWidth + groupGap);
+      const rH = barH(received[i] || 0), dH = barH(released[i] || 0);
+      bars += '<rect x="' + gx + '" y="' + (topPad + chartH - rH) + '" width="' + barWidth + '" height="' + rH + '" fill="#1e7e34"><title>' + escapeHtml(lab) + ' Received: ' + (received[i] || 0) + '</title></rect>';
+      bars += '<rect x="' + (gx + barWidth + barGap) + '" y="' + (topPad + chartH - dH) + '" width="' + barWidth + '" height="' + dH + '" fill="#e07b00"><title>' + escapeHtml(lab) + ' Released: ' + (released[i] || 0) + '</title></rect>';
+      bars += '<text x="' + (gx + groupWidth / 2) + '" y="' + (topPad + chartH + 16) + '" font-size="10" text-anchor="middle" fill="#555">' + escapeHtml(lab) + '</text>';
+    });
+
+    let svg = '<svg width="' + width + '" height="' + height + '" viewBox="0 0 ' + width + ' ' + height + '" xmlns="http://www.w3.org/2000/svg">';
+    svg += '<line x1="' + (leftPad - 6) + '" y1="' + (topPad + chartH) + '" x2="' + width + '" y2="' + (topPad + chartH) + '" stroke="#ccc"/>';
+    svg += '<text x="4" y="' + (topPad + 4) + '" font-size="9" fill="#888">' + maxVal.toLocaleString() + '</text>';
+    svg += bars;
+    svg += '</svg>';
+    return svg;
+  }
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') closeHistory();
+  });
+
+  // ====== CSV EXPORT (Planning staff only -- button itself is hidden otherwise) ======
+  function csvEscape(val) {
+    const s = String(val == null ? '' : val);
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+  function toCsv(rows, columns) {
+    const header = columns.map(function (c) { return csvEscape(c.label); }).join(',');
+    const lines = rows.map(function (r) { return columns.map(function (c) { return csvEscape(r[c.key]); }).join(','); });
+    return [header].concat(lines).join('\r\n');
+  }
+  function downloadCsv(filename, csvContent) {
+    const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' }); // BOM so Excel reads UTF-8 correctly
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  function exportMainCsv() {
+    if (!isPlanningStaff) return; // defensive -- button is hidden otherwise, but never trust the DOM alone
+    const csv = toCsv(lastRenderedRows, [
+      { key: 'ucsCode', label: 'UCS Code' },
+      { key: 'itemDescription', label: 'Item Description' },
+      { key: 'unit', label: 'Unit' },
+      { key: 'received', label: 'Received' },
+      { key: 'released', label: 'Released' },
+      { key: 'balance', label: 'Balance' }
+    ]);
+    downloadCsv('planning_stock_' + new Date().toISOString().slice(0, 10) + '.csv', csv);
+  }
+
+  window.Page = {
+    applyHistoryFilters: applyHistoryFilters,
+    buildChartSvg: buildChartSvg,
+    callApi: callApi,
+    clearFilters: clearFilters,
+    clearHistoryFilters: clearHistoryFilters,
+    clearMessage: clearMessage,
+    closeHistory: closeHistory,
+    csvEscape: csvEscape,
+    downloadCsv: downloadCsv,
+    escapeHtml: escapeHtml,
+    exportHistoryTabCsv: exportHistoryTabCsv,
+    exportMainCsv: exportMainCsv,
+    fetchHistory: fetchHistory,
+    forceSnapshotRefresh: forceSnapshotRefresh,
+    hasCommaValue: hasCommaValue,
+    highlight: highlight,
+    loadStock: loadStock,
+    login: login,
+    logout: logout,
+    nextPage: nextPage,
+    onSearchInput: onSearchInput,
+    openHistory: openHistory,
+    populateAreaOptions: populateAreaOptions,
+    prevPage: prevPage,
+    renderHistoryBody: renderHistoryBody,
+    renderHistoryTabContent: renderHistoryTabContent,
+    renderHistoryTabs: renderHistoryTabs,
+    renderTable: renderTable,
+    setSort: setSort,
+    showMessage: showMessage,
+    switchHistoryTab: switchHistoryTab,
+    toCsv: toCsv,
+    updateSortArrows: updateSortArrows
+  };
+
+  // ---- shell auto-login: fill the page's OWN hidden login form and
+  // submit it through the page's OWN unmodified login() function, so every
+  // page's tested role-check / UI-reveal logic runs exactly as before. ----
+  document.getElementById('loginEmail').value = Shell.getUser().email;
+  document.getElementById('loginPassword').value = Shell.getUser().password;
+  login();
+
+})();
+</script>

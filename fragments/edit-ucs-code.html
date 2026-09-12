@@ -1,0 +1,281 @@
+<style>
+
+  h2 { margin-bottom: 4px; }
+  .subtitle { color: #666; font-size: 13px; margin-bottom: 24px; }
+  label { display: block; font-weight: bold; margin-top: 14px; margin-bottom: 4px; font-size: 14px; }
+  input, textarea { width: 100%; padding: 8px; box-sizing: border-box; font-size: 14px; border: 1px solid #ccc; border-radius: 4px; }
+  textarea { min-height: 80px; resize: vertical; }
+  button { margin-top: 20px; width: 100%; padding: 10px; font-size: 15px; border: none; border-radius: 4px; background: #1a73e8; color: white; cursor: pointer; }
+  button.secondary { background: #5f6368; }
+  button:disabled { background: #999; cursor: not-allowed; }
+  #message { margin-top: 14px; padding: 10px; border-radius: 4px; font-size: 14px; display: none; }
+  .success { background: #e6f4ea; color: #1e7e34; display: block !important; }
+  .error { background: #fce8e6; color: #c5221f; display: block !important; }
+  #loggedInBar { display:none; font-size: 13px; color:#555; margin-bottom: 10px; }
+  #logoutBtn { width:auto; padding:4px 10px; font-size:12px; background:#666; margin-left:8px; }
+  .readonly { background: #f1f3f4; color: #555; }
+  .lockedNotice { background:#fce8e6; color:#c5221f; padding:14px; border-radius:4px; font-size:14px; }
+
+</style>
+
+
+<h2>Edit Existing UCS Code</h2>
+<div class="subtitle">Admin only &mdash; corrects Short/Long Text. UCS Codes are permanent and cannot be changed.</div>
+
+<!-- ====== LOGIN SECTION ====== -->
+<div id="loginSection" style="display:none">
+  <label for="loginEmail">Email</label>
+  <input type="email" id="loginEmail" placeholder="you@test.com">
+
+  <label for="loginPassword">Password</label>
+  <input type="password" id="loginPassword" placeholder="Password">
+
+  <button id="loginBtn" onclick="Page.login()">Log In</button>
+</div>
+
+<!-- ====== NOT ADMIN NOTICE ====== -->
+<div id="notAdminNotice" style="display:none;" class="lockedNotice">
+  You're logged in, but only Approvers can edit existing UCS Codes. If you believe this is wrong, contact the project owner.
+</div>
+
+<!-- ====== LOOKUP SECTION ====== -->
+<div id="lookupSection" style="display:none;">
+  <div id="loggedInBar"></div>
+
+  <label for="searchCode">UCS Code to edit (exactly 14 digits)</label>
+  <input type="text" id="searchCode" placeholder="Enter existing UCS Code" maxlength="14" inputmode="numeric" oninput="Page.sanitizeAndValidateSearchCode()" onblur="Page.validateSearchCodeField()">
+  <div id="searchCodeError" style="color:#c5221f; font-size:12px; margin-top:4px; display:none;"></div>
+  <button id="lookupBtn" onclick="Page.lookupCode()">Look Up</button>
+</div>
+
+<!-- ====== EDIT SECTION (shown after successful lookup) ====== -->
+<div id="editSection" style="display:none;">
+  <label>UCS Code (cannot be changed)</label>
+  <input type="text" id="displayCode" class="readonly" readonly>
+
+  <label>Unit (cannot be changed here)</label>
+  <input type="text" id="displayUnit" class="readonly" readonly>
+
+  <label for="editShortText">Short Text</label>
+  <input type="text" id="editShortText">
+
+  <label for="editLongText">Long Text</label>
+  <textarea id="editLongText"></textarea>
+
+  <button id="saveBtn" onclick="Page.saveEdit()">Save Changes</button>
+  <button class="secondary" onclick="Page.cancelEdit()">Cancel / Search another code</button>
+</div>
+
+<div id="message"></div>
+
+
+
+
+<script>
+(function(){
+
+  // TODO: paste your deployed Apps Script Web App URL here (same one as add-ucs-code.html)
+  const APPS_SCRIPT_URL = Shell.APPS_SCRIPT_URL;
+
+  let currentUser = { email: '', password: '' };
+
+  function showMessage(text, type) {
+    const el = document.getElementById('message');
+    el.textContent = text;
+    el.className = type;
+  }
+  function clearMessage() {
+    const el = document.getElementById('message');
+    el.textContent = '';
+    el.className = '';
+  }
+
+  async function callApi(payload) {
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload)
+    });
+    return res.json();
+  }
+
+  async function login() {
+    const email = document.getElementById('loginEmail').value.trim();
+    const password = document.getElementById('loginPassword').value;
+    clearMessage();
+
+    if (!email || !password) {
+      showMessage('Please enter email and password.', 'error');
+      return;
+    }
+
+    const loginBtn = document.getElementById('loginBtn');
+    loginBtn.disabled = true;
+    loginBtn.textContent = 'Logging in...';
+
+    try {
+      const data = await callApi({ action: 'login', email, password });
+
+      if (!data.success) {
+        showMessage(data.message || 'Login failed.', 'error');
+        return;
+      }
+
+      currentUser = { email, password };
+      document.getElementById('loginSection').style.display = 'none';
+
+      if (!data.isAdmin) {
+        document.getElementById('notAdminNotice').style.display = 'block';
+        return;
+      }
+
+      document.getElementById('lookupSection').style.display = 'block';
+      const bar = document.getElementById('loggedInBar');
+      bar.style.display = 'block';
+      bar.innerHTML = 'Logged in as <b>' + data.name + '</b> (' + data.role + ')' +
+        '<button id="logoutBtn" onclick="Shell.logout()">Log out</button>';
+    } catch (err) {
+      showMessage('Could not reach the server. Check your connection or the Apps Script URL.', 'error');
+    } finally {
+      loginBtn.disabled = false;
+      loginBtn.textContent = 'Log In';
+    }
+  }
+
+  function sanitizeAndValidateSearchCode() {
+    const field = document.getElementById('searchCode');
+    const cleaned = field.value.replace(/[^\d]/g, '');
+    if (cleaned !== field.value) {
+      field.value = cleaned;
+    }
+    validateSearchCodeField();
+  }
+
+  function validateSearchCodeField() {
+    const val = document.getElementById('searchCode').value.trim();
+    const errEl = document.getElementById('searchCodeError');
+
+    if (val === '') {
+      errEl.style.display = 'none';
+      return true;
+    }
+    if (val.length !== 14) {
+      errEl.textContent = 'UCS Code must be exactly 14 digits. Currently ' + val.length + ' digit(s).';
+      errEl.style.display = 'block';
+      return false;
+    }
+    if (val.charAt(0) === '0') {
+      errEl.textContent = 'UCS Code cannot start with 0.';
+      errEl.style.display = 'block';
+      return false;
+    }
+    errEl.style.display = 'none';
+    return true;
+  }
+
+  async function lookupCode() {
+    clearMessage();
+    const ucsCode = document.getElementById('searchCode').value.trim();
+    if (!ucsCode) {
+      showMessage('Enter a UCS Code to look up.', 'error');
+      return;
+    }
+    if (!validateSearchCodeField()) {
+      showMessage('Please fix the UCS Code before searching.', 'error');
+      return;
+    }
+
+    const lookupBtn = document.getElementById('lookupBtn');
+    lookupBtn.disabled = true;
+    lookupBtn.textContent = 'Searching...';
+
+    try {
+      const data = await callApi({
+        action: 'getUCSByCode',
+        email: currentUser.email,
+        password: currentUser.password,
+        ucsCode
+      });
+
+      if (!data.success) {
+        showMessage(data.message || 'Lookup failed.', 'error');
+        document.getElementById('editSection').style.display = 'none';
+        return;
+      }
+
+      document.getElementById('displayCode').value = data.ucsCode;
+      document.getElementById('displayUnit').value = data.unit;
+      document.getElementById('editShortText').value = data.shortText;
+      document.getElementById('editLongText').value = data.longText;
+      document.getElementById('editSection').style.display = 'block';
+    } catch (err) {
+      showMessage('Could not reach the server.', 'error');
+    } finally {
+      lookupBtn.disabled = false;
+      lookupBtn.textContent = 'Look Up';
+    }
+  }
+
+  function cancelEdit() {
+    document.getElementById('editSection').style.display = 'none';
+    document.getElementById('searchCode').value = '';
+    clearMessage();
+  }
+
+  async function saveEdit() {
+    clearMessage();
+    const ucsCode = document.getElementById('displayCode').value;
+    const shortText = document.getElementById('editShortText').value.trim();
+    const longText = document.getElementById('editLongText').value.trim();
+
+    if (!shortText || !longText) {
+      showMessage('Short Text and Long Text cannot be empty.', 'error');
+      return;
+    }
+
+    const saveBtn = document.getElementById('saveBtn');
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving...';
+
+    try {
+      const data = await callApi({
+        action: 'editUCSText',
+        email: currentUser.email,
+        password: currentUser.password,
+        ucsCode, shortText, longText
+      });
+
+      if (data.success) {
+        showMessage(data.message, 'success');
+      } else {
+        showMessage(data.message || 'Update failed.', 'error');
+      }
+    } catch (err) {
+      showMessage('Could not reach the server.', 'error');
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save Changes';
+    }
+  }
+
+  window.Page = {
+    callApi: callApi,
+    cancelEdit: cancelEdit,
+    clearMessage: clearMessage,
+    login: login,
+    lookupCode: lookupCode,
+    sanitizeAndValidateSearchCode: sanitizeAndValidateSearchCode,
+    saveEdit: saveEdit,
+    showMessage: showMessage,
+    validateSearchCodeField: validateSearchCodeField
+  };
+
+  // ---- shell auto-login: fill the page's OWN hidden login form and
+  // submit it through the page's OWN unmodified login() function, so every
+  // page's tested role-check / UI-reveal logic runs exactly as before. ----
+  document.getElementById('loginEmail').value = Shell.getUser().email;
+  document.getElementById('loginPassword').value = Shell.getUser().password;
+  login();
+
+})();
+</script>

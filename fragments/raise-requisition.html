@@ -1,0 +1,606 @@
+<style>
+
+  h2 { margin-bottom: 4px; }
+  .subtitle { color: #666; font-size: 13px; margin-bottom: 24px; }
+  label { display: block; font-weight: bold; margin-top: 14px; margin-bottom: 4px; font-size: 14px; }
+  input, select, textarea { width: 100%; padding: 8px; box-sizing: border-box; font-size: 14px; border: 1px solid #ccc; border-radius: 4px; }
+  input.readonly { background: #f1f3f4; color: #555; }
+  button { margin-top: 20px; width: 100%; padding: 10px; font-size: 15px; border: none; border-radius: 4px; background: #1a73e8; color: white; cursor: pointer; }
+  button.secondary { background: #5f6368; }
+  button.small { width: auto; margin-top: 0; padding: 6px 12px; font-size: 13px; }
+  button.danger { background: #c5221f; }
+  button:disabled { background: #999; cursor: not-allowed; }
+  #message { margin-top: 14px; padding: 10px; border-radius: 4px; font-size: 14px; display: none; }
+  .success { background: #e6f4ea; color: #1e7e34; display: block !important; }
+  .error { background: #fce8e6; color: #c5221f; display: block !important; }
+  #loggedInBar { display:none; font-size: 13px; color:#555; margin-bottom: 10px; }
+  #logoutBtn { width:auto; padding:4px 10px; font-size:12px; background:#666; margin-left:8px; }
+  .fieldError { color:#c5221f; font-size:12px; margin-top:4px; display:none; }
+  .fieldHint { color:#666; font-size:12px; margin-top:4px; }
+  .lockedNotice { background:#fce8e6; color:#c5221f; padding:14px; border-radius:4px; font-size:14px; }
+  .modeNotice { background:#e8f0fe; color:#1a4fa0; padding:10px 12px; border-radius:6px; font-size:13px; margin-top:10px; }
+  .modeNotice.fastTrack { background:#fff8e1; color:#8a6d00; }
+
+  /* ---- Item search combo ---- */
+  #itemSearchWrap { position: relative; }
+  #itemSuggestions {
+    display:none; position:absolute; top:100%; left:0; right:0; z-index:10;
+    background:#fff; border:1px solid #ccc; border-top:none; border-radius:0 0 4px 4px;
+    max-height:220px; overflow-y:auto; box-shadow:0 2px 6px rgba(0,0,0,0.12);
+  }
+  .suggestionItem { padding:8px 10px; cursor:pointer; font-size:13px; border-bottom:1px solid #eee; }
+  .suggestionItem:last-child { border-bottom:none; }
+  .suggestionItem .code { font-family:'Courier New', monospace; font-weight:bold; color:#1a73e8; font-size:12px; }
+  .suggestionItem .short { font-size:13px; }
+  .suggestionItem:hover, .suggestionItem.highlighted { background:#f1f3f4; }
+
+  #pendingItemBox { display:none; margin-top:12px; border:1px solid #ddd; border-radius:6px; padding:12px; background:#fafafa; }
+  #pendingItemBox .pendingRow { display:flex; gap:10px; align-items:flex-end; }
+  #pendingItemBox .pendingRow > div:first-child { flex:2; }
+  #pendingItemBox .pendingRow > div:last-child { flex:1; }
+
+  /* ---- Items table ---- */
+  .tableWrap { overflow-x:auto; border:1px solid #e0e0e0; border-radius:6px; margin-top:14px; }
+  table { border-collapse:collapse; width:100%; font-size:13px; }
+  th, td { padding:8px 10px; border-bottom:1px solid #eee; text-align:left; }
+  th { background:#f8f9fa; font-weight:bold; }
+  #itemCountNotice { font-size:12px; color:#666; margin-top:6px; }
+  #emptyItemsState { padding:16px; text-align:center; color:#888; font-size:13px; border:1px dashed #ccc; border-radius:6px; margin-top:10px; }
+
+  /* ---- My Recent Requisitions (collapsible) ---- */
+  #mySlipsToggle { margin-top:36px; background:none; color:#1a73e8; text-align:left; padding:0; width:auto; font-size:13px; text-decoration:underline; cursor:pointer; }
+  #mySlipsSection { display:none; margin-top:12px; }
+  .badge { padding:2px 8px; border-radius:10px; font-size:11px; font-weight:bold; white-space:nowrap; }
+  .badge.pendingArea { background:#fce8e6; color:#c5221f; }
+  .badge.pendingPlanning { background:#fff8e1; color:#b98900; }
+  .badge.pendingIssue { background:#e8f0fe; color:#1a4fa0; }
+  .badge.completed { background:#e6f4ea; color:#1e7e34; }
+
+  /* ---- My Requisitions: collapsed slip rows + date filter ---- */
+  #mySlipsFilterBar { display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; margin-bottom:12px; }
+  #mySlipsFilterBar > div { display:flex; flex-direction:column; }
+  #mySlipsFilterBar label { margin-top:0; font-size:12px; }
+  #mySlipsFilterBar input { width:150px; }
+  #mySlipsFilterBar button { margin-top:0; width:auto; padding:8px 12px; }
+  #mySlipsRangeNotice { font-size:12px; color:#666; margin-bottom:10px; }
+  .slipSummaryRow { border:1px solid #e0e0e0; border-radius:6px; margin-bottom:8px; overflow:hidden; }
+  .slipSummaryHead { padding:10px 12px; display:flex; align-items:center; gap:10px; cursor:pointer; background:#fafafa; flex-wrap:wrap; }
+  .slipSummaryHead:hover { background:#f1f3f4; }
+  .slipSummaryHead .slipIdText { font-family:'Courier New', monospace; font-weight:bold; font-size:13px; }
+  .slipSummaryHead .slipMeta { font-size:12px; color:#666; }
+  .slipSummaryHead .expandArrow { margin-left:auto; color:#888; font-size:12px; }
+  .slipDetailBody { display:none; padding:10px 12px; border-top:1px solid #e0e0e0; }
+  .slipDetailBody table { border-collapse:collapse; width:100%; font-size:12px; }
+  .slipDetailBody th, .slipDetailBody td { padding:6px 8px; border-bottom:1px solid #eee; text-align:left; }
+  .slipDetailBody th { background:#f8f9fa; }
+
+</style>
+
+
+<h2>Raise Requisition</h2>
+<div class="subtitle">GitHub_SMS-3 Stores Module &mdash; request material from the Planning Store</div>
+
+<!-- ====== LOGIN SECTION ====== -->
+<div id="loginSection" style="display:none">
+  <label for="loginEmail">Email</label>
+  <input type="email" id="loginEmail" placeholder="you@test.com">
+
+  <label for="loginPassword">Password</label>
+  <input type="password" id="loginPassword" placeholder="Password">
+
+  <button id="loginBtn" onclick="Page.login()">Log In</button>
+</div>
+
+<!-- ====== NOT AUTHORIZED NOTICE ====== -->
+<div id="notAuthorizedNotice" style="display:none;" class="lockedNotice">
+  You're logged in, but you're not set up as an Area Store Supervisor or Area Incharge for any area, so you can't raise requisitions. If you believe this is wrong, contact the project owner.
+</div>
+
+<!-- ====== FORM SECTION ====== -->
+<div id="formSection" style="display:none;">
+  <div id="loggedInBar"></div>
+
+  <label for="areaSelect">Area</label>
+  <select id="areaSelect" onchange="Page.onAreaChange()"></select>
+  <div id="modeNotice" class="modeNotice" style="display:none;"></div>
+
+  <label for="itemSearchBox" style="margin-top:20px;">Add a material (search by UCS Code or keywords)</label>
+  <div id="itemSearchWrap">
+    <input type="text" id="itemSearchBox" placeholder="e.g. bearing 6210, or a UCS code" autocomplete="off" oninput="Page.onItemSearchInput()">
+    <div id="itemSuggestions"></div>
+  </div>
+
+  <div id="pendingItemBox">
+    <div class="pendingRow">
+      <div>
+        <label>Selected item</label>
+        <input type="text" id="pendingItemDisplay" class="readonly" readonly>
+      </div>
+      <div>
+        <label for="pendingItemQty">Qty (<span id="pendingItemUnit"></span>) &mdash; Available at Planning: <span id="pendingItemAvailable"></span></label>
+        <input type="number" id="pendingItemQty" min="1" step="1">
+      </div>
+    </div>
+    <div id="pendingItemError" class="fieldError"></div>
+    <button type="button" class="small" style="margin-top:10px;" onclick="Page.addPendingItem()">Add to Slip</button>
+    <button type="button" class="small secondary" style="margin-top:10px; margin-left:8px;" onclick="Page.clearPendingItem()">Cancel</button>
+  </div>
+
+  <div class="tableWrap" id="itemsTableWrap" style="display:none;">
+    <table>
+      <thead><tr><th>UCS Code</th><th>Description</th><th>Unit</th><th>Available at Planning</th><th>Qty</th><th></th></tr></thead>
+      <tbody id="itemsTableBody"></tbody>
+    </table>
+  </div>
+  <div id="emptyItemsState">No items added yet. Search above and add up to 10 materials.</div>
+  <div id="itemCountNotice"></div>
+
+  <button id="submitBtn" onclick="Page.submitRequisition()" disabled>Submit for Approval</button>
+
+  <button id="mySlipsToggle" onclick="Page.toggleMySlips()">Show my area's recent requisitions &#9662;</button>
+  <div id="mySlipsSection">
+    <div id="mySlipsFilterBar">
+      <div>
+        <label for="mySlipsAreaFilter">Area</label>
+        <select id="mySlipsAreaFilter" style="width:130px;"><option value="">All my areas</option></select>
+      </div>
+      <div>
+        <label for="mySlipsFrom">From</label>
+        <input type="date" id="mySlipsFrom">
+      </div>
+      <div>
+        <label for="mySlipsTo">To</label>
+        <input type="date" id="mySlipsTo">
+      </div>
+      <button type="button" class="secondary" onclick="Page.applyMySlipsFilters()">Apply</button>
+      <button type="button" class="secondary" onclick="Page.clearMySlipsFilters()">Clear (show 10 most recent)</button>
+    </div>
+    <div id="mySlipsRangeNotice"></div>
+    <div id="mySlipsList"></div>
+  </div>
+</div>
+
+<div id="message"></div>
+
+
+
+
+<script>
+(function(){
+
+  // TODO: paste your deployed Apps Script Web App URL here (same one used by the other pages)
+  const APPS_SCRIPT_URL = Shell.APPS_SCRIPT_URL;
+  const MAX_ITEMS = 10;
+  const MY_SLIPS_DEFAULT_COUNT = 10;
+
+  let currentUser = { email: '', password: '' };
+  let raiseEligibleAreas = [];   // areas this user can raise for at all
+  let fastTrackAreas = [];       // subset of the above where they're the Area Incharge
+  let allMaterials = [];         // cached UCS_MasterList for the search combo
+  let currentSuggestions = [];
+  let pendingItem = null;        // { ucsCode, shortText, unit } once picked from suggestions
+  let slipItems = [];            // [{ ucsCode, itemDescription, unit, qty }]
+  let mySlipsLoaded = false;
+  let areaRequisitionItems = []; // full cache from getAreaRequisitions, fetched once
+
+  function showMessage(text, type) {
+    const el = document.getElementById('message');
+    el.textContent = text;
+    el.className = type;
+  }
+  function clearMessage() {
+    const el = document.getElementById('message');
+    el.textContent = '';
+    el.className = '';
+  }
+
+  async function callApi(payload) {
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(Object.assign({ email: currentUser.email, password: currentUser.password }, payload))
+    });
+    return res.json();
+  }
+
+  function escapeHtml(str) {
+    return String(str == null ? '' : str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function hasCommaValueClient(str, target) {
+    if (!str) return false;
+    return String(str).split(',').map(function (s) { return s.trim(); }).indexOf(target) !== -1;
+  }
+
+  // ====== LOGIN ======
+  async function login() {
+    const email = document.getElementById('loginEmail').value.trim();
+    const password = document.getElementById('loginPassword').value;
+    clearMessage();
+    if (!email || !password) { showMessage('Please enter email and password.', 'error'); return; }
+
+    const loginBtn = document.getElementById('loginBtn');
+    loginBtn.disabled = true;
+    loginBtn.textContent = 'Logging in...';
+
+    try {
+      const data = await callApi({ action: 'login', email: email, password: password });
+      if (!data.success) { showMessage(data.message || 'Login failed.', 'error'); return; }
+
+      currentUser = { email: email, password: password };
+      const myAreas = String(data.authorizedArea || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+      const isSupervisor = hasCommaValueClient(data.role, 'Area Store Supervisor');
+      const isIncharge = hasCommaValueClient(data.role, 'Area Incharge');
+      raiseEligibleAreas = (isSupervisor || isIncharge) ? myAreas : [];
+      fastTrackAreas = isIncharge ? myAreas : [];
+
+      document.getElementById('loginSection').style.display = 'none';
+
+      if (raiseEligibleAreas.length === 0) {
+        document.getElementById('notAuthorizedNotice').style.display = 'block';
+        return;
+      }
+
+      document.getElementById('formSection').style.display = 'block';
+      const bar = document.getElementById('loggedInBar');
+      bar.style.display = 'block';
+      bar.innerHTML = 'Logged in as <b>' + escapeHtml(data.name) + '</b> (' + escapeHtml(data.role) + ')' +
+        '<button id="logoutBtn" onclick="Shell.logout()">Log out</button>';
+
+      const areaSelect = document.getElementById('areaSelect');
+      areaSelect.innerHTML = raiseEligibleAreas.map(function (a) {
+        return '<option value="' + escapeHtml(a) + '">' + escapeHtml(a) + '</option>';
+      }).join('');
+      onAreaChange();
+
+      const mySlipsAreaFilter = document.getElementById('mySlipsAreaFilter');
+      mySlipsAreaFilter.innerHTML = '<option value="">All my areas</option>' + raiseEligibleAreas.map(function (a) {
+        return '<option value="' + escapeHtml(a) + '">' + escapeHtml(a) + '</option>';
+      }).join('');
+
+      loadMaterials();
+    } catch (err) {
+      showMessage('Could not reach the server. Check your connection or the Apps Script URL.', 'error');
+    } finally {
+      loginBtn.disabled = false;
+      loginBtn.textContent = 'Log In';
+    }
+  }
+
+  function onAreaChange() {
+    const area = document.getElementById('areaSelect').value;
+    const notice = document.getElementById('modeNotice');
+    const submitBtn = document.getElementById('submitBtn');
+    if (fastTrackAreas.indexOf(area) !== -1) {
+      notice.textContent = 'You are the Area Incharge for ' + area + '. This will be auto-approved in the same step (use this only if the Area Store Supervisor is unavailable).';
+      notice.className = 'modeNotice fastTrack';
+      submitBtn.textContent = 'Submit & Approve';
+    } else {
+      notice.textContent = 'This will go to your Area Incharge for approval before Sanction.';
+      notice.className = 'modeNotice';
+      submitBtn.textContent = 'Submit for Approval';
+    }
+    notice.style.display = 'block';
+  }
+
+  // ====== UCS SEARCH COMBO ======
+  async function loadMaterials() {
+    try {
+      const data = await callApi({ action: 'getUCSSearchData' });
+      if (data.success) {
+        allMaterials = data.items.map(function (m) {
+          return {
+            ucsCode: m.ucsCode, shortText: m.shortText, unit: m.unit,
+            // Live balance from Planning, fetched fresh on every page load --
+            // see REQUISITION_MODULE_SPEC.md Section 6.
+            availableAtPlanning: m.availableAtPlanning,
+            // Long Text included in the search haystack -- kept in sync with
+            // search-ucs.html's search behavior. A word can appear only in
+            // Long Text (e.g. a brand name) while another word from the same
+            // query only appears in Short Text -- both need to be searched
+            // together for the two pages' search results to actually agree.
+            haystack: (m.ucsCode + ' ' + m.shortText + ' ' + (m.longText || '')).toLowerCase()
+          };
+        });
+      } else {
+        showMessage(data.message || 'Could not load the material list.', 'error');
+      }
+    } catch (err) {
+      showMessage('Could not reach the server. Check your connection or the Apps Script URL.', 'error');
+    }
+  }
+
+  function onItemSearchInput() {
+    const raw = document.getElementById('itemSearchBox').value.trim().toLowerCase();
+    const box = document.getElementById('itemSuggestions');
+    if (!raw) { box.style.display = 'none'; return; }
+    const tokens = raw.split(/\s+/).filter(Boolean);
+    currentSuggestions = allMaterials.filter(function (m) {
+      return tokens.every(function (t) { return m.haystack.indexOf(t) !== -1; });
+    }).slice(0, 25);
+
+    if (currentSuggestions.length === 0) {
+      box.innerHTML = '<div class="suggestionItem" style="color:#888;">No matches.</div>';
+      box.style.display = 'block';
+      return;
+    }
+    box.innerHTML = currentSuggestions.map(function (m, idx) {
+      return '<div class="suggestionItem" onclick="Page.pickSuggestion(' + idx + ')">' +
+        '<div class="code">' + escapeHtml(m.ucsCode) + ' &middot; ' + escapeHtml(m.unit) +
+          ' &middot; Available: ' + m.availableAtPlanning + '</div>' +
+        '<div class="short">' + escapeHtml(m.shortText) + '</div></div>';
+    }).join('');
+    box.style.display = 'block';
+  }
+
+  function pickSuggestion(idx) {
+    const m = currentSuggestions[idx];
+    if (!m) return;
+    pendingItem = { ucsCode: m.ucsCode, itemDescription: m.shortText, unit: m.unit, availableAtPlanning: m.availableAtPlanning };
+    document.getElementById('itemSuggestions').style.display = 'none';
+    document.getElementById('itemSearchBox').value = '';
+    document.getElementById('pendingItemDisplay').value = m.ucsCode + ' \u2014 ' + m.shortText;
+    document.getElementById('pendingItemUnit').textContent = m.unit;
+    document.getElementById('pendingItemAvailable').textContent = m.availableAtPlanning;
+    document.getElementById('pendingItemQty').value = '';
+    document.getElementById('pendingItemError').style.display = 'none';
+    document.getElementById('pendingItemBox').style.display = 'block';
+  }
+
+  function clearPendingItem() {
+    pendingItem = null;
+    document.getElementById('pendingItemBox').style.display = 'none';
+  }
+
+  function addPendingItem() {
+    const errEl = document.getElementById('pendingItemError');
+    if (!pendingItem) return;
+    if (slipItems.length >= MAX_ITEMS) {
+      errEl.textContent = 'A requisition slip cannot have more than ' + MAX_ITEMS + ' materials.';
+      errEl.style.display = 'block';
+      return;
+    }
+    const qtyRaw = document.getElementById('pendingItemQty').value;
+    const qty = Number(qtyRaw);
+    if (qtyRaw === '' || !Number.isInteger(qty) || qty <= 0) {
+      errEl.textContent = 'Quantity must be a positive whole number.';
+      errEl.style.display = 'block';
+      return;
+    }
+    if (slipItems.some(function (it) { return it.ucsCode === pendingItem.ucsCode; })) {
+      errEl.textContent = 'This UCS Code is already on the slip. Remove it below first if you want to change the quantity.';
+      errEl.style.display = 'block';
+      return;
+    }
+    // Client-side check only, for immediate feedback -- raiseRequisition() re-checks
+    // the live balance server-side on Submit, since this page's number could be a
+    // few minutes stale by then.
+    if (qty > Number(pendingItem.availableAtPlanning)) {
+      errEl.textContent = 'Only ' + pendingItem.availableAtPlanning + ' available at Planning for this UCS Code -- reduce the quantity.';
+      errEl.style.display = 'block';
+      return;
+    }
+    slipItems.push({ ucsCode: pendingItem.ucsCode, itemDescription: pendingItem.itemDescription, unit: pendingItem.unit, qty: qty, availableAtPlanning: pendingItem.availableAtPlanning });
+    clearPendingItem();
+    renderItemsTable();
+  }
+
+  function removeItem(idx) {
+    slipItems.splice(idx, 1);
+    renderItemsTable();
+  }
+
+  function renderItemsTable() {
+    const body = document.getElementById('itemsTableBody');
+    const wrap = document.getElementById('itemsTableWrap');
+    const empty = document.getElementById('emptyItemsState');
+    const countEl = document.getElementById('itemCountNotice');
+
+    if (slipItems.length === 0) {
+      wrap.style.display = 'none';
+      empty.style.display = 'block';
+    } else {
+      empty.style.display = 'none';
+      wrap.style.display = 'block';
+      body.innerHTML = slipItems.map(function (it, idx) {
+        return '<tr><td>' + escapeHtml(it.ucsCode) + '</td><td>' + escapeHtml(it.itemDescription) + '</td>' +
+          '<td>' + escapeHtml(it.unit) + '</td><td>' + it.availableAtPlanning + '</td><td>' + it.qty + '</td>' +
+          '<td><button type="button" class="small danger" onclick="Page.removeItem(' + idx + ')">Remove</button></td></tr>';
+      }).join('');
+    }
+    countEl.textContent = slipItems.length + ' of ' + MAX_ITEMS + ' items added.';
+    document.getElementById('submitBtn').disabled = slipItems.length === 0;
+  }
+
+  // ====== SUBMIT ======
+  async function submitRequisition() {
+    clearMessage();
+    const area = document.getElementById('areaSelect').value;
+    if (!area) { showMessage('Please select an area.', 'error'); return; }
+    if (slipItems.length === 0) { showMessage('Add at least one item first.', 'error'); return; }
+
+    const submitBtn = document.getElementById('submitBtn');
+    submitBtn.disabled = true;
+    const originalLabel = submitBtn.textContent;
+    submitBtn.textContent = 'Submitting...';
+
+    try {
+      const data = await callApi({
+        action: 'raiseRequisition',
+        area: area,
+        items: slipItems.map(function (it) { return { ucsCode: it.ucsCode, qty: it.qty }; })
+      });
+      if (data.success) {
+        showMessage(data.message, 'success');
+        slipItems = [];
+        renderItemsTable();
+        if (mySlipsLoaded) loadMySlips();
+      } else {
+        showMessage(data.message || 'Could not raise this requisition.', 'error');
+      }
+    } catch (err) {
+      showMessage('Could not reach the server. Check your connection or the Apps Script URL.', 'error');
+    } finally {
+      submitBtn.disabled = slipItems.length === 0;
+      submitBtn.textContent = originalLabel;
+    }
+  }
+
+  // ====== MY RECENT REQUISITIONS (read-only) ======
+  function toggleMySlips() {
+    const section = document.getElementById('mySlipsSection');
+    const showing = section.style.display === 'block';
+    section.style.display = showing ? 'none' : 'block';
+    document.getElementById('mySlipsToggle').innerHTML = showing ? 'Show my area\'s recent requisitions &#9662;' : 'Hide my area\'s recent requisitions &#9652;';
+    if (!showing) loadMySlips();
+  }
+
+  function statusBadge(status) {
+    const map = {
+      'Pending Area Approval': 'pendingArea',
+      'Pending Planning Approval': 'pendingPlanning',
+      'Pending Issue': 'pendingIssue',
+      'Completed': 'completed'
+    };
+    return '<span class="badge ' + (map[status] || '') + '">' + escapeHtml(status) + '</span>';
+  }
+
+  async function loadMySlips() {
+    const listEl = document.getElementById('mySlipsList');
+    listEl.innerHTML = '<div style="text-align:center; color:#888; padding:16px;">Loading...</div>';
+    try {
+      const data = await callApi({ action: 'getAreaRequisitions' });
+      mySlipsLoaded = true;
+      if (!data.success) {
+        listEl.innerHTML = '<div style="text-align:center; color:#c5221f; padding:16px;">' + escapeHtml(data.message || 'Could not load.') + '</div>';
+        return;
+      }
+      areaRequisitionItems = data.items;
+      clearMySlipsFilters();
+    } catch (err) {
+      listEl.innerHTML = '<div style="text-align:center; color:#c5221f; padding:16px;">Could not reach the server.</div>';
+    }
+  }
+
+  function groupMySlips(items) {
+    const bySlip = {};
+    items.forEach(function (it) {
+      if (!bySlip[it.slipId]) bySlip[it.slipId] = { slipId: it.slipId, area: it.area, slipDate: it.slipDate, status: it.status, raisedByName: it.raisedByName, items: [] };
+      bySlip[it.slipId].items.push(it);
+    });
+    // newest first, by Slip_ID (which sorts correctly since it's Area+YYYYMMDD-XY and we always compare within render, not across areas)
+    return Object.values(bySlip).sort(function (a, b) {
+      if (a.slipDate !== b.slipDate) return b.slipDate.localeCompare(a.slipDate);
+      return b.slipId.localeCompare(a.slipId);
+    });
+  }
+
+  function renderMySlips(slips, rangeNoticeText) {
+    document.getElementById('mySlipsRangeNotice').textContent = rangeNoticeText || '';
+    const listEl = document.getElementById('mySlipsList');
+    if (slips.length === 0) {
+      listEl.innerHTML = '<div style="text-align:center; color:#888; padding:16px;">No requisitions to show.</div>';
+      return;
+    }
+    listEl.innerHTML = slips.map(function (slip, idx) {
+      const detailRows = slip.items.map(function (it) {
+        return '<tr><td>' + escapeHtml(it.ucsCode) + '</td><td>' + escapeHtml(it.itemDescription) + '</td>' +
+          '<td>' + (it.qtyRequested === '' ? '&mdash;' : it.qtyRequested) + '</td>' +
+          '<td>' + (it.qtyApproved === '' ? '&mdash;' : it.qtyApproved) + '</td>' +
+          '<td>' + (it.qtySanctioned === '' ? '&mdash;' : it.qtySanctioned) + '</td>' +
+          '<td>' + (it.qtyIssued === '' ? '&mdash;' : it.qtyIssued) + '</td></tr>';
+      }).join('');
+      return '<div class="slipSummaryRow">' +
+        '<div class="slipSummaryHead" onclick="Page.toggleSlipDetail(' + idx + ')">' +
+        '<span class="slipIdText">' + escapeHtml(slip.slipId) + '</span>' +
+        '<span class="slipMeta">' + escapeHtml(slip.slipDate) + ' &middot; ' + escapeHtml(slip.area) + ' &middot; raised by ' + escapeHtml(slip.raisedByName) + ' &middot; ' + slip.items.length + ' item(s)</span>' +
+        statusBadge(slip.status) +
+        '<span class="expandArrow" id="arrow-' + idx + '">&#9662; details</span></div>' +
+        '<div class="slipDetailBody" id="detail-' + idx + '">' +
+        '<table><thead><tr><th>UCS Code</th><th>Description</th><th>Req</th><th>Appr</th><th>Sanc</th><th>Issued</th></tr></thead>' +
+        '<tbody>' + detailRows + '</tbody></table></div></div>';
+    }).join('');
+  }
+
+  function toggleSlipDetail(idx) {
+    const body = document.getElementById('detail-' + idx);
+    const arrow = document.getElementById('arrow-' + idx);
+    const showing = body.style.display === 'block';
+    body.style.display = showing ? 'none' : 'block';
+    arrow.innerHTML = showing ? '&#9662; details' : '&#9652; hide';
+  }
+
+  function applyMySlipsFilters() {
+    const area = document.getElementById('mySlipsAreaFilter').value;
+    const from = document.getElementById('mySlipsFrom').value;
+    const to = document.getElementById('mySlipsTo').value;
+    if (!area && !from && !to) {
+      showMessage('Pick an Area and/or a date range, or use Clear to see the 10 most recent across all your areas.', 'error');
+      return;
+    }
+    const filtered = areaRequisitionItems.filter(function (it) {
+      if (area && it.area !== area) return false;
+      if (from && it.slipDate < from) return false;
+      if (to && it.slipDate > to) return false;
+      return true;
+    });
+    const slips = groupMySlips(filtered);
+    const parts = [];
+    if (area) parts.push('Area: ' + area);
+    if (from || to) parts.push('between ' + (from || 'the beginning') + ' and ' + (to || 'today'));
+    renderMySlips(slips, slips.length + ' slip(s)' + (parts.length ? ' \u2014 ' + parts.join(', ') : '') + '.');
+  }
+
+  function clearMySlipsFilters() {
+    document.getElementById('mySlipsAreaFilter').value = '';
+    document.getElementById('mySlipsFrom').value = '';
+    document.getElementById('mySlipsTo').value = '';
+    const allSlips = groupMySlips(areaRequisitionItems);
+    const shown = allSlips.slice(0, MY_SLIPS_DEFAULT_COUNT);
+    const notice = allSlips.length > MY_SLIPS_DEFAULT_COUNT
+      ? 'Showing ' + MY_SLIPS_DEFAULT_COUNT + ' most recent of ' + allSlips.length + ' total across all your areas. Use the filters above to narrow down or see older ones.'
+      : shown.length + ' slip(s) total.';
+    renderMySlips(shown, notice);
+  }
+
+  document.addEventListener('click', function (e) {
+    if (!e.target.closest('#itemSearchWrap')) {
+      document.getElementById('itemSuggestions').style.display = 'none';
+    }
+  });
+
+  window.Page = {
+    addPendingItem: addPendingItem,
+    applyMySlipsFilters: applyMySlipsFilters,
+    callApi: callApi,
+    clearMessage: clearMessage,
+    clearMySlipsFilters: clearMySlipsFilters,
+    clearPendingItem: clearPendingItem,
+    escapeHtml: escapeHtml,
+    groupMySlips: groupMySlips,
+    hasCommaValueClient: hasCommaValueClient,
+    loadMaterials: loadMaterials,
+    loadMySlips: loadMySlips,
+    login: login,
+    onAreaChange: onAreaChange,
+    onItemSearchInput: onItemSearchInput,
+    pickSuggestion: pickSuggestion,
+    removeItem: removeItem,
+    renderItemsTable: renderItemsTable,
+    renderMySlips: renderMySlips,
+    showMessage: showMessage,
+    statusBadge: statusBadge,
+    submitRequisition: submitRequisition,
+    toggleMySlips: toggleMySlips,
+    toggleSlipDetail: toggleSlipDetail
+  };
+
+  // ---- shell auto-login: fill the page's OWN hidden login form and
+  // submit it through the page's OWN unmodified login() function, so every
+  // page's tested role-check / UI-reveal logic runs exactly as before. ----
+  document.getElementById('loginEmail').value = Shell.getUser().email;
+  document.getElementById('loginPassword').value = Shell.getUser().password;
+  login();
+
+})();
+</script>
