@@ -120,20 +120,20 @@
      small and permanent, so !important is the right tool. */
   #pageContainer #logoutBtn { display: none !important; }
 
-  /* The shell's own persistent chrome (sidebar, topbar, login screen) needs
-     to be immune to the SAME leaking-<style> problem in the other
-     direction: several pages have generic `button{width:100%}` rules
-     meant for their own single-column forms, which -- being global --
-     also stretched the shell's own Log out button to full width the
-     moment such a page loaded. Lock down every property a stray fragment
-     rule could plausibly set, on every piece of persistent shell chrome. */
-  #sidebar, #topbar, #loginScreen, #loginCard {
-    width: revert !important; max-width: revert !important; box-sizing: border-box !important;
+  /* The shell's own persistent buttons need to be immune to the SAME
+     leaking-<style> problem in the other direction: several pages have
+     generic `button{width:100%}` rules meant for their own single-column
+     forms, which -- being global -- also stretched the shell's own Log
+     out button to full width the moment such a page loaded. Lock down
+     width on just the specific buttons that were actually affected, with
+     concrete values (deliberately NOT `revert` -- `revert` combined with
+     !important is one of the genuinely ambiguous corners of the CSS spec,
+     and using it on the sidebar/topbar containers themselves is what
+     broke the collapse-toggle feature below). */
+  #logoutBtnShell, #hamburgerBtn, #loginBtnShell {
+    width: auto !important; max-width: none !important;
   }
-  #logoutBtnShell, #hamburgerBtn, .navItem, #loginBtnShell {
-    width: auto !important; max-width: none !important; display: revert !important;
-  }
-  #navMenu a.navItem { display: flex !important; }
+  #navMenu a.navItem { display: flex !important; width: auto !important; }
 
   @media (max-width: 860px) {
     #appShell { position: relative; }
