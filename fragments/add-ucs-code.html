@@ -250,17 +250,19 @@
     }
   }
 
-  window.Page = {
-    clearMessage: clearMessage,
-    loadUnitOptions: loadUnitOptions,
-    login: login,
-    logout: logout,
-    postToBackend: postToBackend,
-    sanitizeAndValidateUCSCode: sanitizeAndValidateUCSCode,
-    showMessage: showMessage,
-    submitUCSCode: submitUCSCode,
-    validateUCSCodeField: validateUCSCodeField
-  };
+  Object.defineProperties(window.Page = {}, {
+    APPS_SCRIPT_URL: { get: function(){ return APPS_SCRIPT_URL; }, set: function(v){ APPS_SCRIPT_URL = v; }, enumerable: true, configurable: true },
+    clearMessage: { get: function(){ return clearMessage; }, set: function(v){ clearMessage = v; }, enumerable: true, configurable: true },
+    currentUser: { get: function(){ return currentUser; }, set: function(v){ currentUser = v; }, enumerable: true, configurable: true },
+    loadUnitOptions: { get: function(){ return loadUnitOptions; }, set: function(v){ loadUnitOptions = v; }, enumerable: true, configurable: true },
+    login: { get: function(){ return login; }, set: function(v){ login = v; }, enumerable: true, configurable: true },
+    logout: { get: function(){ return logout; }, set: function(v){ logout = v; }, enumerable: true, configurable: true },
+    postToBackend: { get: function(){ return postToBackend; }, set: function(v){ postToBackend = v; }, enumerable: true, configurable: true },
+    sanitizeAndValidateUCSCode: { get: function(){ return sanitizeAndValidateUCSCode; }, set: function(v){ sanitizeAndValidateUCSCode = v; }, enumerable: true, configurable: true },
+    showMessage: { get: function(){ return showMessage; }, set: function(v){ showMessage = v; }, enumerable: true, configurable: true },
+    submitUCSCode: { get: function(){ return submitUCSCode; }, set: function(v){ submitUCSCode = v; }, enumerable: true, configurable: true },
+    validateUCSCodeField: { get: function(){ return validateUCSCodeField; }, set: function(v){ validateUCSCodeField = v; }, enumerable: true, configurable: true }
+  });
 
   // ---- shell auto-login: fill the page's OWN hidden login form and
   // submit it through the page's OWN unmodified login() function, so every

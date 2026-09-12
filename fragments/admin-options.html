@@ -217,17 +217,19 @@
     }
   }
 
-  window.Page = {
-    addValue: addValue,
-    callApi: callApi,
-    clearMessage: clearMessage,
-    escapeHtml: escapeHtml,
-    loadValues: loadValues,
-    login: login,
-    onCategoryChange: onCategoryChange,
-    rawPost: rawPost,
-    showMessage: showMessage
-  };
+  Object.defineProperties(window.Page = {}, {
+    APPS_SCRIPT_URL: { get: function(){ return APPS_SCRIPT_URL; }, set: function(v){ APPS_SCRIPT_URL = v; }, enumerable: true, configurable: true },
+    addValue: { get: function(){ return addValue; }, set: function(v){ addValue = v; }, enumerable: true, configurable: true },
+    callApi: { get: function(){ return callApi; }, set: function(v){ callApi = v; }, enumerable: true, configurable: true },
+    clearMessage: { get: function(){ return clearMessage; }, set: function(v){ clearMessage = v; }, enumerable: true, configurable: true },
+    currentUser: { get: function(){ return currentUser; }, set: function(v){ currentUser = v; }, enumerable: true, configurable: true },
+    escapeHtml: { get: function(){ return escapeHtml; }, set: function(v){ escapeHtml = v; }, enumerable: true, configurable: true },
+    loadValues: { get: function(){ return loadValues; }, set: function(v){ loadValues = v; }, enumerable: true, configurable: true },
+    login: { get: function(){ return login; }, set: function(v){ login = v; }, enumerable: true, configurable: true },
+    onCategoryChange: { get: function(){ return onCategoryChange; }, set: function(v){ onCategoryChange = v; }, enumerable: true, configurable: true },
+    rawPost: { get: function(){ return rawPost; }, set: function(v){ rawPost = v; }, enumerable: true, configurable: true },
+    showMessage: { get: function(){ return showMessage; }, set: function(v){ showMessage = v; }, enumerable: true, configurable: true }
+  });
 
   // ---- shell auto-login: fill the page's OWN hidden login form and
   // submit it through the page's OWN unmodified login() function, so every

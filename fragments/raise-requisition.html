@@ -569,31 +569,43 @@
     }
   });
 
-  window.Page = {
-    addPendingItem: addPendingItem,
-    applyMySlipsFilters: applyMySlipsFilters,
-    callApi: callApi,
-    clearMessage: clearMessage,
-    clearMySlipsFilters: clearMySlipsFilters,
-    clearPendingItem: clearPendingItem,
-    escapeHtml: escapeHtml,
-    groupMySlips: groupMySlips,
-    hasCommaValueClient: hasCommaValueClient,
-    loadMaterials: loadMaterials,
-    loadMySlips: loadMySlips,
-    login: login,
-    onAreaChange: onAreaChange,
-    onItemSearchInput: onItemSearchInput,
-    pickSuggestion: pickSuggestion,
-    removeItem: removeItem,
-    renderItemsTable: renderItemsTable,
-    renderMySlips: renderMySlips,
-    showMessage: showMessage,
-    statusBadge: statusBadge,
-    submitRequisition: submitRequisition,
-    toggleMySlips: toggleMySlips,
-    toggleSlipDetail: toggleSlipDetail
-  };
+  Object.defineProperties(window.Page = {}, {
+    APPS_SCRIPT_URL: { get: function(){ return APPS_SCRIPT_URL; }, set: function(v){ APPS_SCRIPT_URL = v; }, enumerable: true, configurable: true },
+    MAX_ITEMS: { get: function(){ return MAX_ITEMS; }, set: function(v){ MAX_ITEMS = v; }, enumerable: true, configurable: true },
+    MY_SLIPS_DEFAULT_COUNT: { get: function(){ return MY_SLIPS_DEFAULT_COUNT; }, set: function(v){ MY_SLIPS_DEFAULT_COUNT = v; }, enumerable: true, configurable: true },
+    addPendingItem: { get: function(){ return addPendingItem; }, set: function(v){ addPendingItem = v; }, enumerable: true, configurable: true },
+    allMaterials: { get: function(){ return allMaterials; }, set: function(v){ allMaterials = v; }, enumerable: true, configurable: true },
+    applyMySlipsFilters: { get: function(){ return applyMySlipsFilters; }, set: function(v){ applyMySlipsFilters = v; }, enumerable: true, configurable: true },
+    areaRequisitionItems: { get: function(){ return areaRequisitionItems; }, set: function(v){ areaRequisitionItems = v; }, enumerable: true, configurable: true },
+    callApi: { get: function(){ return callApi; }, set: function(v){ callApi = v; }, enumerable: true, configurable: true },
+    clearMessage: { get: function(){ return clearMessage; }, set: function(v){ clearMessage = v; }, enumerable: true, configurable: true },
+    clearMySlipsFilters: { get: function(){ return clearMySlipsFilters; }, set: function(v){ clearMySlipsFilters = v; }, enumerable: true, configurable: true },
+    clearPendingItem: { get: function(){ return clearPendingItem; }, set: function(v){ clearPendingItem = v; }, enumerable: true, configurable: true },
+    currentSuggestions: { get: function(){ return currentSuggestions; }, set: function(v){ currentSuggestions = v; }, enumerable: true, configurable: true },
+    currentUser: { get: function(){ return currentUser; }, set: function(v){ currentUser = v; }, enumerable: true, configurable: true },
+    escapeHtml: { get: function(){ return escapeHtml; }, set: function(v){ escapeHtml = v; }, enumerable: true, configurable: true },
+    fastTrackAreas: { get: function(){ return fastTrackAreas; }, set: function(v){ fastTrackAreas = v; }, enumerable: true, configurable: true },
+    groupMySlips: { get: function(){ return groupMySlips; }, set: function(v){ groupMySlips = v; }, enumerable: true, configurable: true },
+    hasCommaValueClient: { get: function(){ return hasCommaValueClient; }, set: function(v){ hasCommaValueClient = v; }, enumerable: true, configurable: true },
+    loadMaterials: { get: function(){ return loadMaterials; }, set: function(v){ loadMaterials = v; }, enumerable: true, configurable: true },
+    loadMySlips: { get: function(){ return loadMySlips; }, set: function(v){ loadMySlips = v; }, enumerable: true, configurable: true },
+    login: { get: function(){ return login; }, set: function(v){ login = v; }, enumerable: true, configurable: true },
+    mySlipsLoaded: { get: function(){ return mySlipsLoaded; }, set: function(v){ mySlipsLoaded = v; }, enumerable: true, configurable: true },
+    onAreaChange: { get: function(){ return onAreaChange; }, set: function(v){ onAreaChange = v; }, enumerable: true, configurable: true },
+    onItemSearchInput: { get: function(){ return onItemSearchInput; }, set: function(v){ onItemSearchInput = v; }, enumerable: true, configurable: true },
+    pendingItem: { get: function(){ return pendingItem; }, set: function(v){ pendingItem = v; }, enumerable: true, configurable: true },
+    pickSuggestion: { get: function(){ return pickSuggestion; }, set: function(v){ pickSuggestion = v; }, enumerable: true, configurable: true },
+    raiseEligibleAreas: { get: function(){ return raiseEligibleAreas; }, set: function(v){ raiseEligibleAreas = v; }, enumerable: true, configurable: true },
+    removeItem: { get: function(){ return removeItem; }, set: function(v){ removeItem = v; }, enumerable: true, configurable: true },
+    renderItemsTable: { get: function(){ return renderItemsTable; }, set: function(v){ renderItemsTable = v; }, enumerable: true, configurable: true },
+    renderMySlips: { get: function(){ return renderMySlips; }, set: function(v){ renderMySlips = v; }, enumerable: true, configurable: true },
+    showMessage: { get: function(){ return showMessage; }, set: function(v){ showMessage = v; }, enumerable: true, configurable: true },
+    slipItems: { get: function(){ return slipItems; }, set: function(v){ slipItems = v; }, enumerable: true, configurable: true },
+    statusBadge: { get: function(){ return statusBadge; }, set: function(v){ statusBadge = v; }, enumerable: true, configurable: true },
+    submitRequisition: { get: function(){ return submitRequisition; }, set: function(v){ submitRequisition = v; }, enumerable: true, configurable: true },
+    toggleMySlips: { get: function(){ return toggleMySlips; }, set: function(v){ toggleMySlips = v; }, enumerable: true, configurable: true },
+    toggleSlipDetail: { get: function(){ return toggleSlipDetail; }, set: function(v){ toggleSlipDetail = v; }, enumerable: true, configurable: true }
+  });
 
   // ---- shell auto-login: fill the page's OWN hidden login form and
   // submit it through the page's OWN unmodified login() function, so every

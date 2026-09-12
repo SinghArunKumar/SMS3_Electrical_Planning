@@ -216,7 +216,7 @@
     body.innerHTML = alerts.map(function (a) {
       const material = a.ucsCode ? (escapeHtml(a.ucsCode) + ' \u2014 ' + escapeHtml(a.itemDescription)) : ('<i>(New)</i> ' + escapeHtml(a.itemDescription));
       const rows = [
-        '<tr class="rowClickable" onclick="Page.toggleDetail(\'' + a.alertId + '\')">' +
+        '<tr class="rowClickable" onclick="toggleDetail(\'' + a.alertId + '\')">' +
           '<td>' + escapeHtml(a.dateRaised) + '</td>' +
           '<td>' + escapeHtml(a.area) + '</td>' +
           '<td>' + escapeHtml(a.raisedByName) + '</td>' +
@@ -236,7 +236,7 @@
               }).join('') +
             '</select></div>' +
             '<div style="flex:2;"><label>Planning remarks</label><input type="text" id="remarksInput_' + a.alertId + '" value="' + escapeHtml(a.planningRemarks || '') + '" style="width:100%;"></div>' +
-            '<div style="flex:0 0 auto;"><button onclick="Page.saveStatus(\'' + a.alertId + '\')">Save</button></div>' +
+            '<div style="flex:0 0 auto;"><button onclick="saveStatus(\'' + a.alertId + '\')">Save</button></div>' +
           '</div>' +
           (a.lastUpdatedBy ? '<div style="font-size:12px; color:#888; padding-bottom:8px;">Last updated by ' + escapeHtml(a.lastUpdatedBy) + ' on ' + escapeHtml(a.lastUpdatedAt || '') + '</div>' : '') +
           '</td></tr>'
@@ -269,20 +269,24 @@
     }
   }
 
-  window.Page = {
-    callApi: callApi,
-    clearMessage: clearMessage,
-    escapeHtml: escapeHtml,
-    hasCommaValueClient: hasCommaValueClient,
-    loadAlerts: loadAlerts,
-    login: login,
-    rawPost: rawPost,
-    renderTable: renderTable,
-    saveStatus: saveStatus,
-    showMessage: showMessage,
-    statusBadge: statusBadge,
-    toggleDetail: toggleDetail
-  };
+  Object.defineProperties(window.Page = {}, {
+    APPS_SCRIPT_URL: { get: function(){ return APPS_SCRIPT_URL; }, set: function(v){ APPS_SCRIPT_URL = v; }, enumerable: true, configurable: true },
+    alerts: { get: function(){ return alerts; }, set: function(v){ alerts = v; }, enumerable: true, configurable: true },
+    callApi: { get: function(){ return callApi; }, set: function(v){ callApi = v; }, enumerable: true, configurable: true },
+    clearMessage: { get: function(){ return clearMessage; }, set: function(v){ clearMessage = v; }, enumerable: true, configurable: true },
+    currentUser: { get: function(){ return currentUser; }, set: function(v){ currentUser = v; }, enumerable: true, configurable: true },
+    escapeHtml: { get: function(){ return escapeHtml; }, set: function(v){ escapeHtml = v; }, enumerable: true, configurable: true },
+    expandedId: { get: function(){ return expandedId; }, set: function(v){ expandedId = v; }, enumerable: true, configurable: true },
+    hasCommaValueClient: { get: function(){ return hasCommaValueClient; }, set: function(v){ hasCommaValueClient = v; }, enumerable: true, configurable: true },
+    loadAlerts: { get: function(){ return loadAlerts; }, set: function(v){ loadAlerts = v; }, enumerable: true, configurable: true },
+    login: { get: function(){ return login; }, set: function(v){ login = v; }, enumerable: true, configurable: true },
+    rawPost: { get: function(){ return rawPost; }, set: function(v){ rawPost = v; }, enumerable: true, configurable: true },
+    renderTable: { get: function(){ return renderTable; }, set: function(v){ renderTable = v; }, enumerable: true, configurable: true },
+    saveStatus: { get: function(){ return saveStatus; }, set: function(v){ saveStatus = v; }, enumerable: true, configurable: true },
+    showMessage: { get: function(){ return showMessage; }, set: function(v){ showMessage = v; }, enumerable: true, configurable: true },
+    statusBadge: { get: function(){ return statusBadge; }, set: function(v){ statusBadge = v; }, enumerable: true, configurable: true },
+    toggleDetail: { get: function(){ return toggleDetail; }, set: function(v){ toggleDetail = v; }, enumerable: true, configurable: true }
+  });
 
   // ---- shell auto-login: fill the page's OWN hidden login form and
   // submit it through the page's OWN unmodified login() function, so every

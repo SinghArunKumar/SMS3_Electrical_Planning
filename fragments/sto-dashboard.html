@@ -130,7 +130,7 @@
       <button type="button" class="secondary" onclick="Page.clearFilters()">Clear filters</button>
     </div>
     <div>
-      <button type="button" onclick="Page.loadPage(currentPage)">Refresh</button>
+      <button type="button" onclick="Page.loadPage(Page.currentPage)">Refresh</button>
     </div>
   </div>
   <div id="dateRangeError" class="fieldError"></div>
@@ -160,9 +160,9 @@
   <div id="paginationBar">
     <div id="showingText">Showing 0 of 0</div>
     <div class="pageControls">
-      <button type="button" class="secondary small" onclick="Page.goToPage(currentPage - 1)" id="prevPageBtn">Prev</button>
+      <button type="button" class="secondary small" onclick="Page.goToPage(Page.currentPage - 1)" id="prevPageBtn">Prev</button>
       <span id="pageIndicator">Page 1 of 1</span>
-      <button type="button" class="secondary small" onclick="Page.goToPage(currentPage + 1)" id="nextPageBtn">Next</button>
+      <button type="button" class="secondary small" onclick="Page.goToPage(Page.currentPage + 1)" id="nextPageBtn">Next</button>
     </div>
   </div>
 
@@ -996,33 +996,49 @@
     }
   }
 
-  window.Page = {
-    callApi: callApi,
-    cancelConfirm: cancelConfirm,
-    clearFilters: clearFilters,
-    clearMessage: clearMessage,
-    closeActionPanel: closeActionPanel,
-    detachActionPanel: detachActionPanel,
-    doSave: doSave,
-    goToPage: goToPage,
-    hasCommaValueClient: hasCommaValueClient,
-    loadPage: loadPage,
-    login: login,
-    onFilterChange: onFilterChange,
-    onSearchInput: onSearchInput,
-    openActionPanel: openActionPanel,
-    renderS201Section: renderS201Section,
-    renderTable: renderTable,
-    renderZ04Section: renderZ04Section,
-    reviewAction: reviewAction,
-    selectRow: selectRow,
-    showMessage: showMessage,
-    todayLocalISO: todayLocalISO,
-    updatePaginationBar: updatePaginationBar,
-    validateCorrectFields: validateCorrectFields,
-    validateDateRange: validateDateRange,
-    validateReceiveFields: validateReceiveFields
-  };
+  Object.defineProperties(window.Page = {}, {
+    APPS_SCRIPT_URL: { get: function(){ return APPS_SCRIPT_URL; }, set: function(v){ APPS_SCRIPT_URL = v; }, enumerable: true, configurable: true },
+    PAGE_SIZE: { get: function(){ return PAGE_SIZE; }, set: function(v){ PAGE_SIZE = v; }, enumerable: true, configurable: true },
+    TABLE_COLUMN_COUNT: { get: function(){ return TABLE_COLUMN_COUNT; }, set: function(v){ TABLE_COLUMN_COUNT = v; }, enumerable: true, configurable: true },
+    callApi: { get: function(){ return callApi; }, set: function(v){ callApi = v; }, enumerable: true, configurable: true },
+    cancelConfirm: { get: function(){ return cancelConfirm; }, set: function(v){ cancelConfirm = v; }, enumerable: true, configurable: true },
+    clearFilters: { get: function(){ return clearFilters; }, set: function(v){ clearFilters = v; }, enumerable: true, configurable: true },
+    clearMessage: { get: function(){ return clearMessage; }, set: function(v){ clearMessage = v; }, enumerable: true, configurable: true },
+    closeActionPanel: { get: function(){ return closeActionPanel; }, set: function(v){ closeActionPanel = v; }, enumerable: true, configurable: true },
+    currentPage: { get: function(){ return currentPage; }, set: function(v){ currentPage = v; }, enumerable: true, configurable: true },
+    currentRows: { get: function(){ return currentRows; }, set: function(v){ currentRows = v; }, enumerable: true, configurable: true },
+    currentUser: { get: function(){ return currentUser; }, set: function(v){ currentUser = v; }, enumerable: true, configurable: true },
+    detachActionPanel: { get: function(){ return detachActionPanel; }, set: function(v){ detachActionPanel = v; }, enumerable: true, configurable: true },
+    detailRowEl: { get: function(){ return detailRowEl; }, set: function(v){ detailRowEl = v; }, enumerable: true, configurable: true },
+    doSave: { get: function(){ return doSave; }, set: function(v){ doSave = v; }, enumerable: true, configurable: true },
+    goToPage: { get: function(){ return goToPage; }, set: function(v){ goToPage = v; }, enumerable: true, configurable: true },
+    hasCommaValueClient: { get: function(){ return hasCommaValueClient; }, set: function(v){ hasCommaValueClient = v; }, enumerable: true, configurable: true },
+    isAdminUser: { get: function(){ return isAdminUser; }, set: function(v){ isAdminUser = v; }, enumerable: true, configurable: true },
+    listRequestInFlight: { get: function(){ return listRequestInFlight; }, set: function(v){ listRequestInFlight = v; }, enumerable: true, configurable: true },
+    loadPage: { get: function(){ return loadPage; }, set: function(v){ loadPage = v; }, enumerable: true, configurable: true },
+    login: { get: function(){ return login; }, set: function(v){ login = v; }, enumerable: true, configurable: true },
+    onFilterChange: { get: function(){ return onFilterChange; }, set: function(v){ onFilterChange = v; }, enumerable: true, configurable: true },
+    onSearchInput: { get: function(){ return onSearchInput; }, set: function(v){ onSearchInput = v; }, enumerable: true, configurable: true },
+    openActionPanel: { get: function(){ return openActionPanel; }, set: function(v){ openActionPanel = v; }, enumerable: true, configurable: true },
+    pendingSaveAction: { get: function(){ return pendingSaveAction; }, set: function(v){ pendingSaveAction = v; }, enumerable: true, configurable: true },
+    renderS201Section: { get: function(){ return renderS201Section; }, set: function(v){ renderS201Section = v; }, enumerable: true, configurable: true },
+    renderTable: { get: function(){ return renderTable; }, set: function(v){ renderTable = v; }, enumerable: true, configurable: true },
+    renderZ04Section: { get: function(){ return renderZ04Section; }, set: function(v){ renderZ04Section = v; }, enumerable: true, configurable: true },
+    reviewAction: { get: function(){ return reviewAction; }, set: function(v){ reviewAction = v; }, enumerable: true, configurable: true },
+    s201RequestInFlight: { get: function(){ return s201RequestInFlight; }, set: function(v){ s201RequestInFlight = v; }, enumerable: true, configurable: true },
+    searchDebounceTimer: { get: function(){ return searchDebounceTimer; }, set: function(v){ searchDebounceTimer = v; }, enumerable: true, configurable: true },
+    selectRow: { get: function(){ return selectRow; }, set: function(v){ selectRow = v; }, enumerable: true, configurable: true },
+    selectedIndex: { get: function(){ return selectedIndex; }, set: function(v){ selectedIndex = v; }, enumerable: true, configurable: true },
+    showMessage: { get: function(){ return showMessage; }, set: function(v){ showMessage = v; }, enumerable: true, configurable: true },
+    todayLocalISO: { get: function(){ return todayLocalISO; }, set: function(v){ todayLocalISO = v; }, enumerable: true, configurable: true },
+    totalCount: { get: function(){ return totalCount; }, set: function(v){ totalCount = v; }, enumerable: true, configurable: true },
+    totalPages: { get: function(){ return totalPages; }, set: function(v){ totalPages = v; }, enumerable: true, configurable: true },
+    updatePaginationBar: { get: function(){ return updatePaginationBar; }, set: function(v){ updatePaginationBar = v; }, enumerable: true, configurable: true },
+    validateCorrectFields: { get: function(){ return validateCorrectFields; }, set: function(v){ validateCorrectFields = v; }, enumerable: true, configurable: true },
+    validateDateRange: { get: function(){ return validateDateRange; }, set: function(v){ validateDateRange = v; }, enumerable: true, configurable: true },
+    validateReceiveFields: { get: function(){ return validateReceiveFields; }, set: function(v){ validateReceiveFields = v; }, enumerable: true, configurable: true },
+    z04DetailRequestInFlight: { get: function(){ return z04DetailRequestInFlight; }, set: function(v){ z04DetailRequestInFlight = v; }, enumerable: true, configurable: true }
+  });
 
   // ---- shell auto-login: fill the page's OWN hidden login form and
   // submit it through the page's OWN unmodified login() function, so every

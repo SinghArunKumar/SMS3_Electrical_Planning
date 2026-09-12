@@ -633,32 +633,38 @@
     validateAll();
   }
 
-  window.Page = {
-    abortUCSCode: abortUCSCode,
-    callApi: callApi,
-    cancelInlineAddUCS: cancelInlineAddUCS,
-    clearMessage: clearMessage,
-    hasCommaValueClient: hasCommaValueClient,
-    hideInlineAddUCS: hideInlineAddUCS,
-    loadUnitOptions: loadUnitOptions,
-    login: login,
-    onSTONoInput: onSTONoInput,
-    onUCSCodeInput: onUCSCodeInput,
-    rawPost: rawPost,
-    resetForm: resetForm,
-    sanitizeDigits: sanitizeDigits,
-    showInlineAddUCS: showInlineAddUCS,
-    showMessage: showMessage,
-    submitInlineAddUCS: submitInlineAddUCS,
-    submitSTO: submitSTO,
-    todayLocalISO: todayLocalISO,
-    validateAll: validateAll,
-    validateQtyField: validateQtyField,
-    validateReceivedDateField: validateReceivedDateField,
-    validateReceivedQtyField: validateReceivedQtyField,
-    validateSTONoField: validateSTONoField,
-    validateUCSCodeField: validateUCSCodeField
-  };
+  Object.defineProperties(window.Page = {}, {
+    APPS_SCRIPT_URL: { get: function(){ return APPS_SCRIPT_URL; }, set: function(v){ APPS_SCRIPT_URL = v; }, enumerable: true, configurable: true },
+    abortUCSCode: { get: function(){ return abortUCSCode; }, set: function(v){ abortUCSCode = v; }, enumerable: true, configurable: true },
+    callApi: { get: function(){ return callApi; }, set: function(v){ callApi = v; }, enumerable: true, configurable: true },
+    cancelInlineAddUCS: { get: function(){ return cancelInlineAddUCS; }, set: function(v){ cancelInlineAddUCS = v; }, enumerable: true, configurable: true },
+    clearMessage: { get: function(){ return clearMessage; }, set: function(v){ clearMessage = v; }, enumerable: true, configurable: true },
+    currentUser: { get: function(){ return currentUser; }, set: function(v){ currentUser = v; }, enumerable: true, configurable: true },
+    hasCommaValueClient: { get: function(){ return hasCommaValueClient; }, set: function(v){ hasCommaValueClient = v; }, enumerable: true, configurable: true },
+    hideInlineAddUCS: { get: function(){ return hideInlineAddUCS; }, set: function(v){ hideInlineAddUCS = v; }, enumerable: true, configurable: true },
+    loadUnitOptions: { get: function(){ return loadUnitOptions; }, set: function(v){ loadUnitOptions = v; }, enumerable: true, configurable: true },
+    login: { get: function(){ return login; }, set: function(v){ login = v; }, enumerable: true, configurable: true },
+    onSTONoInput: { get: function(){ return onSTONoInput; }, set: function(v){ onSTONoInput = v; }, enumerable: true, configurable: true },
+    onUCSCodeInput: { get: function(){ return onUCSCodeInput; }, set: function(v){ onUCSCodeInput = v; }, enumerable: true, configurable: true },
+    rawPost: { get: function(){ return rawPost; }, set: function(v){ rawPost = v; }, enumerable: true, configurable: true },
+    resetForm: { get: function(){ return resetForm; }, set: function(v){ resetForm = v; }, enumerable: true, configurable: true },
+    sanitizeDigits: { get: function(){ return sanitizeDigits; }, set: function(v){ sanitizeDigits = v; }, enumerable: true, configurable: true },
+    showInlineAddUCS: { get: function(){ return showInlineAddUCS; }, set: function(v){ showInlineAddUCS = v; }, enumerable: true, configurable: true },
+    showMessage: { get: function(){ return showMessage; }, set: function(v){ showMessage = v; }, enumerable: true, configurable: true },
+    stoNoCheckInFlight: { get: function(){ return stoNoCheckInFlight; }, set: function(v){ stoNoCheckInFlight = v; }, enumerable: true, configurable: true },
+    stoNoConfirmedUnique: { get: function(){ return stoNoConfirmedUnique; }, set: function(v){ stoNoConfirmedUnique = v; }, enumerable: true, configurable: true },
+    submitInlineAddUCS: { get: function(){ return submitInlineAddUCS; }, set: function(v){ submitInlineAddUCS = v; }, enumerable: true, configurable: true },
+    submitSTO: { get: function(){ return submitSTO; }, set: function(v){ submitSTO = v; }, enumerable: true, configurable: true },
+    todayLocalISO: { get: function(){ return todayLocalISO; }, set: function(v){ todayLocalISO = v; }, enumerable: true, configurable: true },
+    ucsCheckInFlight: { get: function(){ return ucsCheckInFlight; }, set: function(v){ ucsCheckInFlight = v; }, enumerable: true, configurable: true },
+    ucsConfirmedFound: { get: function(){ return ucsConfirmedFound; }, set: function(v){ ucsConfirmedFound = v; }, enumerable: true, configurable: true },
+    validateAll: { get: function(){ return validateAll; }, set: function(v){ validateAll = v; }, enumerable: true, configurable: true },
+    validateQtyField: { get: function(){ return validateQtyField; }, set: function(v){ validateQtyField = v; }, enumerable: true, configurable: true },
+    validateReceivedDateField: { get: function(){ return validateReceivedDateField; }, set: function(v){ validateReceivedDateField = v; }, enumerable: true, configurable: true },
+    validateReceivedQtyField: { get: function(){ return validateReceivedQtyField; }, set: function(v){ validateReceivedQtyField = v; }, enumerable: true, configurable: true },
+    validateSTONoField: { get: function(){ return validateSTONoField; }, set: function(v){ validateSTONoField = v; }, enumerable: true, configurable: true },
+    validateUCSCodeField: { get: function(){ return validateUCSCodeField; }, set: function(v){ validateUCSCodeField = v; }, enumerable: true, configurable: true }
+  });
 
   // ---- shell auto-login: fill the page's OWN hidden login form and
   // submit it through the page's OWN unmodified login() function, so every

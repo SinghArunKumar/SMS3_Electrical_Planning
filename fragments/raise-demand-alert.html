@@ -362,21 +362,28 @@
     }
   }
 
-  window.Page = {
-    callApi: callApi,
-    clearMessage: clearMessage,
-    escapeHtml: escapeHtml,
-    hasCommaValueClient: hasCommaValueClient,
-    loadMaterials: loadMaterials,
-    loadMyAlerts: loadMyAlerts,
-    login: login,
-    onItemSearchInput: onItemSearchInput,
-    pickSuggestion: pickSuggestion,
-    setRequestType: setRequestType,
-    showMessage: showMessage,
-    statusBadge: statusBadge,
-    submitAlert: submitAlert
-  };
+  Object.defineProperties(window.Page = {}, {
+    APPS_SCRIPT_URL: { get: function(){ return APPS_SCRIPT_URL; }, set: function(v){ APPS_SCRIPT_URL = v; }, enumerable: true, configurable: true },
+    allMaterials: { get: function(){ return allMaterials; }, set: function(v){ allMaterials = v; }, enumerable: true, configurable: true },
+    callApi: { get: function(){ return callApi; }, set: function(v){ callApi = v; }, enumerable: true, configurable: true },
+    clearMessage: { get: function(){ return clearMessage; }, set: function(v){ clearMessage = v; }, enumerable: true, configurable: true },
+    currentSuggestions: { get: function(){ return currentSuggestions; }, set: function(v){ currentSuggestions = v; }, enumerable: true, configurable: true },
+    currentUser: { get: function(){ return currentUser; }, set: function(v){ currentUser = v; }, enumerable: true, configurable: true },
+    escapeHtml: { get: function(){ return escapeHtml; }, set: function(v){ escapeHtml = v; }, enumerable: true, configurable: true },
+    hasCommaValueClient: { get: function(){ return hasCommaValueClient; }, set: function(v){ hasCommaValueClient = v; }, enumerable: true, configurable: true },
+    inchargeAreas: { get: function(){ return inchargeAreas; }, set: function(v){ inchargeAreas = v; }, enumerable: true, configurable: true },
+    loadMaterials: { get: function(){ return loadMaterials; }, set: function(v){ loadMaterials = v; }, enumerable: true, configurable: true },
+    loadMyAlerts: { get: function(){ return loadMyAlerts; }, set: function(v){ loadMyAlerts = v; }, enumerable: true, configurable: true },
+    login: { get: function(){ return login; }, set: function(v){ login = v; }, enumerable: true, configurable: true },
+    onItemSearchInput: { get: function(){ return onItemSearchInput; }, set: function(v){ onItemSearchInput = v; }, enumerable: true, configurable: true },
+    pickSuggestion: { get: function(){ return pickSuggestion; }, set: function(v){ pickSuggestion = v; }, enumerable: true, configurable: true },
+    pickedItem: { get: function(){ return pickedItem; }, set: function(v){ pickedItem = v; }, enumerable: true, configurable: true },
+    requestType: { get: function(){ return requestType; }, set: function(v){ requestType = v; }, enumerable: true, configurable: true },
+    setRequestType: { get: function(){ return setRequestType; }, set: function(v){ setRequestType = v; }, enumerable: true, configurable: true },
+    showMessage: { get: function(){ return showMessage; }, set: function(v){ showMessage = v; }, enumerable: true, configurable: true },
+    statusBadge: { get: function(){ return statusBadge; }, set: function(v){ statusBadge = v; }, enumerable: true, configurable: true },
+    submitAlert: { get: function(){ return submitAlert; }, set: function(v){ submitAlert = v; }, enumerable: true, configurable: true }
+  });
 
   // ---- shell auto-login: fill the page's OWN hidden login form and
   // submit it through the page's OWN unmodified login() function, so every

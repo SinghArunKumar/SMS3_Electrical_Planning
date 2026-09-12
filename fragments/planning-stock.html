@@ -109,7 +109,7 @@
       <input type="text" id="searchBox" placeholder="Type any part of either..." oninput="Page.onSearchInput()">
     </div>
     <div id="zeroOnlyWrap">
-      <input type="checkbox" id="zeroOnlyCheck" onchange="currentPage=1; Page.renderTable();">
+      <input type="checkbox" id="zeroOnlyCheck" onchange="Page.currentPage=1; Page.renderTable();">
       <label for="zeroOnlyCheck">Zero / negative balance only</label>
     </div>
     <div>
@@ -486,7 +486,7 @@
         const bal = Number(m.balance) || 0;
         const rowClass = bal <= 0 ? 'zeroBalance' : '';
         const codeCell = isPlanningStaff
-          ? '<span class="clickableCode" onclick="Page.openHistory(\'' + escapeHtml(m.ucsCode).replace(/'/g, "\\'") + '\')" title="Click for full history">' + highlight(m.ucsCode, tokens) + '</span>'
+          ? '<span class="clickableCode" onclick="openHistory(\'' + escapeHtml(m.ucsCode).replace(/'/g, "\\'") + '\')" title="Click for full history">' + highlight(m.ucsCode, tokens) + '</span>'
           : highlight(m.ucsCode, tokens);
         return '<tr class="' + rowClass + '">' +
           '<td class="code">' + codeCell + '</td>' +
@@ -621,7 +621,7 @@
     document.getElementById('historyTabs').innerHTML = HISTORY_TABS.map(function (t) {
       const activeClass = (t.key === historyActiveTab) ? ' active' : '';
       const countLabel = counts[t.key] === null ? '' : ' (' + counts[t.key] + ')';
-      return '<button type="button" class="historyTabBtn' + activeClass + '" onclick="Page.switchHistoryTab(\'' + t.key + '\')">' + t.label + countLabel + '</button>';
+      return '<button type="button" class="historyTabBtn' + activeClass + '" onclick="switchHistoryTab(\'' + t.key + '\')">' + t.label + countLabel + '</button>';
     }).join('');
   }
 
@@ -777,41 +777,59 @@
     downloadCsv('planning_stock_' + new Date().toISOString().slice(0, 10) + '.csv', csv);
   }
 
-  window.Page = {
-    applyHistoryFilters: applyHistoryFilters,
-    buildChartSvg: buildChartSvg,
-    callApi: callApi,
-    clearFilters: clearFilters,
-    clearHistoryFilters: clearHistoryFilters,
-    clearMessage: clearMessage,
-    closeHistory: closeHistory,
-    csvEscape: csvEscape,
-    downloadCsv: downloadCsv,
-    escapeHtml: escapeHtml,
-    exportHistoryTabCsv: exportHistoryTabCsv,
-    exportMainCsv: exportMainCsv,
-    fetchHistory: fetchHistory,
-    forceSnapshotRefresh: forceSnapshotRefresh,
-    hasCommaValue: hasCommaValue,
-    highlight: highlight,
-    loadStock: loadStock,
-    login: login,
-    logout: logout,
-    nextPage: nextPage,
-    onSearchInput: onSearchInput,
-    openHistory: openHistory,
-    populateAreaOptions: populateAreaOptions,
-    prevPage: prevPage,
-    renderHistoryBody: renderHistoryBody,
-    renderHistoryTabContent: renderHistoryTabContent,
-    renderHistoryTabs: renderHistoryTabs,
-    renderTable: renderTable,
-    setSort: setSort,
-    showMessage: showMessage,
-    switchHistoryTab: switchHistoryTab,
-    toCsv: toCsv,
-    updateSortArrows: updateSortArrows
-  };
+  Object.defineProperties(window.Page = {}, {
+    APPS_SCRIPT_URL: { get: function(){ return APPS_SCRIPT_URL; }, set: function(v){ APPS_SCRIPT_URL = v; }, enumerable: true, configurable: true },
+    HISTORY_TABS: { get: function(){ return HISTORY_TABS; }, set: function(v){ HISTORY_TABS = v; }, enumerable: true, configurable: true },
+    PAGE_SIZE: { get: function(){ return PAGE_SIZE; }, set: function(v){ PAGE_SIZE = v; }, enumerable: true, configurable: true },
+    POLL_INTERVAL_MS: { get: function(){ return POLL_INTERVAL_MS; }, set: function(v){ POLL_INTERVAL_MS = v; }, enumerable: true, configurable: true },
+    TAB_COLUMNS: { get: function(){ return TAB_COLUMNS; }, set: function(v){ TAB_COLUMNS = v; }, enumerable: true, configurable: true },
+    allItems: { get: function(){ return allItems; }, set: function(v){ allItems = v; }, enumerable: true, configurable: true },
+    applyHistoryFilters: { get: function(){ return applyHistoryFilters; }, set: function(v){ applyHistoryFilters = v; }, enumerable: true, configurable: true },
+    buildChartSvg: { get: function(){ return buildChartSvg; }, set: function(v){ buildChartSvg = v; }, enumerable: true, configurable: true },
+    callApi: { get: function(){ return callApi; }, set: function(v){ callApi = v; }, enumerable: true, configurable: true },
+    clearFilters: { get: function(){ return clearFilters; }, set: function(v){ clearFilters = v; }, enumerable: true, configurable: true },
+    clearHistoryFilters: { get: function(){ return clearHistoryFilters; }, set: function(v){ clearHistoryFilters = v; }, enumerable: true, configurable: true },
+    clearMessage: { get: function(){ return clearMessage; }, set: function(v){ clearMessage = v; }, enumerable: true, configurable: true },
+    closeHistory: { get: function(){ return closeHistory; }, set: function(v){ closeHistory = v; }, enumerable: true, configurable: true },
+    csvEscape: { get: function(){ return csvEscape; }, set: function(v){ csvEscape = v; }, enumerable: true, configurable: true },
+    currentPage: { get: function(){ return currentPage; }, set: function(v){ currentPage = v; }, enumerable: true, configurable: true },
+    currentUser: { get: function(){ return currentUser; }, set: function(v){ currentUser = v; }, enumerable: true, configurable: true },
+    downloadCsv: { get: function(){ return downloadCsv; }, set: function(v){ downloadCsv = v; }, enumerable: true, configurable: true },
+    escapeHtml: { get: function(){ return escapeHtml; }, set: function(v){ escapeHtml = v; }, enumerable: true, configurable: true },
+    exportHistoryTabCsv: { get: function(){ return exportHistoryTabCsv; }, set: function(v){ exportHistoryTabCsv = v; }, enumerable: true, configurable: true },
+    exportMainCsv: { get: function(){ return exportMainCsv; }, set: function(v){ exportMainCsv = v; }, enumerable: true, configurable: true },
+    fetchHistory: { get: function(){ return fetchHistory; }, set: function(v){ fetchHistory = v; }, enumerable: true, configurable: true },
+    forceSnapshotRefresh: { get: function(){ return forceSnapshotRefresh; }, set: function(v){ forceSnapshotRefresh = v; }, enumerable: true, configurable: true },
+    hasCommaValue: { get: function(){ return hasCommaValue; }, set: function(v){ hasCommaValue = v; }, enumerable: true, configurable: true },
+    highlight: { get: function(){ return highlight; }, set: function(v){ highlight = v; }, enumerable: true, configurable: true },
+    historyActiveTab: { get: function(){ return historyActiveTab; }, set: function(v){ historyActiveTab = v; }, enumerable: true, configurable: true },
+    historyData: { get: function(){ return historyData; }, set: function(v){ historyData = v; }, enumerable: true, configurable: true },
+    historyUcsCode: { get: function(){ return historyUcsCode; }, set: function(v){ historyUcsCode = v; }, enumerable: true, configurable: true },
+    isPlanningStaff: { get: function(){ return isPlanningStaff; }, set: function(v){ isPlanningStaff = v; }, enumerable: true, configurable: true },
+    lastRenderedRows: { get: function(){ return lastRenderedRows; }, set: function(v){ lastRenderedRows = v; }, enumerable: true, configurable: true },
+    listRequestInFlight: { get: function(){ return listRequestInFlight; }, set: function(v){ listRequestInFlight = v; }, enumerable: true, configurable: true },
+    loadStock: { get: function(){ return loadStock; }, set: function(v){ loadStock = v; }, enumerable: true, configurable: true },
+    login: { get: function(){ return login; }, set: function(v){ login = v; }, enumerable: true, configurable: true },
+    logout: { get: function(){ return logout; }, set: function(v){ logout = v; }, enumerable: true, configurable: true },
+    nextPage: { get: function(){ return nextPage; }, set: function(v){ nextPage = v; }, enumerable: true, configurable: true },
+    onSearchInput: { get: function(){ return onSearchInput; }, set: function(v){ onSearchInput = v; }, enumerable: true, configurable: true },
+    openHistory: { get: function(){ return openHistory; }, set: function(v){ openHistory = v; }, enumerable: true, configurable: true },
+    pollTimer: { get: function(){ return pollTimer; }, set: function(v){ pollTimer = v; }, enumerable: true, configurable: true },
+    populateAreaOptions: { get: function(){ return populateAreaOptions; }, set: function(v){ populateAreaOptions = v; }, enumerable: true, configurable: true },
+    prevPage: { get: function(){ return prevPage; }, set: function(v){ prevPage = v; }, enumerable: true, configurable: true },
+    renderHistoryBody: { get: function(){ return renderHistoryBody; }, set: function(v){ renderHistoryBody = v; }, enumerable: true, configurable: true },
+    renderHistoryTabContent: { get: function(){ return renderHistoryTabContent; }, set: function(v){ renderHistoryTabContent = v; }, enumerable: true, configurable: true },
+    renderHistoryTabs: { get: function(){ return renderHistoryTabs; }, set: function(v){ renderHistoryTabs = v; }, enumerable: true, configurable: true },
+    renderTable: { get: function(){ return renderTable; }, set: function(v){ renderTable = v; }, enumerable: true, configurable: true },
+    searchDebounceTimer: { get: function(){ return searchDebounceTimer; }, set: function(v){ searchDebounceTimer = v; }, enumerable: true, configurable: true },
+    setSort: { get: function(){ return setSort; }, set: function(v){ setSort = v; }, enumerable: true, configurable: true },
+    showMessage: { get: function(){ return showMessage; }, set: function(v){ showMessage = v; }, enumerable: true, configurable: true },
+    sortDir: { get: function(){ return sortDir; }, set: function(v){ sortDir = v; }, enumerable: true, configurable: true },
+    sortKey: { get: function(){ return sortKey; }, set: function(v){ sortKey = v; }, enumerable: true, configurable: true },
+    switchHistoryTab: { get: function(){ return switchHistoryTab; }, set: function(v){ switchHistoryTab = v; }, enumerable: true, configurable: true },
+    toCsv: { get: function(){ return toCsv; }, set: function(v){ toCsv = v; }, enumerable: true, configurable: true },
+    updateSortArrows: { get: function(){ return updateSortArrows; }, set: function(v){ updateSortArrows = v; }, enumerable: true, configurable: true }
+  });
 
   // ---- shell auto-login: fill the page's OWN hidden login form and
   // submit it through the page's OWN unmodified login() function, so every

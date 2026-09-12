@@ -258,17 +258,19 @@
     }
   }
 
-  window.Page = {
-    callApi: callApi,
-    cancelEdit: cancelEdit,
-    clearMessage: clearMessage,
-    login: login,
-    lookupCode: lookupCode,
-    sanitizeAndValidateSearchCode: sanitizeAndValidateSearchCode,
-    saveEdit: saveEdit,
-    showMessage: showMessage,
-    validateSearchCodeField: validateSearchCodeField
-  };
+  Object.defineProperties(window.Page = {}, {
+    APPS_SCRIPT_URL: { get: function(){ return APPS_SCRIPT_URL; }, set: function(v){ APPS_SCRIPT_URL = v; }, enumerable: true, configurable: true },
+    callApi: { get: function(){ return callApi; }, set: function(v){ callApi = v; }, enumerable: true, configurable: true },
+    cancelEdit: { get: function(){ return cancelEdit; }, set: function(v){ cancelEdit = v; }, enumerable: true, configurable: true },
+    clearMessage: { get: function(){ return clearMessage; }, set: function(v){ clearMessage = v; }, enumerable: true, configurable: true },
+    currentUser: { get: function(){ return currentUser; }, set: function(v){ currentUser = v; }, enumerable: true, configurable: true },
+    login: { get: function(){ return login; }, set: function(v){ login = v; }, enumerable: true, configurable: true },
+    lookupCode: { get: function(){ return lookupCode; }, set: function(v){ lookupCode = v; }, enumerable: true, configurable: true },
+    sanitizeAndValidateSearchCode: { get: function(){ return sanitizeAndValidateSearchCode; }, set: function(v){ sanitizeAndValidateSearchCode = v; }, enumerable: true, configurable: true },
+    saveEdit: { get: function(){ return saveEdit; }, set: function(v){ saveEdit = v; }, enumerable: true, configurable: true },
+    showMessage: { get: function(){ return showMessage; }, set: function(v){ showMessage = v; }, enumerable: true, configurable: true },
+    validateSearchCodeField: { get: function(){ return validateSearchCodeField; }, set: function(v){ validateSearchCodeField = v; }, enumerable: true, configurable: true }
+  });
 
   // ---- shell auto-login: fill the page's OWN hidden login form and
   // submit it through the page's OWN unmodified login() function, so every
