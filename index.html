@@ -11,7 +11,7 @@
   :root {
     --blue: #1a73e8;
     --blue-dark: #1557b0;
-    --bg: #e9ebec;
+    --bg: #dde3ea;
     --card-bg: #ffffff;
     --border: #e0e0e0;
     --text: #1f2430;
@@ -25,6 +25,12 @@
     margin: 0; padding: 0; height: 100%;
     font-family: 'Barlow', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     color: var(--text); background: var(--bg);
+    /* Very subtle gradient, deliberately kept within a tight range of the
+       same tone -- enough to add a touch of depth without shifting text
+       contrast meaningfully anywhere on the page, which matters here since
+       none of the 17 pages' own text colors were designed with a varying
+       background in mind. */
+    background: linear-gradient(135deg, #dde3ea, #d3dae2);
   }
   /* Headings inside the content area use Barlow Condensed -- this applies
      across all 17 pages at once without touching any of their own files,
