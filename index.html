@@ -67,7 +67,12 @@
   #sidebar.collapsed .navLabel, #sidebar.collapsed .navGroupLabel, #sidebar.collapsed .brandText {
     display: none;
   }
-  #sidebar.collapsed .navItem { justify-content: center; padding: 0; }
+  /* Fixed height (not padding-based sizing) is deliberate: relying on
+     content to size each row risks small, inconsistent differences row to
+     row (inline SVGs carry their own baseline spacing that isn't always
+     identical), which is what produced visibly uneven gaps between icons.
+     A fixed height makes every row exactly the same regardless of content. */
+  #sidebar.collapsed .navItem { justify-content: center; padding: 0; height: 44px; }
   #sidebar.collapsed .navItem.active { border-right: none; border-left: 3px solid var(--blue); }
   #sidebar.collapsed .brand { justify-content: center; padding: 20px 0; gap: 0; }
 
@@ -101,6 +106,10 @@
   .navItem:hover { background: rgba(255,255,255,0.06); }
   .navItem.active { background: var(--sidebar-active); color: #fff; border-right: 3px solid var(--blue); }
   .navIcon { display: flex; align-items: center; opacity: 0.9; flex-shrink: 0; }
+  /* SVGs are inline by default and carry small built-in baseline spacing
+     that browsers apply inconsistently -- forcing block display removes
+     that as a possible source of row-to-row height variation. */
+  .navIcon svg { display: block; }
   .navEmpty { padding: 16px 18px; font-size: 13px; color: #8b97ad; }
 
   #mainArea { flex: 1; display: flex; flex-direction: column; min-width: 0; }
