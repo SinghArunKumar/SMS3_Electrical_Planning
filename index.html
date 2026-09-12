@@ -58,8 +58,11 @@
 
   #sidebar {
     width: 250px; flex-shrink: 0; background: var(--sidebar-bg); color: var(--sidebar-text);
-    display: flex; flex-direction: column; transition: margin-left 0.2s ease;
+    display: flex; flex-direction: column; transition: margin-left 0.2s ease, width 0.2s ease;
+    overflow: hidden;
   }
+  #sidebar.collapsed { width: 0; }
+  #sidebar.collapsed .brand, #sidebar.collapsed #navMenu { opacity: 0; pointer-events: none; }
   #sidebar .brand {
     padding: 20px 18px; font-weight: 700; font-size: 16px; color: #fff;
     border-bottom: 1px solid rgba(255,255,255,0.08);
@@ -85,8 +88,8 @@
     display: flex; align-items: center; padding: 0 16px; gap: 12px;
   }
   #hamburgerBtn {
-    display: none; background: none; border: none; cursor: pointer; padding: 6px;
-    color: var(--text);
+    display: flex; align-items: center; background: none; border: none; cursor: pointer;
+    padding: 6px; color: var(--text);
   }
   #userBadge { font-size: 13px; color: var(--text-muted); }
   #topbarSpacer { flex: 1; }
@@ -109,17 +112,37 @@
 
   /* Every page already shows its own "Logged in as X (role) [Log out]"
      bar, which is now redundant with the shell's own top-bar Log out
-     button -- hide just the button, keep the informational text. */
-  #pageContainer #logoutBtn { display: none; }
+     button -- hide just the button, keep the informational text.
+     !important is deliberate here: fragments' own generic `button{...}`
+     rules apply document-wide (a <style> tag isn't scoped to where it
+     sits in the DOM), so a plain rule here could lose a specificity fight
+     against one of 17 different pages' own styling. This one rule is
+     small and permanent, so !important is the right tool. */
+  #pageContainer #logoutBtn { display: none !important; }
+
+  /* The shell's own persistent chrome (sidebar, topbar, login screen) needs
+     to be immune to the SAME leaking-<style> problem in the other
+     direction: several pages have generic `button{width:100%}` rules
+     meant for their own single-column forms, which -- being global --
+     also stretched the shell's own Log out button to full width the
+     moment such a page loaded. Lock down every property a stray fragment
+     rule could plausibly set, on every piece of persistent shell chrome. */
+  #sidebar, #topbar, #loginScreen, #loginCard {
+    width: revert !important; max-width: revert !important; box-sizing: border-box !important;
+  }
+  #logoutBtnShell, #hamburgerBtn, .navItem, #loginBtnShell {
+    width: auto !important; max-width: none !important; display: revert !important;
+  }
+  #navMenu a.navItem { display: flex !important; }
 
   @media (max-width: 860px) {
     #appShell { position: relative; }
     #sidebar {
       position: fixed; top: 0; bottom: 0; left: 0; z-index: 20;
-      margin-left: -250px;
+      margin-left: -250px; width: 250px;
     }
     #sidebar.open { margin-left: 0; box-shadow: 4px 0 16px rgba(0,0,0,0.25); }
-    #hamburgerBtn { display: block; }
+    #sidebar.collapsed { width: 250px; } /* on mobile, "collapsed" has no meaning -- off-canvas open/close only */
     #pageContainer { padding: 16px; }
   }
 </style>
@@ -152,7 +175,7 @@
 
   <div id="mainArea">
     <div id="topbar">
-      <button id="hamburgerBtn" onclick="toggleSidebar()">☰</button>
+      <button id="hamburgerBtn" onclick="toggleSidebar()" title="Show/hide sidebar">☰</button>
       <span id="userBadge"></span>
       <div id="topbarSpacer"></div>
       <button id="logoutBtnShell" onclick="Shell.logout()">Log out</button>

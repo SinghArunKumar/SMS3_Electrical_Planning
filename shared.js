@@ -315,7 +315,12 @@ async function shellLogin() {
 }
 
 function toggleSidebar() {
-  document.getElementById('sidebar').classList.toggle('open');
+  const sidebar = document.getElementById('sidebar');
+  if (window.innerWidth <= 860) {
+    sidebar.classList.toggle('open');
+  } else {
+    sidebar.classList.toggle('collapsed');
+  }
 }
 
 // Install the addEventListener tracking wrapper and the login-caching
