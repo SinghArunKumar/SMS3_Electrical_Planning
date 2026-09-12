@@ -139,7 +139,7 @@ const Access = {
 const PAGES = [
   // --- UCS Codes ---
   { key: 'search-ucs', file: 'search-ucs.html', label: 'Search UCS Codes', icon: 'search', group: 'UCS Codes', access: Access.anyLoggedIn },
-  { key: 'add-ucs-code', file: 'add-ucs-code.html', label: 'Add UCS Code', icon: 'plus', group: 'UCS Codes', access: Access.anyLoggedIn },
+  { key: 'add-ucs-code', file: 'add-ucs-code.html', label: 'Add UCS Code', icon: 'plus', group: 'UCS Codes', access: Access.canManageSTO },
   { key: 'edit-ucs-code', file: 'edit-ucs-code.html', label: 'Edit UCS Code', icon: 'edit', group: 'UCS Codes', access: Access.isApprover },
 
   // --- Planning / STO flow ---
