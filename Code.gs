@@ -414,10 +414,15 @@ function getColIndexOrThrow_(headers, name, sheetLabel) {
 }
 
 // ====== ADD NEW UCS CODE ======
+// Restricted to Planning staff (excluding Store Incharge) -- same gate as
+// STO/Z04/201, per the project owner's explicit decision. Previously this
+// only called checkLogin() (any logged-in user), which is why an Area Store
+// Supervisor could reach and submit this form -- fixed here.
 
 function addUCSCode(data) {
-  const login = checkLogin(data.email, data.password);
-  if (!login.success) return jsonResponse(login);
+  const check = requireSTOAccess(data);
+  if (!check.ok) return check.response;
+  const login = check.login;
 
   const ucsCode = String(data.ucsCode || '').trim();
   const shortText = String(data.shortText || '').trim();
@@ -605,7 +610,7 @@ function checkSTONoExists(data) {
   const values = sheet.getDataRange().getValues();
   const headers = values[0];
   const col = {};
-  headers.forEach(function (h, idx) { col[h] = idx; });
+  headers.forEach((h, idx) => { col[h] = idx; });
 
   for (let i = 1; i < values.length; i++) {
     if (String(values[i][col['STO_No']]).trim() === stoNo) {
@@ -1852,18 +1857,6 @@ function addS201Entry(data) {
       (newRemaining === 0 ? ' (FULLY EXHAUSTED)' : '')
   );
 
-  // S_201 (when Released_to_Area != 'Planning') is one of AREA_STOCK's two
-  // inflow sources (the other is PLNG_ISSUE_SHEET) -- refresh it here too.
-  // Never let a snapshot failure block the transaction itself, already fully
-  // recorded above -- just log it loudly.
-  if (String(releasedToArea).trim().toUpperCase() !== 'PLANNING') {
-    try {
-      refreshAreaStock();
-    } catch (e) {
-      logAudit(login.name, data.email, 'AREA_STOCK_REFRESH_FAILED', 'After 201 entry for STO ' + stoNo + ': ' + e.message);
-    }
-  }
-
   return jsonResponse({
     success: true,
     message: '201 entry for STO ' + stoNo + ' saved successfully. Remaining: ' + newRemaining + ' of ' + qtyRecievedZ04 + '.',
@@ -2500,19 +2493,15 @@ function finishIssueRequisition_(data, login, slipId, area, issuedTo, headerShee
     'Slip ' + slipId + ' | Area ' + area + ' | Issued to: ' + issuedTo + ' | ' + writes.length + ' item(s): ' +
     writes.map(function (w) { return w.ucsCode + ' x' + w.qtyIssued; }).join(', '));
 
-  // ---- Write-triggered stock refresh. Never let a snapshot failure block the
-  // transaction itself, which is already fully recorded above -- just log it loudly. ----
-  try {
-    refreshPlanningStock();
-  } catch (e) {
-    logAudit(login.name, data.email, 'PLNG_STOCK_REFRESH_FAILED', 'After issuing slip ' + slipId + ': ' + e.message);
-  }
-  // PLNG_ISSUE_SHEET is also one of AREA_STOCK's two inflow sources (the other is S_201) -- refresh that too.
-  try {
-    refreshAreaStock();
-  } catch (e) {
-    logAudit(login.name, data.email, 'AREA_STOCK_REFRESH_FAILED', 'After issuing slip ' + slipId + ': ' + e.message);
-  }
+  // Snapshot refresh (PLNG_STOCK / AREA_STOCK) intentionally NOT triggered
+  // here anymore -- nothing in the web app reads those sheets (every live
+  // dashboard recomputes fresh via computePlanningStockMap_/
+  // computeAreaStockMap_ directly), so this was pure latency on the
+  // critical path for zero user-visible benefit. The 30-minute timer
+  // trigger (setupPlanningStockTrigger/setupAreaStockTrigger) still keeps
+  // the snapshot sheets current for anyone browsing the raw spreadsheet,
+  // and the "Refresh" button on each dashboard (refreshPlanningStockEndpoint/
+  // refreshAreaStockEndpoint) still forces it instantly on demand.
 
   return jsonResponse({ success: true, message: 'Slip ' + slipId + ' issued to ' + issuedTo + '. Requisition completed.' });
 }
@@ -3192,13 +3181,9 @@ function recordLocalIssue(data) {
     logAudit(login.name, data.email, 'RECORD_LOCAL_ISSUE',
       area + ': ' + clean.map(function (c) { return c.ucsCode + ' x' + c.qty; }).join(', ') + ' -> ' + issuedTo);
 
-    // ---- Write-triggered stock refresh. Never let a snapshot failure block the
-    // transaction itself, which is already fully recorded above -- just log it loudly. ----
-    try {
-      refreshAreaStock();
-    } catch (e) {
-      logAudit(login.name, data.email, 'AREA_STOCK_REFRESH_FAILED', 'After local issue in ' + area + ': ' + e.message);
-    }
+    // Snapshot refresh (AREA_STOCK) intentionally NOT triggered here anymore --
+    // see the matching note in finishIssueRequisition_ above. The 30-minute
+    // timer trigger and the dashboard's own "Refresh" button still cover this.
 
     return jsonResponse({ success: true, message: clean.length + ' item(s) issued from ' + area + "'s local stock." });
   } finally {
