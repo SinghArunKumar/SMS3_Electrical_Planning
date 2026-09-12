@@ -64,8 +64,24 @@
   /* Collapsed = a slim icon-only rail, not a fully hidden sidebar -- icons
      stay visible and clickable, only the text labels disappear. */
   #sidebar.collapsed { width: 64px !important; }
-  #sidebar.collapsed .navLabel, #sidebar.collapsed .navGroupLabel, #sidebar.collapsed .brandText {
+  /* navLabel (page name next to each icon) and brandText (top logo's title)
+     are safe with display:none -- they don't affect row height, since a
+     navItem row's height comes from its icon regardless of whether the
+     text next to it is present.
+     navGroupLabel is different and MUST use visibility:hidden instead:
+     display:none removes its block-level height from the layout entirely,
+     which shifts every icon below it upward to fill that space -- and
+     since there are 4 group labels stacked down the sidebar, that shift
+     compounds group after group, moving icons further and further from
+     their expanded-view position the further down the list they are.
+     visibility:hidden hides the text but keeps its box (and height)
+     reserved, so every icon stays at the exact same vertical position
+     whether the sidebar is collapsed or expanded. */
+  #sidebar.collapsed .navLabel, #sidebar.collapsed .brandText {
     display: none;
+  }
+  #sidebar.collapsed .navGroupLabel {
+    visibility: hidden;
   }
   /* Fixed height (not padding-based sizing) is deliberate: relying on
      content to size each row risks small, inconsistent differences row to
@@ -97,7 +113,17 @@
   #navMenu { flex: 1; overflow-y: auto; padding: 10px 0; }
   .navGroupLabel {
     padding: 14px 18px 6px; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase;
-    color: #8b97ad;
+    color: #8b97ad; white-space: nowrap;
+    /* nowrap is deliberate, not just cosmetic: when collapsed, this label
+       is visibility:hidden (not display:none) specifically so its height
+       still reserves the correct space and icons don't shift position --
+       but that only works if the height itself doesn't change. Without
+       nowrap, the same text would wrap onto 2+ lines at the narrow 64px
+       collapsed width instead of the 1 line it uses at full width, giving
+       a DIFFERENT height and quietly reintroducing a (smaller, less
+       predictable) version of the same shift this fix exists to prevent.
+       The overflowing text is invisible either way (visibility:hidden, and
+       #sidebar itself clips overflow), so nowrap costs nothing visually. */
   }
   .navItem {
     display: flex; align-items: center; gap: 10px; padding: 9px 18px;
