@@ -102,8 +102,15 @@
   /* Undo the "boxed-in narrow column" look each old standalone page used to
      have (max-width:480px on <body>). That selector only ever hits the real
      <body> element, never our container div, so pages now stretch to fill
-     the available width naturally -- no per-page CSS edits needed. */
-  #pageContainer > div { max-width: 900px; }
+     the available width naturally -- no per-page CSS edits needed.
+     Widened from 900px: data-heavy tables (STO Dashboard etc.) were being
+     forced into a horizontal scrollbar on screens that had plenty of room. */
+  #pageContainer > div { max-width: 1400px; }
+
+  /* Every page already shows its own "Logged in as X (role) [Log out]"
+     bar, which is now redundant with the shell's own top-bar Log out
+     button -- hide just the button, keep the informational text. */
+  #pageContainer #logoutBtn { display: none; }
 
   @media (max-width: 860px) {
     #appShell { position: relative; }

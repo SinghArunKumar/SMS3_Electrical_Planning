@@ -55,6 +55,51 @@ const Shell = {
     this._trackedListeners = [];
   },
 
+  // Every page's own login() re-verifies email/password against the Users
+  // sheet -- a full Apps Script round-trip -- which was correct as a
+  // one-time check in the original standalone-page world, but now runs
+  // AGAIN on every single navigation since the shell reuses that same
+  // tested code for safety. That's the main cause of the app feeling slow:
+  // 2x the necessary network calls per page, plus real Apps Script latency.
+  // Fix: once the shell has verified these exact credentials, short-circuit
+  // any repeat login network call and answer from memory instead -- no
+  // fragment code changes needed, and this matches the ORIGINAL app's own
+  // behavior (a standalone page never re-checked its own login mid-session
+  // either).
+  _wrapFetchOnce() {
+    if (this._fetchWrapped) return;
+    this._fetchWrapped = true;
+    const originalFetch = window.fetch.bind(window);
+    const self = this;
+    window.fetch = function (url, options) {
+      if (
+        url === self.APPS_SCRIPT_URL &&
+        options && options.method === 'POST' && typeof options.body === 'string'
+      ) {
+        try {
+          const parsed = JSON.parse(options.body);
+          if (
+            parsed.action === 'login' && self.currentUser &&
+            parsed.email === self.currentUser.email &&
+            parsed.password === self.currentUser.password
+          ) {
+            const cached = {
+              success: true,
+              name: self.currentUser.name,
+              role: self.currentUser.role,
+              authorizedArea: self.currentUser.authorizedArea,
+              isAdmin: self.currentUser.isAdmin
+            };
+            return Promise.resolve(new Response(JSON.stringify(cached), {
+              status: 200, headers: { 'Content-Type': 'application/json' }
+            }));
+          }
+        } catch (e) { /* not JSON, or not a login call -- fall through */ }
+      }
+      return originalFetch(url, options);
+    };
+  },
+
   logout() {
     this.currentUser = null;
     this.clearAllIntervals();
@@ -273,6 +318,7 @@ function toggleSidebar() {
   document.getElementById('sidebar').classList.toggle('open');
 }
 
-// Install the addEventListener tracking wrapper immediately, before any
-// fragment ever gets a chance to add a listener.
+// Install the addEventListener tracking wrapper and the login-caching
+// fetch wrapper immediately, before any fragment ever gets a chance to run.
 Shell._wrapAddEventListenerOnce();
+Shell._wrapFetchOnce();
