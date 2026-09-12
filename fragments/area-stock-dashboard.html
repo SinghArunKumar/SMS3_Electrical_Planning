@@ -471,7 +471,7 @@
     const pageRows = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
     bodyEl.innerHTML = pageRows.map(function (it) {
       const rowClass = it.qtyBalance < 0 ? 'negBalance' : (it.qtyBalance === 0 ? 'zeroBalance' : '');
-      const codeCell = '<span class="clickableCode" onclick="openHistory(\'' + escapeHtml(it.ucsCode).replace(/'/g, "\\'") + '\')" title="Click for this area\'s movement history">' + highlight(it.ucsCode, tokens) + '</span>';
+      const codeCell = '<span class="clickableCode" onclick="Page.openHistory(\'' + Page.escapeHtml(it.ucsCode).replace(/'/g, "\\'") + '\')" title="Click for this area\'s movement history">' + highlight(it.ucsCode, tokens) + '</span>';
       return '<tr class="' + rowClass + '">' +
         '<td class="code">' + codeCell + '</td>' +
         '<td>' + highlight(it.itemDescription, tokens) + '</td>' +
@@ -629,7 +629,7 @@
     };
     document.getElementById('historyTabs').innerHTML = HISTORY_TABS.map(function (t) {
       const activeClass = (t.key === historyActiveTab) ? ' active' : '';
-      return '<button type="button" class="historyTabBtn' + activeClass + '" onclick="switchHistoryTab(\'' + t.key + '\')">' + t.label + ' (' + counts[t.key] + ')</button>';
+      return '<button type="button" class="historyTabBtn' + activeClass + '" onclick="Page.switchHistoryTab(\'' + t.key + '\')">' + t.label + ' (' + counts[t.key] + ')</button>';
     }).join('');
   }
 

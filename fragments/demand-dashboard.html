@@ -216,7 +216,7 @@
     body.innerHTML = alerts.map(function (a) {
       const material = a.ucsCode ? (escapeHtml(a.ucsCode) + ' \u2014 ' + escapeHtml(a.itemDescription)) : ('<i>(New)</i> ' + escapeHtml(a.itemDescription));
       const rows = [
-        '<tr class="rowClickable" onclick="toggleDetail(\'' + a.alertId + '\')">' +
+        '<tr class="rowClickable" onclick="Page.toggleDetail(\'' + a.alertId + '\')">' +
           '<td>' + escapeHtml(a.dateRaised) + '</td>' +
           '<td>' + escapeHtml(a.area) + '</td>' +
           '<td>' + escapeHtml(a.raisedByName) + '</td>' +
@@ -236,7 +236,7 @@
               }).join('') +
             '</select></div>' +
             '<div style="flex:2;"><label>Planning remarks</label><input type="text" id="remarksInput_' + a.alertId + '" value="' + escapeHtml(a.planningRemarks || '') + '" style="width:100%;"></div>' +
-            '<div style="flex:0 0 auto;"><button onclick="saveStatus(\'' + a.alertId + '\')">Save</button></div>' +
+            '<div style="flex:0 0 auto;"><button onclick="Page.saveStatus(\'' + a.alertId + '\')">Save</button></div>' +
           '</div>' +
           (a.lastUpdatedBy ? '<div style="font-size:12px; color:#888; padding-bottom:8px;">Last updated by ' + escapeHtml(a.lastUpdatedBy) + ' on ' + escapeHtml(a.lastUpdatedAt || '') + '</div>' : '') +
           '</td></tr>'

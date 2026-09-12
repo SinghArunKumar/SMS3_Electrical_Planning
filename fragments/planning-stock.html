@@ -486,7 +486,7 @@
         const bal = Number(m.balance) || 0;
         const rowClass = bal <= 0 ? 'zeroBalance' : '';
         const codeCell = isPlanningStaff
-          ? '<span class="clickableCode" onclick="openHistory(\'' + escapeHtml(m.ucsCode).replace(/'/g, "\\'") + '\')" title="Click for full history">' + highlight(m.ucsCode, tokens) + '</span>'
+          ? '<span class="clickableCode" onclick="Page.openHistory(\'' + Page.escapeHtml(m.ucsCode).replace(/'/g, "\\'") + '\')" title="Click for full history">' + highlight(m.ucsCode, tokens) + '</span>'
           : highlight(m.ucsCode, tokens);
         return '<tr class="' + rowClass + '">' +
           '<td class="code">' + codeCell + '</td>' +
@@ -621,7 +621,7 @@
     document.getElementById('historyTabs').innerHTML = HISTORY_TABS.map(function (t) {
       const activeClass = (t.key === historyActiveTab) ? ' active' : '';
       const countLabel = counts[t.key] === null ? '' : ' (' + counts[t.key] + ')';
-      return '<button type="button" class="historyTabBtn' + activeClass + '" onclick="switchHistoryTab(\'' + t.key + '\')">' + t.label + countLabel + '</button>';
+      return '<button type="button" class="historyTabBtn' + activeClass + '" onclick="Page.switchHistoryTab(\'' + t.key + '\')">' + t.label + countLabel + '</button>';
     }).join('');
   }
 
