@@ -139,42 +139,54 @@ const Access = {
 const PAGES = [
   // --- UCS Codes ---
   { key: 'search-ucs', file: 'search-ucs.html', label: 'Search UCS Codes', icon: 'search', group: 'UCS Codes', access: Access.anyLoggedIn },
-  { key: 'add-ucs-code', file: 'add-ucs-code.html', label: 'Add UCS Code', icon: 'plus', group: 'UCS Codes', access: Access.canManageSTO },
-  { key: 'edit-ucs-code', file: 'edit-ucs-code.html', label: 'Edit UCS Code', icon: 'edit', group: 'UCS Codes', access: Access.isApprover },
+  { key: 'add-ucs-code', file: 'add-ucs-code.html', label: 'Add UCS Code', icon: 'filePlus', group: 'UCS Codes', access: Access.canManageSTO },
+  { key: 'edit-ucs-code', file: 'edit-ucs-code.html', label: 'Edit UCS Code', icon: 'filePen', group: 'UCS Codes', access: Access.isApprover },
 
   // --- Planning / STO flow ---
-  { key: 'add-sto', file: 'add-sto.html', label: 'Raise STO', icon: 'plus', group: 'Planning', access: Access.canManageSTO },
-  { key: 'sto-dashboard', file: 'sto-dashboard.html', label: 'STO Dashboard', icon: 'dashboard', group: 'Planning', access: Access.canManageSTO },
-  { key: 'add-z04', file: 'add-z04.html', label: 'Create Z04 Entry', icon: 'plus', group: 'Planning', access: Access.canManageSTO },
-  { key: 'add-201', file: 'add-201.html', label: 'Create 201 Entry', icon: 'plus', group: 'Planning', access: Access.canManageSTO },
-  { key: 'planning-stock', file: 'planning-stock.html', label: 'Planning Stock', icon: 'dashboard', group: 'Planning', access: Access.anyLoggedIn },
-  { key: 'demand-dashboard', file: 'demand-dashboard.html', label: 'Demand Dashboard', icon: 'dashboard', group: 'Planning', access: Access.canManageSTO },
+  { key: 'add-sto', file: 'add-sto.html', label: 'Raise STO', icon: 'truck', group: 'Planning', access: Access.canManageSTO },
+  { key: 'sto-dashboard', file: 'sto-dashboard.html', label: 'STO Dashboard', icon: 'clipboardList', group: 'Planning', access: Access.canManageSTO },
+  { key: 'add-z04', file: 'add-z04.html', label: 'Create Z04 Entry', icon: 'packageIn', group: 'Planning', access: Access.canManageSTO },
+  { key: 'add-201', file: 'add-201.html', label: 'Create 201 Entry', icon: 'packageOut', group: 'Planning', access: Access.canManageSTO },
+  { key: 'planning-stock', file: 'planning-stock.html', label: 'Planning Stock', icon: 'boxes', group: 'Planning', access: Access.anyLoggedIn },
+  { key: 'demand-dashboard', file: 'demand-dashboard.html', label: 'Demand Dashboard', icon: 'trend', group: 'Planning', access: Access.canManageSTO },
 
   // --- Requisition flow ---
-  { key: 'raise-requisition', file: 'raise-requisition.html', label: 'Raise Requisition', icon: 'plus', group: 'Requisitions', access: Access.isAreaSupervisorOrIncharge },
-  { key: 'area-approval-dashboard', file: 'area-approval-dashboard.html', label: 'Area Approval', icon: 'check', group: 'Requisitions', access: Access.isAreaIncharge },
-  { key: 'sanction-dashboard', file: 'sanction-dashboard.html', label: 'Sanction Dashboard', icon: 'check', group: 'Requisitions', access: Access.isApprover },
-  { key: 'issue-dashboard', file: 'issue-dashboard.html', label: 'Issue Dashboard', icon: 'check', group: 'Requisitions', access: Access.isStoreIncharge },
+  { key: 'raise-requisition', file: 'raise-requisition.html', label: 'Raise Requisition', icon: 'clipboardPlus', group: 'Requisitions', access: Access.isAreaSupervisorOrIncharge },
+  { key: 'area-approval-dashboard', file: 'area-approval-dashboard.html', label: 'Area Approval', icon: 'checkCircle', group: 'Requisitions', access: Access.isAreaIncharge },
+  { key: 'sanction-dashboard', file: 'sanction-dashboard.html', label: 'Sanction Dashboard', icon: 'stamp', group: 'Requisitions', access: Access.isApprover },
+  { key: 'issue-dashboard', file: 'issue-dashboard.html', label: 'Issue Dashboard', icon: 'checkCircle', group: 'Requisitions', access: Access.isStoreIncharge },
 
   // --- Area / local stock ---
-  { key: 'add-local-issue', file: 'add-local-issue.html', label: 'Record Local Issue', icon: 'plus', group: 'Area Stock', access: Access.isAreaSupervisorOrIncharge },
-  { key: 'area-stock-dashboard', file: 'area-stock-dashboard.html', label: 'Area Stock Dashboard', icon: 'dashboard', group: 'Area Stock', access: Access.anyLoggedIn },
+  { key: 'add-local-issue', file: 'add-local-issue.html', label: 'Record Local Issue', icon: 'handReceive', group: 'Area Stock', access: Access.isAreaSupervisorOrIncharge },
+  { key: 'area-stock-dashboard', file: 'area-stock-dashboard.html', label: 'Area Stock Dashboard', icon: 'warehouse', group: 'Area Stock', access: Access.anyLoggedIn },
   { key: 'raise-demand-alert', file: 'raise-demand-alert.html', label: 'Raise Demand Alert', icon: 'alert', group: 'Area Stock', access: Access.isAreaIncharge },
 
   // --- Admin ---
   { key: 'admin-options', file: 'admin-options.html', label: 'Manage Options', icon: 'settings', group: 'Admin', access: Access.isApprover },
 ];
 
-// ====== SIMPLE INLINE ICONS (no external CDN -- works offline for Phase 2) ======
+// ====== ICONS ======
+// Ported directly from the design mockup's own SVG icons (24x24, 1.5px
+// stroke, rounded caps) -- kept as inline SVG rather than an icon font, so
+// there's no external dependency and it works offline for Phase 2 (PWA).
 
 const ICONS = {
-  search: '<svg viewBox="0 0 24 24" width="18" height="18"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><line x1="20" y1="20" x2="16.5" y2="16.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
-  plus: '<svg viewBox="0 0 24 24" width="18" height="18"><line x1="12" y1="5" x2="12" y2="19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="5" y1="12" x2="19" y2="12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
-  edit: '<svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 20h9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>',
-  dashboard: '<svg viewBox="0 0 24 24" width="18" height="18"><rect x="3" y="3" width="7" height="9" rx="1" fill="none" stroke="currentColor" stroke-width="2"/><rect x="14" y="3" width="7" height="5" rx="1" fill="none" stroke="currentColor" stroke-width="2"/><rect x="14" y="12" width="7" height="9" rx="1" fill="none" stroke="currentColor" stroke-width="2"/><rect x="3" y="16" width="7" height="5" rx="1" fill="none" stroke="currentColor" stroke-width="2"/></svg>',
-  check: '<svg viewBox="0 0 24 24" width="18" height="18"><path d="M4 12l5 5L20 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-  alert: '<svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 3 2 20h20L12 3Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><line x1="12" y1="9" x2="12" y2="14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="17.2" r="0.9" fill="currentColor"/></svg>',
-  settings: '<svg viewBox="0 0 24 24" width="18" height="18"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.5-2-3.4-2.3.9a7.6 7.6 0 0 0-1.7-1L15 3.6h-4l-.4 2.4a7.6 7.6 0 0 0-1.7 1l-2.3-.9-2 3.4L6.6 11a7.6 7.6 0 0 0 0 2l-2 1.5 2 3.4 2.3-.9c.5.4 1.1.75 1.7 1l.4 2.4h4l.4-2.4c.6-.25 1.2-.6 1.7-1l2.3.9 2-3.4Z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>',
+  search: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h6"/><path d="M14 3l5 5h-5V3z"/><circle cx="16.5" cy="16.5" r="3.5"/><path d="M19.2 19.2 22 22"/></svg>',
+  filePlus: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z"/><path d="M14 3l5 5h-5V3z"/><path d="M12 12v6M9 15h6"/></svg>',
+  filePen: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h5"/><path d="M14 3l5 5h-5V3z"/><path d="M14 21h3l4.5-4.5-3-3L14 18v3z"/></svg>',
+  truck: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6h10v11H2z"/><path d="M12 9h4l3 3.5V17h-7z"/><circle cx="7" cy="19" r="1.6"/><circle cx="17" cy="19" r="1.6"/></svg>',
+  clipboardList: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6v3H9z"/><path d="M15 4.5h3v16H6v-16h3"/><path d="M9 11h6M9 15h6"/></svg>',
+  clipboardPlus: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6v3H9z"/><path d="M15 4.5h3v16H6v-16h3"/><path d="M12 10v7M8.5 13.5h7"/></svg>',
+  packageIn: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v8"/><path d="M9 7.5l3 3 3-3"/><path d="M3 12h18v9H3z"/><path d="M3 12l2-3h4M21 12l-2-3h-4"/></svg>',
+  packageOut: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 10V2"/><path d="M9 4.5l3-3 3 3"/><path d="M3 12h18v9H3z"/><path d="M3 12l2-3h4M21 12l-2-3h-4"/></svg>',
+  boxes: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 3h7v6h-7z"/><path d="M3 14h7v7H3z"/><path d="M14 14h7v7h-7z"/></svg>',
+  trend: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 3v17h17"/><path d="M7 15l4-5 3 2.5 5-6.5"/><path d="M19 6h-3.5M19 6v3.5"/></svg>',
+  checkCircle: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 12.2l2.8 2.8L16.5 9.3"/></svg>',
+  stamp: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3.5h6a2 2 0 0 1 2 2c0 2-1.6 2.6-1.6 4.2V12H7.6V9.7C7.6 8.1 6 7.5 6 5.5"/><path d="M4.5 15h15v3.5h-15z"/><path d="M4 21h16"/></svg>',
+  handReceive: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3h10v5H7z"/><path d="M3 21v-5l3-2 3 1.5h3.5a1.5 1.5 0 0 1 0 3H11"/><path d="M12.5 18.5h5.5a2 2 0 0 0 0-4h-2.5"/></svg>',
+  warehouse: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21V9l9-5 9 5v12"/><path d="M8 21v-7h8v7"/><path d="M8 17.5h8"/></svg>',
+  alert: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 2 20h20L12 3Z"/><path d="M12 9v5"/><circle cx="12" cy="17.2" r="0.9" fill="currentColor" stroke="none"/></svg>',
+  settings: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.5-2-3.4-2.3.9a7.6 7.6 0 0 0-1.7-1L15 3.6h-4l-.4 2.4a7.6 7.6 0 0 0-1.7 1l-2.3-.9-2 3.4L6.6 11a7.6 7.6 0 0 0 0 2l-2 1.5 2 3.4 2.3-.9c.5.4 1.1.75 1.7 1l.4 2.4h4l.4-2.4c.6-.25 1.2-.6 1.7-1l2.3.9 2-3.4Z"/></svg>',
 };
 
 // ====== FRAGMENT LOADER ======
@@ -187,6 +199,7 @@ async function loadPage(key) {
   Shell.clearTrackedListeners(); // remove any document/window listeners the previous page added
 
   document.querySelectorAll('.navItem').forEach(el => el.classList.toggle('active', el.dataset.key === key));
+  document.getElementById('pageTitleName').textContent = page.label;
   const container = document.getElementById('pageContainer');
   container.innerHTML = '<div class="pageLoading">Loading…</div>';
   window.location.hash = key;
@@ -248,7 +261,8 @@ function renderMenu() {
       a.href = '#' + p.key;
       a.className = 'navItem';
       a.dataset.key = p.key;
-      a.innerHTML = '<span class="navIcon">' + (ICONS[p.icon] || '') + '</span><span>' + p.label + '</span>';
+      a.title = p.label; // native tooltip -- shows the page name on hover when the sidebar is collapsed to icons
+      a.innerHTML = '<span class="navIcon">' + (ICONS[p.icon] || '') + '</span><span class="navLabel">' + p.label + '</span>';
       a.onclick = (e) => { e.preventDefault(); loadPage(p.key); };
       nav.appendChild(a);
     });

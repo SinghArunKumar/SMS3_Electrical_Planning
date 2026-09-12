@@ -61,12 +61,34 @@
     display: flex; flex-direction: column; transition: margin-left 0.2s ease, width 0.2s ease;
     overflow: hidden;
   }
-  #sidebar.collapsed { width: 0 !important; }
-  #sidebar.collapsed .brand, #sidebar.collapsed #navMenu { opacity: 0; pointer-events: none; }
+  /* Collapsed = a slim icon-only rail, not a fully hidden sidebar -- icons
+     stay visible and clickable, only the text labels disappear. */
+  #sidebar.collapsed { width: 64px !important; }
+  #sidebar.collapsed .navLabel, #sidebar.collapsed .navGroupLabel, #sidebar.collapsed .brandText {
+    display: none;
+  }
+  #sidebar.collapsed .navItem { justify-content: center; padding: 0; }
+  #sidebar.collapsed .navItem.active { border-right: none; border-left: 3px solid var(--blue); }
+  #sidebar.collapsed .brand { justify-content: center; padding: 20px 0; gap: 0; }
+
   #sidebar .brand {
-    padding: 20px 18px; font-weight: 700; font-size: 16px; color: #fff;
+    padding: 16px 18px; display: flex; align-items: center; gap: 12px;
     border-bottom: 1px solid rgba(255,255,255,0.08);
   }
+  /* Placeholder logo box -- swap the text node for a real <img src="logo.png">
+     once an official logo file is available. Sized/positioned to drop
+     an image in without touching the surrounding layout. */
+  #brandLogo {
+    width: 34px; height: 34px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+    border: 1px solid var(--blue); border-radius: 4px; color: #cfd8e6; font-size: 11px; font-weight: 700;
+    letter-spacing: 0.02em;
+  }
+  .brandText { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .brandText .brandTitle { font-weight: 700; font-size: 15px; color: #fff; line-height: 1.2; }
+  .brandText .brandSubtitle {
+    font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: #8b97ad;
+  }
+
   #navMenu { flex: 1; overflow-y: auto; padding: 10px 0; }
   .navGroupLabel {
     padding: 14px 18px 6px; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase;
@@ -78,23 +100,34 @@
   }
   .navItem:hover { background: rgba(255,255,255,0.06); }
   .navItem.active { background: var(--sidebar-active); color: #fff; border-right: 3px solid var(--blue); }
-  .navIcon { display: flex; align-items: center; opacity: 0.9; }
+  .navIcon { display: flex; align-items: center; opacity: 0.9; flex-shrink: 0; }
   .navEmpty { padding: 16px 18px; font-size: 13px; color: #8b97ad; }
 
   #mainArea { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 
   #topbar {
-    height: 56px; flex-shrink: 0; background: #fff; border-bottom: 1px solid var(--border);
+    height: 64px; flex-shrink: 0; background: #fff; border-bottom: 1px solid var(--border);
     display: flex; align-items: center; padding: 0 16px; gap: 12px;
   }
   #hamburgerBtn {
     display: flex; align-items: center; background: none; border: none; cursor: pointer;
     padding: 6px; color: var(--text);
   }
+  /* Page title: small "Stores Module" eyebrow + the current page's own name,
+     next to the hamburger -- lets someone glance at the header and know
+     which page they're on, independent of the sidebar being open/collapsed. */
+  #pageTitleBlock { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  #pageTitleEyebrow {
+    font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted);
+  }
+  #pageTitleName { font-size: 17px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* "Logged in as X" now stacks above the Log out button, right-aligned,
+     instead of sitting inline to the left of it. */
+  #topbarRight { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; }
   #userBadge { font-size: 13px; color: var(--text-muted); }
   #topbarSpacer { flex: 1; }
   #logoutBtnShell {
-    padding: 7px 14px; font-size: 13px; border: 1px solid var(--border); border-radius: 6px;
+    padding: 6px 14px; font-size: 13px; border: 1px solid var(--border); border-radius: 6px;
     background: #fff; cursor: pointer; color: var(--text);
   }
   #logoutBtnShell:hover { background: #f1f3f4; }
@@ -169,16 +202,28 @@
 <!-- ====== APP SHELL ====== -->
 <div id="appShell">
   <div id="sidebar">
-    <div class="brand">📦 Stores Dashboard</div>
+    <div class="brand">
+      <div id="brandLogo">SMS</div>
+      <div class="brandText">
+        <span class="brandTitle">Stores Dashboard</span>
+        <span class="brandSubtitle">Electrical Planning</span>
+      </div>
+    </div>
     <div id="navMenu"></div>
   </div>
 
   <div id="mainArea">
     <div id="topbar">
       <button id="hamburgerBtn" onclick="toggleSidebar()" title="Show/hide sidebar">☰</button>
-      <span id="userBadge"></span>
+      <div id="pageTitleBlock">
+        <span id="pageTitleEyebrow">Stores Module</span>
+        <span id="pageTitleName"></span>
+      </div>
       <div id="topbarSpacer"></div>
-      <button id="logoutBtnShell" onclick="Shell.logout()">Log out</button>
+      <div id="topbarRight">
+        <span id="userBadge"></span>
+        <button id="logoutBtnShell" onclick="Shell.logout()">Log out</button>
+      </div>
     </div>
     <div id="pageContainer"></div>
   </div>
