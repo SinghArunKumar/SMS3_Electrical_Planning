@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Raise Return</title>
+<style>
+  body { font-family: Arial, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; color: #222; }
+  h2 { margin-bottom: 4px; }
+  .subtitle { color: #666; font-size: 13px; margin-bottom: 24px; }
+  label { display: block; font-weight: bold; margin-top: 14px; margin-bottom: 4px; font-size: 14px; }
+  input, select, textarea { width: 100%; padding: 8px; box-sizing: border-box; font-size: 14px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit; }
+  input.readonly { background: #f1f3f4; color: #555; }
+  button { margin-top: 20px; width: 100%; padding: 10px; font-size: 15px; border: none; border-radius: 4px; background: #1a73e8; color: white; cursor: pointer; }
+  button.secondary { background: #5f6368; }
+  button.small { width: auto; margin-top: 0; padding: 6px 12px; font-size: 13px; }
+  button.danger { background: #c5221f; }
+  button:disabled { background: #999; cursor: not-allowed; }
+  #message { margin-top: 14px; padding: 10px; border-radius: 4px; font-size: 14px; display: none; }
+  .success { background: #e6f4ea; color: #1e7e34; display: block !important; }
+  .error { background: #fce8e6; color: #c5221f; display: block !important; }
+  #loggedInBar { display:none; font-size: 13px; color:#555; margin-bottom: 10px; }
+  #logoutBtn { width:auto; padding:4px 10px; font-size:12px; background:#666; margin-left:8px; }
+  .fieldError { color:#c5221f; font-size:12px; margin-top:4px; display:none; }
+  .fieldHint { color:#666; font-size:12px; margin-top:4px; }
+  .lockedNotice { background:#fce8e6; color:#c5221f; padding:14px; border-radius:4px; font-size:14px; }
+  .scopeNotice { background:#e8f0fe; color:#1a4fa0; padding:10px 12px; border-radius:6px; font-size:13px; margin-bottom:20px; }
+
+  /* ---- Item search combo ---- */
+  #itemSearchWrap { position: relative; }
+  #itemSuggestions {
+    display:none; position:absolute; top:100%; left:0; right:0; z-index:10;
+    background:#fff; border:1px solid #ccc; border-top:none; border-radius:0 0 4px 4px;
+    max-height:220px; overflow-y:auto; box-shadow:0 2px 6px rgba(0,0,0,0.12);
+  }
+  .suggestionItem { padding:8px 10px; cursor:pointer; font-size:13px; border-bottom:1px solid #eee; }
+  .suggestionItem:last-child { border-bottom:none; }
+  .suggestionItem .code { font-family:'Courier New', monospace; font-weight:bold; color:#1a73e8; font-size:12px; }
+  .suggestionItem .short { font-size:13px; }
+  .suggestionItem:hover, .suggestionItem.highlighted { background:#f1f3f4; }
+
+  #pendingItemBox { display:none; margin-top:12px; border:1px solid #ddd; border-radius:6px; padding:12px; background:#fafafa; }
+  #pendingItemBox .pendingRow { display:flex; gap:10px; align-items:flex-end; }
+  #pendingItemBox .pendingRow > div:first-child { flex:2; }
+  #pendingItemBox .pendingRow > div:last-child { flex:1; }
+
+  /* ---- Items table ---- */
+  .tableWrap { overflow-x:auto; border:1px solid #e0e0e0; border-radius:6px; margin-top:14px; }
+  table { border-collapse:collapse; width:100%; font-size:13px; }
+  th, td { padding:8px 10px; border-bottom:1px solid #eee; text-align:left; }
+  th { background:#f8f9fa; font-weight:bold; }
+  #itemCountNotice { font-size:12px; color:#666; margin-top:6px; }
+  #emptyItemsState { padding:16px; text-align:center; color:#888; font-size:13px; border:1px dashed #ccc; border-radius:6px; margin-top:10px; }
+
+  /* ---- My Recent Returns (collapsible) ---- */
+  #mySlipsToggle { margin-top:36px; background:none; color:#1a73e8; text-align:left; padding:0; width:auto; font-size:13px; text-decoration:underline; cursor:pointer; }
+  #mySlipsSection { display:none; margin-top:12px; }
+  .badge { padding:2px 8px; border-radius:10px; font-size:11px; font-weight:bold; white-space:nowrap; }
+  .badge.pending { background:#fff8e1; color:#8a6d00; }
+  .badge.completed { background:#e6f4ea; color:#1e7e34; }
+  .slipSummaryRow { border:1px solid #e0e0e0; border-radius:6px; margin-bottom:8px; overflow:hidden; }
+  .slipSummaryHead { padding:10px 12px; display:flex; align-items:center; gap:10px; cursor:pointer; background:#fafafa; flex-wrap:wrap; }
+  .slipSummaryHead:hover { background:#f1f3f4; }
+  .slipSummaryHead .slipIdText { font-family:'Courier New', monospace; font-weight:bold; font-size:13px; }
+  .slipSummaryHead .slipMeta { font-size:12px; color:#666; }
+  .slipSummaryHead .expandArrow { margin-left:auto; color:#888; font-size:12px; }
+  .slipDetailBody { display:none; padding:10px 12px; border-top:1px solid #e0e0e0; }
+  .slipDetailBody table { border-collapse:collapse; width:100%; font-size:12px; }
+  .slipDetailBody th, .slipDetailBody td { padding:6px 8px; border-bottom:1px solid #eee; text-align:left; }
+  .slipDetailBody th { background:#f8f9fa; }
+</style>
+</head>
+<body>
+
+<h2>Raise Return</h2>
+<div class="subtitle">GitHub_SMS-3 Stores Module &mdash; return material drawn in error, back to the Planning Store</div>
+
+<!-- ====== LOGIN SECTION ====== -->
+<div id="loginSection">
+  <label for="loginEmail">Email</label>
+  <input type="email" id="loginEmail" placeholder="you@test.com">
+  <label for="loginPassword">Password</label>
+  <input type="password" id="loginPassword" placeholder="Password">
+  <button id="loginBtn" onclick="login()">Log In</button>
+</div>
+
+<!-- ====== NOT AUTHORIZED NOTICE ====== -->
+<div id="notAuthorizedNotice" style="display:none;" class="lockedNotice">
+  You're logged in, but only an Area Incharge can raise a return. If you believe this is wrong, contact the project owner.
+</div>
+
+<!-- ====== FORM SECTION ====== -->
+<div id="formSection" style="display:none;">
+  <div id="loggedInBar"></div>
+
+  <div class="scopeNotice">Only for material still sitting in your area's shelf stock, never Locally Issued to anyone. Once material has been Locally Issued, it can't be returned through this form.</div>
+
+  <label for="areaSelect">Area</label>
+  <select id="areaSelect" onchange="onAreaChange()"></select>
+
+  <label for="itemSearchBox" style="margin-top:20px;">Add a material (search by UCS Code or keywords)</label>
+  <div id="itemSearchWrap">
+    <input type="text" id="itemSearchBox" placeholder="e.g. bearing 6210, or a UCS code" autocomplete="off" oninput="onItemSearchInput()">
+    <div id="itemSuggestions"></div>
+  </div>
+
+  <div id="pendingItemBox">
+    <div class="pendingRow">
+      <div>
+        <label>Selected item</label>
+        <input type="text" id="pendingItemDisplay" class="readonly" readonly>
+      </div>
+      <div>
+        <label for="pendingItemQty">Qty (<span id="pendingItemUnit"></span>)</label>
+        <input type="number" id="pendingItemQty" min="1" step="1" oninput="onQtyInput()" onkeydown="onQtyKeydown(event)">
+      </div>
+    </div>
+    <div id="pendingItemStockHint" class="fieldHint"></div>
+    <label for="pendingItemReason">Reason (mandatory)</label>
+    <textarea id="pendingItemReason" rows="2" maxlength="500" placeholder="e.g. Wrong UCS Code requested by mistake"></textarea>
+    <div id="pendingItemError" class="fieldError"></div>
+    <button type="button" class="small" style="margin-top:10px;" onclick="addPendingItem()">Add to Return</button>
+    <button type="button" class="small secondary" style="margin-top:10px; margin-left:8px;" onclick="clearPendingItem()">Cancel</button>
+  </div>
+
+  <div class="tableWrap" id="itemsTableWrap" style="display:none;">
+    <table>
+      <thead><tr><th>UCS Code</th><th>Description</th><th>Unit</th><th>Qty</th><th>Reason</th><th></th></tr></thead>
+      <tbody id="itemsTableBody"></tbody>
+    </table>
+  </div>
+  <div id="emptyItemsState">No items added yet. Search above and add up to 10 materials.</div>
+  <div id="itemCountNotice"></div>
+
+  <button id="submitBtn" onclick="submitReturn()" disabled>Submit Return</button>
+
+  <button id="mySlipsToggle" onclick="toggleMySlips()">Show my area's recent returns &#9662;</button>
+  <div id="mySlipsSection">
+    <div id="mySlipsList"></div>
+  </div>
+</div>
+
+<div id="message"></div>
+
+<script>
+  // TODO: paste your deployed Apps Script Web App URL here (same one used by the other pages)
+  const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxMXqckZThqa3Vh06rh8fPWJ8RM0fn3x9yT_YzhqQt0Ph4BKArpoVNRviDwfaEYYyVH/exec';
+  const MAX_ITEMS = 10;
+
+  let currentUser = { email: '', password: '' };
+  let raiseEligibleAreas = [];
+  let allMaterials = [];
+  let currentSuggestions = [];
+  let pendingItem = null;
+  let slipItems = [];
+  let mySlipsLoaded = false;
+  let currentArea = '';
+  let areaStockMap = {}; // ucsCode -> qtyBalance currently held by currentArea (empty/skipped for PLANNING)
+  let currentMaxQty = null; // available stock for the currently-picked item; null = no cap (Area = PLANNING)
+
+  // Blocks the keystrokes that a bare type="number" input still lets through
+  // (e/E for exponents, +, -, .) before they ever land in the field -- belt
+  // and braces alongside onQtyInput()'s clamp, which only runs after the
+  // character is already in the box.
+  function onQtyKeydown(e) {
+    if (['e', 'E', '+', '-', '.'].indexOf(e.key) !== -1) e.preventDefault();
+  }
+
+  // Live-sanitizes and clamps the qty field on every keystroke, so a value
+  // above the area's current stock (or a non-digit) is corrected immediately
+  // rather than only rejected on "Add to Return" click.
+  function onQtyInput() {
+    const el = document.getElementById('pendingItemQty');
+    const errEl = document.getElementById('pendingItemError');
+    let digitsOnly = el.value.replace(/[^0-9]/g, '');
+    digitsOnly = digitsOnly.replace(/^0+(?=[0-9])/, ''); // drop leading zeros, keep a lone '0' as-is for now
+
+    if (digitsOnly !== '' && currentMaxQty !== null && Number(digitsOnly) > currentMaxQty) {
+      el.value = String(currentMaxQty);
+      errEl.textContent = pendingItem
+        ? pendingItem.ucsCode + ': only ' + currentMaxQty + ' currently held in ' + currentArea + "'s stock -- capped to that."
+        : 'Capped to the available stock.';
+      errEl.style.display = 'block';
+    } else {
+      el.value = digitsOnly;
+      errEl.style.display = 'none';
+    }
+  }
+
+  function showMessage(text, type) { const el = document.getElementById('message'); el.textContent = text; el.className = type; }
+  function clearMessage() { const el = document.getElementById('message'); el.textContent = ''; el.className = ''; }
+  function escapeHtml(str) { return String(str == null ? '' : str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  function hasCommaValueClient(str, target) {
+    if (!str) return false;
+    return String(str).split(',').map(function (s) { return s.trim(); }).indexOf(target) !== -1;
+  }
+
+  async function callApi(payload) {
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(Object.assign({ email: currentUser.email, password: currentUser.password }, payload))
+    });
+    return res.json();
+  }
+
+  // ====== LOGIN ======
+  async function login() {
+    const email = document.getElementById('loginEmail').value.trim();
+    const password = document.getElementById('loginPassword').value;
+    clearMessage();
+    if (!email || !password) { showMessage('Please enter email and password.', 'error'); return; }
+
+    const loginBtn = document.getElementById('loginBtn');
+    loginBtn.disabled = true;
+    loginBtn.textContent = 'Logging in...';
+    try {
+      const data = await callApi({ action: 'login', email: email, password: password });
+      if (!data.success) { showMessage(data.message || 'Login failed.', 'error'); return; }
+
+      currentUser = { email: email, password: password };
+      // Only Area Incharge can raise a return (no Area Approval stage to catch a Supervisor's mistake).
+      raiseEligibleAreas = hasCommaValueClient(data.role, 'Area Incharge')
+        ? String(data.authorizedArea || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean)
+        : [];
+
+      document.getElementById('loginSection').style.display = 'none';
+      if (raiseEligibleAreas.length === 0) {
+        document.getElementById('notAuthorizedNotice').style.display = 'block';
+        return;
+      }
+      document.getElementById('formSection').style.display = 'block';
+      const bar = document.getElementById('loggedInBar');
+      bar.style.display = 'block';
+      bar.innerHTML = 'Logged in as <b>' + escapeHtml(data.name) + '</b> (' + escapeHtml(data.role) + ')' +
+        '<button id="logoutBtn" onclick="location.reload()">Log out</button>';
+
+      const areaSelect = document.getElementById('areaSelect');
+      areaSelect.innerHTML = raiseEligibleAreas.map(function (a) { return '<option value="' + escapeHtml(a) + '">' + escapeHtml(a) + '</option>'; }).join('');
+      currentArea = areaSelect.value;
+      loadMaterials();
+      loadAreaStock(currentArea);
+    } catch (err) {
+      showMessage('Could not reach the server. Check your connection or the Apps Script URL.', 'error');
+    } finally {
+      loginBtn.disabled = false;
+      loginBtn.textContent = 'Log In';
+    }
+  }
+
+  // ====== AREA STOCK (present balance the area is currently holding) ======
+  async function loadAreaStock(area) {
+    areaStockMap = {};
+    if (!area || area.toUpperCase() === 'PLANNING') return; // no trackable "currently held" balance for Planning itself
+    try {
+      const data = await callApi({ action: 'getAreaStockList', area: area });
+      if (data.success) {
+        data.items.forEach(function (r) { areaStockMap[r.ucsCode] = r.qtyBalance; });
+      }
+    } catch (err) {
+      // Non-fatal: the raise itself still gets server-side re-checked and rejected
+      // if this silently failed to load; the person just won't see the hint text.
+    }
+  }
+
+  function onAreaChange() {
+    const newArea = document.getElementById('areaSelect').value;
+    if (newArea === currentArea) return;
+    if (slipItems.length > 0 || pendingItem) {
+      if (!confirm('Changing area will clear the items you\'ve added so far (stock levels differ by area). Continue?')) {
+        document.getElementById('areaSelect').value = currentArea;
+        return;
+      }
+    }
+    currentArea = newArea;
+    slipItems = [];
+    clearPendingItem();
+    renderItemsTable();
+    loadAreaStock(currentArea);
+  }
+
+  // ====== UCS SEARCH COMBO ======
+  async function loadMaterials() {
+    try {
+      const data = await callApi({ action: 'getUCSSearchData' });
+      if (data.success) {
+        allMaterials = data.items.map(function (m) {
+          return {
+            ucsCode: m.ucsCode, shortText: m.shortText, unit: m.unit,
+            haystack: (m.ucsCode + ' ' + m.shortText + ' ' + (m.longText || '')).toLowerCase()
+          };
+        });
+      } else {
+        showMessage(data.message || 'Could not load the material list.', 'error');
+      }
+    } catch (err) {
+      showMessage('Could not reach the server. Check your connection or the Apps Script URL.', 'error');
+    }
+  }
+
+  function onItemSearchInput() {
+    const raw = document.getElementById('itemSearchBox').value.trim().toLowerCase();
+    const box = document.getElementById('itemSuggestions');
+    if (!raw) { box.style.display = 'none'; return; }
+    const tokens = raw.split(/\s+/).filter(Boolean);
+    currentSuggestions = allMaterials.filter(function (m) {
+      return tokens.every(function (t) { return m.haystack.indexOf(t) !== -1; });
+    }).slice(0, 25);
+
+    if (currentSuggestions.length === 0) {
+      box.innerHTML = '<div class="suggestionItem" style="color:#888;">No matches.</div>';
+      box.style.display = 'block';
+      return;
+    }
+    box.innerHTML = currentSuggestions.map(function (m, idx) {
+      return '<div class="suggestionItem" onclick="pickSuggestion(' + idx + ')">' +
+        '<div class="code">' + escapeHtml(m.ucsCode) + ' &middot; ' + escapeHtml(m.unit) + '</div>' +
+        '<div class="short">' + escapeHtml(m.shortText) + '</div></div>';
+    }).join('');
+    box.style.display = 'block';
+  }
+
+  function pickSuggestion(idx) {
+    const m = currentSuggestions[idx];
+    if (!m) return;
+    pendingItem = { ucsCode: m.ucsCode, itemDescription: m.shortText, unit: m.unit };
+    document.getElementById('itemSuggestions').style.display = 'none';
+    document.getElementById('itemSearchBox').value = '';
+    document.getElementById('pendingItemDisplay').value = m.ucsCode + ' \u2014 ' + m.shortText;
+    document.getElementById('pendingItemUnit').textContent = m.unit;
+    document.getElementById('pendingItemQty').value = '';
+    document.getElementById('pendingItemReason').value = '';
+    document.getElementById('pendingItemError').style.display = 'none';
+    document.getElementById('pendingItemBox').style.display = 'block';
+
+    const hintEl = document.getElementById('pendingItemStockHint');
+    if (currentArea.toUpperCase() === 'PLANNING') {
+      hintEl.textContent = '';
+      currentMaxQty = null;
+      document.getElementById('pendingItemQty').removeAttribute('max');
+    } else {
+      const avail = areaStockMap.hasOwnProperty(m.ucsCode) ? areaStockMap[m.ucsCode] : 0;
+      hintEl.textContent = 'Currently held in ' + currentArea + "'s stock: " + avail + ' ' + m.unit;
+      currentMaxQty = avail;
+      document.getElementById('pendingItemQty').max = String(Math.max(avail, 0));
+    }
+  }
+
+  function clearPendingItem() {
+    pendingItem = null;
+    currentMaxQty = null;
+    document.getElementById('pendingItemBox').style.display = 'none';
+  }
+
+  function addPendingItem() {
+    const errEl = document.getElementById('pendingItemError');
+    if (!pendingItem) return;
+    if (slipItems.length >= MAX_ITEMS) {
+      errEl.textContent = 'A return cannot have more than ' + MAX_ITEMS + ' materials.';
+      errEl.style.display = 'block';
+      return;
+    }
+    const qtyRaw = document.getElementById('pendingItemQty').value.trim();
+    // Reject anything that isn't a plain positive integer string first --
+    // Number('') is 0 and Number(' 3 ') is 3, so those loose coercions can't
+    // be trusted alone; a decimal like "2.5" also fails this pattern outright.
+    if (!/^[1-9][0-9]*$/.test(qtyRaw)) {
+      errEl.textContent = 'Quantity must be a positive whole number (no zero, negative, or decimals).';
+      errEl.style.display = 'block';
+      return;
+    }
+    const qty = Number(qtyRaw);
+    // Belt and braces: onQtyInput() already clamps live as the user types,
+    // so this should never actually trigger, but the click handler re-checks
+    // against the same currentMaxQty rather than trusting the field blindly.
+    if (currentMaxQty !== null && qty > currentMaxQty) {
+      errEl.textContent = pendingItem.ucsCode + ': only ' + currentMaxQty + ' currently held in ' + currentArea + "'s stock -- cannot return " + qty + '.';
+      errEl.style.display = 'block';
+      return;
+    }
+    const reason = document.getElementById('pendingItemReason').value.trim();
+    if (!reason) {
+      errEl.textContent = 'Reason is required.';
+      errEl.style.display = 'block';
+      return;
+    }
+    if (slipItems.some(function (it) { return it.ucsCode === pendingItem.ucsCode; })) {
+      errEl.textContent = 'This UCS Code is already on this return. Remove it below first if you want to change the quantity.';
+      errEl.style.display = 'block';
+      return;
+    }
+    slipItems.push({ ucsCode: pendingItem.ucsCode, itemDescription: pendingItem.itemDescription, unit: pendingItem.unit, qty: qty, reason: reason });
+    clearPendingItem();
+    renderItemsTable();
+  }
+
+  function removeItem(idx) { slipItems.splice(idx, 1); renderItemsTable(); }
+
+  function renderItemsTable() {
+    const body = document.getElementById('itemsTableBody');
+    const wrap = document.getElementById('itemsTableWrap');
+    const empty = document.getElementById('emptyItemsState');
+    const countEl = document.getElementById('itemCountNotice');
+
+    if (slipItems.length === 0) {
+      wrap.style.display = 'none';
+      empty.style.display = 'block';
+    } else {
+      empty.style.display = 'none';
+      wrap.style.display = 'block';
+      body.innerHTML = slipItems.map(function (it, idx) {
+        return '<tr><td>' + escapeHtml(it.ucsCode) + '</td><td>' + escapeHtml(it.itemDescription) + '</td>' +
+          '<td>' + escapeHtml(it.unit) + '</td><td>' + it.qty + '</td><td>' + escapeHtml(it.reason) + '</td>' +
+          '<td><button type="button" class="small danger" onclick="removeItem(' + idx + ')">Remove</button></td></tr>';
+      }).join('');
+    }
+    countEl.textContent = slipItems.length + ' of ' + MAX_ITEMS + ' items added.';
+    document.getElementById('submitBtn').disabled = slipItems.length === 0;
+  }
+
+  // ====== SUBMIT ======
+  async function submitReturn() {
+    clearMessage();
+    const area = document.getElementById('areaSelect').value;
+    if (!area) { showMessage('Please select an area.', 'error'); return; }
+    if (slipItems.length === 0) { showMessage('Add at least one item first.', 'error'); return; }
+
+    const submitBtn = document.getElementById('submitBtn');
+    submitBtn.disabled = true;
+    const originalLabel = submitBtn.textContent;
+    submitBtn.textContent = 'Submitting...';
+
+    try {
+      const data = await callApi({
+        action: 'raiseReturn',
+        area: area,
+        items: slipItems.map(function (it) { return { ucsCode: it.ucsCode, qty: it.qty, reason: it.reason }; })
+      });
+      if (data.success) {
+        showMessage(data.message, 'success');
+        slipItems = [];
+        renderItemsTable();
+        if (mySlipsLoaded) loadMySlips();
+      } else {
+        showMessage(data.message || 'Could not raise this return.', 'error');
+      }
+    } catch (err) {
+      showMessage('Could not reach the server. Check your connection or the Apps Script URL.', 'error');
+    } finally {
+      submitBtn.disabled = slipItems.length === 0;
+      submitBtn.textContent = originalLabel;
+    }
+  }
+
+  // ====== MY RECENT RETURNS ======
+  function toggleMySlips() {
+    const section = document.getElementById('mySlipsSection');
+    const showing = section.style.display === 'block';
+    section.style.display = showing ? 'none' : 'block';
+    document.getElementById('mySlipsToggle').innerHTML = showing ? 'Show my area\'s recent returns &#9662;' : 'Hide my area\'s recent returns &#9652;';
+    if (!showing) loadMySlips();
+  }
+
+  function statusBadge(status) {
+    return status === 'Completed' ? '<span class="badge completed">Completed</span>' : '<span class="badge pending">Pending Approval</span>';
+  }
+
+  async function loadMySlips() {
+    const listEl = document.getElementById('mySlipsList');
+    listEl.innerHTML = '<div style="text-align:center; color:#888; padding:16px;">Loading...</div>';
+    try {
+      const data = await callApi({ action: 'getAreaReturns' });
+      mySlipsLoaded = true;
+      if (!data.success) {
+        listEl.innerHTML = '<div style="text-align:center; color:#c5221f; padding:16px;">' + escapeHtml(data.message || 'Could not load.') + '</div>';
+        return;
+      }
+      renderMySlips(groupMySlips(data.items));
+    } catch (err) {
+      listEl.innerHTML = '<div style="text-align:center; color:#c5221f; padding:16px;">Could not reach the server.</div>';
+    }
+  }
+
+  function groupMySlips(items) {
+    const bySlip = {};
+    items.forEach(function (it) {
+      if (!bySlip[it.returnId]) bySlip[it.returnId] = { returnId: it.returnId, area: it.area, returnDate: it.returnDate, status: it.status, raisedByName: it.raisedByName, items: [] };
+      bySlip[it.returnId].items.push(it);
+    });
+    return Object.values(bySlip).sort(function (a, b) {
+      if (a.returnDate !== b.returnDate) return b.returnDate.localeCompare(a.returnDate);
+      return b.returnId.localeCompare(a.returnId);
+    }).slice(0, 10);
+  }
+
+  function renderMySlips(slips) {
+    const listEl = document.getElementById('mySlipsList');
+    if (slips.length === 0) {
+      listEl.innerHTML = '<div style="text-align:center; color:#888; padding:16px;">No returns to show.</div>';
+      return;
+    }
+    listEl.innerHTML = slips.map(function (slip, idx) {
+      const detailRows = slip.items.map(function (it) {
+        return '<tr><td>' + escapeHtml(it.ucsCode) + '</td><td>' + escapeHtml(it.itemDescription) + '</td>' +
+          '<td>' + it.qtyReturnRequested + '</td>' +
+          '<td>' + (it.qtyApproved === '' ? '&mdash;' : it.qtyApproved) + '</td>' +
+          '<td>' + escapeHtml(it.reason) + '</td></tr>';
+      }).join('');
+      return '<div class="slipSummaryRow">' +
+        '<div class="slipSummaryHead" onclick="toggleSlipDetail(' + idx + ')">' +
+        '<span class="slipIdText">' + escapeHtml(slip.returnId) + '</span>' +
+        '<span class="slipMeta">' + escapeHtml(slip.returnDate) + ' &middot; ' + escapeHtml(slip.area) + ' &middot; ' + slip.items.length + ' item(s)</span>' +
+        statusBadge(slip.status) +
+        '<span class="expandArrow" id="arrow-' + idx + '">&#9662; details</span></div>' +
+        '<div class="slipDetailBody" id="detail-' + idx + '">' +
+        '<table><thead><tr><th>UCS Code</th><th>Description</th><th>Requested</th><th>Approved</th><th>Reason</th></tr></thead>' +
+        '<tbody>' + detailRows + '</tbody></table></div></div>';
+    }).join('');
+  }
+
+  function toggleSlipDetail(idx) {
+    const body = document.getElementById('detail-' + idx);
+    const arrow = document.getElementById('arrow-' + idx);
+    const showing = body.style.display === 'block';
+    body.style.display = showing ? 'none' : 'block';
+    arrow.innerHTML = showing ? '&#9662; details' : '&#9652; hide';
+  }
+
+  document.addEventListener('click', function (e) {
+    if (!e.target.closest('#itemSearchWrap')) document.getElementById('itemSuggestions').style.display = 'none';
+  });
+</script>
+
+</body>
+</html>
