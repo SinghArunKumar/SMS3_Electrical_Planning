@@ -4,6 +4,17 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Stores Dashboard</title>
+
+<!-- PWA: installability. Chrome/Android read the manifest; iOS Safari
+     ignores it and needs these specific meta tags + apple-touch-icon
+     instead, which is why both are present. -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#17233b">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Stores Dashboard">
+
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&display=swap" rel="stylesheet">
@@ -119,9 +130,8 @@
      once an official logo file is available. Sized/positioned to drop
      an image in without touching the surrounding layout. */
   #brandLogo {
-    width: 34px; height: 34px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
-    border: 1px solid var(--blue); border-radius: 4px; color: #cfd8e6; font-size: 11px; font-weight: 700;
-    letter-spacing: 0.02em;
+    width: 34px; height: 34px; flex-shrink: 0; border-radius: 6px;
+    object-fit: cover; background: #fff;
   }
   .brandText { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
   .brandText .brandTitle { font-weight: 700; font-size: 15px; color: #fff; line-height: 1.2; }
@@ -258,7 +268,7 @@
 <div id="appShell">
   <div id="sidebar">
     <div class="brand">
-      <div id="brandLogo">SMS</div>
+      <img id="brandLogo" src="icons/icon-192.png" alt="Company logo">
       <div class="brandText">
         <span class="brandTitle">Stores Dashboard</span>
         <span class="brandSubtitle">Electrical Planning</span>
@@ -285,5 +295,16 @@
 </div>
 
 <script src="shared.js"></script>
+<script>
+  // PWA installability -- registers the service worker (see sw.js for why
+  // it's network-first, not cache-first). Feature-checked and wrapped in
+  // try/catch so this can never break the app for a browser that doesn't
+  // support service workers at all.
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('sw.js').catch(function () { /* non-fatal */ });
+    });
+  }
+</script>
 </body>
 </html>

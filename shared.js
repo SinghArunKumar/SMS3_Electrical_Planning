@@ -6,7 +6,7 @@
 // =====================================================================
 
 const Shell = {
-  APPS_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbxMXqckZThqa3Vh06rh8fPWJ8RM0fn3x9yT_YzhqQt0Ph4BKArpoVNRviDwfaEYYyVH/exec',
+  APPS_SCRIPT_URL: 'PASTE_YOUR_DEPLOYED_WEB_APP_URL_HERE',
   currentUser: null,   // { email, password, name, role, authorizedArea, isAdmin }
   _intervals: [],
 
