@@ -163,6 +163,14 @@ const PAGES = [
 
   // --- Admin ---
   { key: 'admin-options', file: 'admin-options.html', label: 'Manage Options', icon: 'settings', group: 'Admin', access: Access.isApprover },
+
+  // --- Returns ---
+  // Access mirrors the pages' own gates exactly: raiseReturn() requires
+  // isAreaInchargeForArea (Area Incharge, area-scoped -- no Supervisor
+  // fast-track, unlike Requisitions), approveReturn() requires
+  // canSanctionRequisition (Approver, global, same as Sanction Dashboard).
+  { key: 'raise-return', file: 'raise-return.html', label: 'Raise Return', icon: 'undo', group: 'Returns', access: Access.isAreaIncharge },
+  { key: 'return-approval-dashboard', file: 'return-approval-dashboard.html', label: 'Return Approval', icon: 'inbox', group: 'Returns', access: Access.isApprover },
 ];
 
 // ====== ICONS ======
@@ -187,6 +195,8 @@ const ICONS = {
   warehouse: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21V9l9-5 9 5v12"/><path d="M8 21v-7h8v7"/><path d="M8 17.5h8"/></svg>',
   alert: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 2 20h20L12 3Z"/><path d="M12 9v5"/><circle cx="12" cy="17.2" r="0.9" fill="currentColor" stroke="none"/></svg>',
   settings: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.5-2-3.4-2.3.9a7.6 7.6 0 0 0-1.7-1L15 3.6h-4l-.4 2.4a7.6 7.6 0 0 0-1.7 1l-2.3-.9-2 3.4L6.6 11a7.6 7.6 0 0 0 0 2l-2 1.5 2 3.4 2.3-.9c.5.4 1.1.75 1.7 1l.4 2.4h4l.4-2.4c.6-.25 1.2-.6 1.7-1l2.3.9 2-3.4Z"/></svg>',
+  undo: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-6a4 4 0 0 0-4-4H4"/></svg>',
+  inbox: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12h-5l-1.8 3h-4.4L8 12H3"/><path d="M5.4 5.1 3 12v6a1.5 1.5 0 0 0 1.5 1.5h15A1.5 1.5 0 0 0 21 18v-6l-2.4-6.9A1.6 1.6 0 0 0 17.1 4H6.9a1.6 1.6 0 0 0-1.5 1.1z"/></svg>',
 };
 
 // ====== FRAGMENT LOADER ======
