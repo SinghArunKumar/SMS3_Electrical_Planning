@@ -1,11 +1,5 @@
-<!DOCTYPE html>
-<html lang="en-GB">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Return Approval Dashboard</title>
 <style>
-  body { font-family: Arial, sans-serif; max-width: 800px; margin: 40px auto; padding: 0 16px; color: #222; }
+
   h2 { margin-bottom: 4px; }
   .subtitle { color: #666; font-size: 13px; margin-bottom: 24px; }
   label { display: block; font-weight: bold; margin-top: 14px; margin-bottom: 4px; font-size: 14px; }
@@ -35,20 +29,20 @@
   .slipCardFooter { padding:12px 16px; display:flex; justify-content:flex-end; gap:8px; align-items:center; }
   .slipCardFooter .cardMessage { font-size:12px; color:#c5221f; margin-right:auto; }
   .physicalNote { padding:0 16px 12px; font-size:12px; color:#666; }
+
 </style>
-</head>
-<body>
+
 
 <h2>Return Approval Dashboard</h2>
 <div class="subtitle">GitHub_SMS-3 Stores Module &mdash; approve returns; approving completes them and restores Planning stock</div>
 
 <!-- ====== LOGIN SECTION ====== -->
-<div id="loginSection">
+<div id="loginSection" style="display:none">
   <label for="loginEmail">Email</label>
   <input type="email" id="loginEmail" placeholder="you@test.com">
   <label for="loginPassword">Password</label>
   <input type="password" id="loginPassword" placeholder="Password">
-  <button id="loginBtn" onclick="login()" style="margin-top:20px; width:100%;">Log In</button>
+  <button id="loginBtn" onclick="Page.login()" style="margin-top:20px; width:100%;">Log In</button>
 </div>
 
 <!-- ====== NOT AUTHORIZED NOTICE ====== -->
@@ -59,7 +53,7 @@
 <!-- ====== DASHBOARD SECTION ====== -->
 <div id="dashboardSection" style="display:none;">
   <div id="loggedInBar"></div>
-  <button class="secondary" onclick="loadPending()" style="width:auto;">&#8635; Refresh</button>
+  <button class="secondary" onclick="Page.loadPending()" style="width:auto;">&#8635; Refresh</button>
   <div id="loadingState">Loading pending returns&hellip;</div>
   <div id="emptyState">No returns are currently pending approval.</div>
   <div id="slipsContainer"></div>
@@ -67,9 +61,14 @@
 
 <div id="message"></div>
 
+
+
+
 <script>
+(function(){
+
   // TODO: paste your deployed Apps Script Web App URL here
-  const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxMXqckZThqa3Vh06rh8fPWJ8RM0fn3x9yT_YzhqQt0Ph4BKArpoVNRviDwfaEYYyVH/exec';
+  const APPS_SCRIPT_URL = Shell.APPS_SCRIPT_URL;
 
   let currentUser = { email: '', password: '' };
 
@@ -113,7 +112,7 @@
       const bar = document.getElementById('loggedInBar');
       bar.style.display = 'block';
       bar.innerHTML = 'Logged in as <b>' + escapeHtml(data.name) + '</b> (Approver)' +
-        '<button id="logoutBtn" onclick="location.reload()">Log out</button>';
+        '<button id="logoutBtn" onclick="Shell.logout()">Log out</button>';
       loadPending();
     } catch (err) {
       showMessage('Could not reach the server. Check your connection or the Apps Script URL.', 'error');
@@ -162,7 +161,7 @@
           '<td>' + (it.currentAreaBalance === '' ? '&mdash;' : it.currentAreaBalance) + '</td>' +
           '<td>' + it.qtyReturnRequested + '</td>' +
           '<td><input type="number" min="0" step="1" max="' + it.qtyReturnRequested + '" value="' + it.qtyReturnRequested + '" ' +
-            'data-max="' + it.qtyReturnRequested + '" oninput="validateQtyInput(this)"><div class="qtyErr" style="display:none;"></div></td>' +
+            'data-max="' + it.qtyReturnRequested + '" oninput="Page.validateQtyInput(this)"><div class="qtyErr" style="display:none;"></div></td>' +
           '</tr>';
       }).join('');
       return '<div class="slipCard" data-slip-id="' + escapeHtml(slip.returnId) + '">' +
@@ -172,7 +171,7 @@
         '<tbody>' + rows + '</tbody></table></div>' +
         '<div class="physicalNote">Approving completes the return &mdash; material is treated as back in Planning inventory immediately. Physically receive it from ' + escapeHtml(slip.area) + ' yourself before or after approving.</div>' +
         '<div class="slipCardFooter"><span class="cardMessage"></span>' +
-        '<button onclick="approveSlip(this)">Approve Return</button></div></div>';
+        '<button onclick="Page.approveSlip(this)">Approve Return</button></div></div>';
     }).join('');
   }
 
@@ -228,7 +227,29 @@
       btn.textContent = original;
     }
   }
-</script>
 
-</body>
-</html>
+  Object.defineProperties(window.Page = {}, {
+    APPS_SCRIPT_URL: { get: function(){ return APPS_SCRIPT_URL; }, set: function(v){ APPS_SCRIPT_URL = v; }, enumerable: true, configurable: true },
+    approveSlip: { get: function(){ return approveSlip; }, set: function(v){ approveSlip = v; }, enumerable: true, configurable: true },
+    callApi: { get: function(){ return callApi; }, set: function(v){ callApi = v; }, enumerable: true, configurable: true },
+    clearMessage: { get: function(){ return clearMessage; }, set: function(v){ clearMessage = v; }, enumerable: true, configurable: true },
+    currentUser: { get: function(){ return currentUser; }, set: function(v){ currentUser = v; }, enumerable: true, configurable: true },
+    escapeHtml: { get: function(){ return escapeHtml; }, set: function(v){ escapeHtml = v; }, enumerable: true, configurable: true },
+    groupBySlip: { get: function(){ return groupBySlip; }, set: function(v){ groupBySlip = v; }, enumerable: true, configurable: true },
+    hasCommaValueClient: { get: function(){ return hasCommaValueClient; }, set: function(v){ hasCommaValueClient = v; }, enumerable: true, configurable: true },
+    loadPending: { get: function(){ return loadPending; }, set: function(v){ loadPending = v; }, enumerable: true, configurable: true },
+    login: { get: function(){ return login; }, set: function(v){ login = v; }, enumerable: true, configurable: true },
+    renderSlips: { get: function(){ return renderSlips; }, set: function(v){ renderSlips = v; }, enumerable: true, configurable: true },
+    showMessage: { get: function(){ return showMessage; }, set: function(v){ showMessage = v; }, enumerable: true, configurable: true },
+    validateQtyInput: { get: function(){ return validateQtyInput; }, set: function(v){ validateQtyInput = v; }, enumerable: true, configurable: true }
+  });
+
+  // ---- shell auto-login: fill the page's OWN hidden login form and
+  // submit it through the page's OWN unmodified login() function, so every
+  // page's tested role-check / UI-reveal logic runs exactly as before. ----
+  document.getElementById('loginEmail').value = Shell.getUser().email;
+  document.getElementById('loginPassword').value = Shell.getUser().password;
+  login();
+
+})();
+</script>

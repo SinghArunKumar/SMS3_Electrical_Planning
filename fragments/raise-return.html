@@ -1,11 +1,5 @@
-<!DOCTYPE html>
-<html lang="en-GB">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Raise Return</title>
 <style>
-  body { font-family: Arial, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; color: #222; }
+
   h2 { margin-bottom: 4px; }
   .subtitle { color: #666; font-size: 13px; margin-bottom: 24px; }
   label { display: block; font-weight: bold; margin-top: 14px; margin-bottom: 4px; font-size: 14px; }
@@ -68,20 +62,20 @@
   .slipDetailBody table { border-collapse:collapse; width:100%; font-size:12px; }
   .slipDetailBody th, .slipDetailBody td { padding:6px 8px; border-bottom:1px solid #eee; text-align:left; }
   .slipDetailBody th { background:#f8f9fa; }
+
 </style>
-</head>
-<body>
+
 
 <h2>Raise Return</h2>
 <div class="subtitle">GitHub_SMS-3 Stores Module &mdash; return material drawn in error, back to the Planning Store</div>
 
 <!-- ====== LOGIN SECTION ====== -->
-<div id="loginSection">
+<div id="loginSection" style="display:none">
   <label for="loginEmail">Email</label>
   <input type="email" id="loginEmail" placeholder="you@test.com">
   <label for="loginPassword">Password</label>
   <input type="password" id="loginPassword" placeholder="Password">
-  <button id="loginBtn" onclick="login()">Log In</button>
+  <button id="loginBtn" onclick="Page.login()">Log In</button>
 </div>
 
 <!-- ====== NOT AUTHORIZED NOTICE ====== -->
@@ -96,11 +90,11 @@
   <div class="scopeNotice">Only for material still sitting in your area's shelf stock, never Locally Issued to anyone. Once material has been Locally Issued, it can't be returned through this form.</div>
 
   <label for="areaSelect">Area</label>
-  <select id="areaSelect" onchange="onAreaChange()"></select>
+  <select id="areaSelect" onchange="Page.onAreaChange()"></select>
 
   <label for="itemSearchBox" style="margin-top:20px;">Add a material (search by UCS Code or keywords)</label>
   <div id="itemSearchWrap">
-    <input type="text" id="itemSearchBox" placeholder="e.g. bearing 6210, or a UCS code" autocomplete="off" oninput="onItemSearchInput()">
+    <input type="text" id="itemSearchBox" placeholder="e.g. bearing 6210, or a UCS code" autocomplete="off" oninput="Page.onItemSearchInput()">
     <div id="itemSuggestions"></div>
   </div>
 
@@ -112,15 +106,15 @@
       </div>
       <div>
         <label for="pendingItemQty">Qty (<span id="pendingItemUnit"></span>)</label>
-        <input type="number" id="pendingItemQty" min="1" step="1" oninput="onQtyInput()" onkeydown="onQtyKeydown(event)">
+        <input type="number" id="pendingItemQty" min="1" step="1" oninput="Page.onQtyInput()" onkeydown="Page.onQtyKeydown(event)">
       </div>
     </div>
     <div id="pendingItemStockHint" class="fieldHint"></div>
     <label for="pendingItemReason">Reason (mandatory)</label>
     <textarea id="pendingItemReason" rows="2" maxlength="500" placeholder="e.g. Wrong UCS Code requested by mistake"></textarea>
     <div id="pendingItemError" class="fieldError"></div>
-    <button type="button" class="small" style="margin-top:10px;" onclick="addPendingItem()">Add to Return</button>
-    <button type="button" class="small secondary" style="margin-top:10px; margin-left:8px;" onclick="clearPendingItem()">Cancel</button>
+    <button type="button" class="small" style="margin-top:10px;" onclick="Page.addPendingItem()">Add to Return</button>
+    <button type="button" class="small secondary" style="margin-top:10px; margin-left:8px;" onclick="Page.clearPendingItem()">Cancel</button>
   </div>
 
   <div class="tableWrap" id="itemsTableWrap" style="display:none;">
@@ -132,9 +126,9 @@
   <div id="emptyItemsState">No items added yet. Search above and add up to 10 materials.</div>
   <div id="itemCountNotice"></div>
 
-  <button id="submitBtn" onclick="submitReturn()" disabled>Submit Return</button>
+  <button id="submitBtn" onclick="Page.submitReturn()" disabled>Submit Return</button>
 
-  <button id="mySlipsToggle" onclick="toggleMySlips()">Show my area's recent returns &#9662;</button>
+  <button id="mySlipsToggle" onclick="Page.toggleMySlips()">Show my area's recent returns &#9662;</button>
   <div id="mySlipsSection">
     <div id="mySlipsList"></div>
   </div>
@@ -142,9 +136,14 @@
 
 <div id="message"></div>
 
+
+
+
 <script>
+(function(){
+
   // TODO: paste your deployed Apps Script Web App URL here (same one used by the other pages)
-  const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxMXqckZThqa3Vh06rh8fPWJ8RM0fn3x9yT_YzhqQt0Ph4BKArpoVNRviDwfaEYYyVH/exec';
+  const APPS_SCRIPT_URL = Shell.APPS_SCRIPT_URL;
   const MAX_ITEMS = 10;
 
   let currentUser = { email: '', password: '' };
@@ -233,7 +232,7 @@
       const bar = document.getElementById('loggedInBar');
       bar.style.display = 'block';
       bar.innerHTML = 'Logged in as <b>' + escapeHtml(data.name) + '</b> (' + escapeHtml(data.role) + ')' +
-        '<button id="logoutBtn" onclick="location.reload()">Log out</button>';
+        '<button id="logoutBtn" onclick="Shell.logout()">Log out</button>';
 
       const areaSelect = document.getElementById('areaSelect');
       areaSelect.innerHTML = raiseEligibleAreas.map(function (a) { return '<option value="' + escapeHtml(a) + '">' + escapeHtml(a) + '</option>'; }).join('');
@@ -313,7 +312,7 @@
       return;
     }
     box.innerHTML = currentSuggestions.map(function (m, idx) {
-      return '<div class="suggestionItem" onclick="pickSuggestion(' + idx + ')">' +
+      return '<div class="suggestionItem" onclick="Page.pickSuggestion(' + idx + ')">' +
         '<div class="code">' + escapeHtml(m.ucsCode) + ' &middot; ' + escapeHtml(m.unit) + '</div>' +
         '<div class="short">' + escapeHtml(m.shortText) + '</div></div>';
     }).join('');
@@ -411,7 +410,7 @@
       body.innerHTML = slipItems.map(function (it, idx) {
         return '<tr><td>' + escapeHtml(it.ucsCode) + '</td><td>' + escapeHtml(it.itemDescription) + '</td>' +
           '<td>' + escapeHtml(it.unit) + '</td><td>' + it.qty + '</td><td>' + escapeHtml(it.reason) + '</td>' +
-          '<td><button type="button" class="small danger" onclick="removeItem(' + idx + ')">Remove</button></td></tr>';
+          '<td><button type="button" class="small danger" onclick="Page.removeItem(' + idx + ')">Remove</button></td></tr>';
       }).join('');
     }
     countEl.textContent = slipItems.length + ' of ' + MAX_ITEMS + ' items added.';
@@ -507,7 +506,7 @@
           '<td>' + escapeHtml(it.reason) + '</td></tr>';
       }).join('');
       return '<div class="slipSummaryRow">' +
-        '<div class="slipSummaryHead" onclick="toggleSlipDetail(' + idx + ')">' +
+        '<div class="slipSummaryHead" onclick="Page.toggleSlipDetail(' + idx + ')">' +
         '<span class="slipIdText">' + escapeHtml(slip.returnId) + '</span>' +
         '<span class="slipMeta">' + escapeHtml(slip.returnDate) + ' &middot; ' + escapeHtml(slip.area) + ' &middot; ' + slip.items.length + ' item(s)</span>' +
         statusBadge(slip.status) +
@@ -529,7 +528,52 @@
   document.addEventListener('click', function (e) {
     if (!e.target.closest('#itemSearchWrap')) document.getElementById('itemSuggestions').style.display = 'none';
   });
-</script>
 
-</body>
-</html>
+  Object.defineProperties(window.Page = {}, {
+    APPS_SCRIPT_URL: { get: function(){ return APPS_SCRIPT_URL; }, set: function(v){ APPS_SCRIPT_URL = v; }, enumerable: true, configurable: true },
+    MAX_ITEMS: { get: function(){ return MAX_ITEMS; }, set: function(v){ MAX_ITEMS = v; }, enumerable: true, configurable: true },
+    addPendingItem: { get: function(){ return addPendingItem; }, set: function(v){ addPendingItem = v; }, enumerable: true, configurable: true },
+    allMaterials: { get: function(){ return allMaterials; }, set: function(v){ allMaterials = v; }, enumerable: true, configurable: true },
+    areaStockMap: { get: function(){ return areaStockMap; }, set: function(v){ areaStockMap = v; }, enumerable: true, configurable: true },
+    callApi: { get: function(){ return callApi; }, set: function(v){ callApi = v; }, enumerable: true, configurable: true },
+    clearMessage: { get: function(){ return clearMessage; }, set: function(v){ clearMessage = v; }, enumerable: true, configurable: true },
+    clearPendingItem: { get: function(){ return clearPendingItem; }, set: function(v){ clearPendingItem = v; }, enumerable: true, configurable: true },
+    currentArea: { get: function(){ return currentArea; }, set: function(v){ currentArea = v; }, enumerable: true, configurable: true },
+    currentMaxQty: { get: function(){ return currentMaxQty; }, set: function(v){ currentMaxQty = v; }, enumerable: true, configurable: true },
+    currentSuggestions: { get: function(){ return currentSuggestions; }, set: function(v){ currentSuggestions = v; }, enumerable: true, configurable: true },
+    currentUser: { get: function(){ return currentUser; }, set: function(v){ currentUser = v; }, enumerable: true, configurable: true },
+    escapeHtml: { get: function(){ return escapeHtml; }, set: function(v){ escapeHtml = v; }, enumerable: true, configurable: true },
+    groupMySlips: { get: function(){ return groupMySlips; }, set: function(v){ groupMySlips = v; }, enumerable: true, configurable: true },
+    hasCommaValueClient: { get: function(){ return hasCommaValueClient; }, set: function(v){ hasCommaValueClient = v; }, enumerable: true, configurable: true },
+    loadAreaStock: { get: function(){ return loadAreaStock; }, set: function(v){ loadAreaStock = v; }, enumerable: true, configurable: true },
+    loadMaterials: { get: function(){ return loadMaterials; }, set: function(v){ loadMaterials = v; }, enumerable: true, configurable: true },
+    loadMySlips: { get: function(){ return loadMySlips; }, set: function(v){ loadMySlips = v; }, enumerable: true, configurable: true },
+    login: { get: function(){ return login; }, set: function(v){ login = v; }, enumerable: true, configurable: true },
+    mySlipsLoaded: { get: function(){ return mySlipsLoaded; }, set: function(v){ mySlipsLoaded = v; }, enumerable: true, configurable: true },
+    onAreaChange: { get: function(){ return onAreaChange; }, set: function(v){ onAreaChange = v; }, enumerable: true, configurable: true },
+    onItemSearchInput: { get: function(){ return onItemSearchInput; }, set: function(v){ onItemSearchInput = v; }, enumerable: true, configurable: true },
+    onQtyInput: { get: function(){ return onQtyInput; }, set: function(v){ onQtyInput = v; }, enumerable: true, configurable: true },
+    onQtyKeydown: { get: function(){ return onQtyKeydown; }, set: function(v){ onQtyKeydown = v; }, enumerable: true, configurable: true },
+    pendingItem: { get: function(){ return pendingItem; }, set: function(v){ pendingItem = v; }, enumerable: true, configurable: true },
+    pickSuggestion: { get: function(){ return pickSuggestion; }, set: function(v){ pickSuggestion = v; }, enumerable: true, configurable: true },
+    raiseEligibleAreas: { get: function(){ return raiseEligibleAreas; }, set: function(v){ raiseEligibleAreas = v; }, enumerable: true, configurable: true },
+    removeItem: { get: function(){ return removeItem; }, set: function(v){ removeItem = v; }, enumerable: true, configurable: true },
+    renderItemsTable: { get: function(){ return renderItemsTable; }, set: function(v){ renderItemsTable = v; }, enumerable: true, configurable: true },
+    renderMySlips: { get: function(){ return renderMySlips; }, set: function(v){ renderMySlips = v; }, enumerable: true, configurable: true },
+    showMessage: { get: function(){ return showMessage; }, set: function(v){ showMessage = v; }, enumerable: true, configurable: true },
+    slipItems: { get: function(){ return slipItems; }, set: function(v){ slipItems = v; }, enumerable: true, configurable: true },
+    statusBadge: { get: function(){ return statusBadge; }, set: function(v){ statusBadge = v; }, enumerable: true, configurable: true },
+    submitReturn: { get: function(){ return submitReturn; }, set: function(v){ submitReturn = v; }, enumerable: true, configurable: true },
+    toggleMySlips: { get: function(){ return toggleMySlips; }, set: function(v){ toggleMySlips = v; }, enumerable: true, configurable: true },
+    toggleSlipDetail: { get: function(){ return toggleSlipDetail; }, set: function(v){ toggleSlipDetail = v; }, enumerable: true, configurable: true }
+  });
+
+  // ---- shell auto-login: fill the page's OWN hidden login form and
+  // submit it through the page's OWN unmodified login() function, so every
+  // page's tested role-check / UI-reveal logic runs exactly as before. ----
+  document.getElementById('loginEmail').value = Shell.getUser().email;
+  document.getElementById('loginPassword').value = Shell.getUser().password;
+  login();
+
+})();
+</script>
