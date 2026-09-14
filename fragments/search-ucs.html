@@ -1,5 +1,11 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UCS Code Search</title>
 <style>
-
+  body { font-family: Arial, sans-serif; max-width: 760px; margin: 40px auto; padding: 0 16px; color: #222; }
   h2 { margin-bottom: 4px; }
   .subtitle { color: #666; font-size: 13px; margin-bottom: 24px; }
   label { display: block; font-weight: bold; margin-top: 14px; margin-bottom: 4px; font-size: 14px; }
@@ -40,22 +46,22 @@
   #detailCard .detailValue { font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
   #detailCard .detailUnit { display:inline-block; background:#f1f3f4; padding: 3px 10px; border-radius: 10px; font-size: 12px; margin-top: 4px; }
   #detailOkBtn { margin-top: 22px; width: 100%; }
-
 </style>
-
+</head>
+<body>
 
 <h2>UCS Code Search</h2>
 <div class="subtitle">GitHub_SMS-3 Stores Module &mdash; find a material's UCS Code by any combination of keywords<span class="readOnlyBadge">READ-ONLY</span></div>
 
 <!-- ====== LOGIN SECTION ====== -->
-<div id="loginSection" style="display:none">
+<div id="loginSection">
   <label for="loginEmail">Email</label>
   <input type="email" id="loginEmail" placeholder="you@test.com">
 
   <label for="loginPassword">Password</label>
   <input type="password" id="loginPassword" placeholder="Password">
 
-  <button id="loginBtn" onclick="Page.login()" style="margin-top:20px; width:100%;">Log In</button>
+  <button id="loginBtn" onclick="login()" style="margin-top:20px; width:100%;">Log In</button>
 </div>
 
 <!-- ====== SEARCH SECTION (shown after login) ====== -->
@@ -64,7 +70,7 @@
 
   <label for="searchBox">Search by UCS Code or any keywords from the description</label>
   <div id="searchWrap">
-    <input type="text" id="searchBox" placeholder="e.g. cable 1100 v copper xlpe &nbsp;|&nbsp; 5131000105..." autocomplete="off" oninput="Page.onSearchInput()">
+    <input type="text" id="searchBox" placeholder="e.g. cable 1100 v copper xlpe &nbsp;|&nbsp; 5131000105..." autocomplete="off" oninput="onSearchInput()">
   </div>
   <div id="resultCount"></div>
 
@@ -78,7 +84,7 @@
 <div id="message"></div>
 
 <!-- ====== DETAIL OVERLAY ====== -->
-<div id="detailOverlay" onclick="if(event.target===this) Page.closeDetail()">
+<div id="detailOverlay" onclick="if(event.target===this) closeDetail()">
   <div id="detailCard">
     <div class="detailCode" id="detailCode"></div>
     <span class="detailUnit" id="detailUnit"></span>
@@ -89,18 +95,13 @@
     <div class="detailLabel">Long Text</div>
     <div class="detailValue" id="detailLong"></div>
 
-    <button id="detailOkBtn" onclick="Page.closeDetail()">OK</button>
+    <button id="detailOkBtn" onclick="closeDetail()">OK</button>
   </div>
 </div>
 
-
-
-
 <script>
-(function(){
-
   // TODO: paste your deployed Apps Script Web App URL here
-  const APPS_SCRIPT_URL = Shell.APPS_SCRIPT_URL;
+  const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxMXqckZThqa3Vh06rh8fPWJ8RM0fn3x9yT_YzhqQt0Ph4BKArpoVNRviDwfaEYYyVH/exec';
 
   // Kept only in memory for this page load — not persisted to browser storage.
   let currentUser = { email: '', password: '' };
@@ -163,7 +164,7 @@
         const bar = document.getElementById('loggedInBar');
         bar.style.display = 'block';
         bar.innerHTML = 'Logged in as <b>' + data.name + '</b> (' + data.role + ')' +
-          '<button id="logoutBtn" onclick="Shell.logout()">Log out</button>';
+          '<button id="logoutBtn" onclick="logout()">Log out</button>';
         loadMaterials();
       } else {
         showMessage(data.message || 'Login failed.', 'error');
@@ -230,12 +231,49 @@
   }
 
   function highlight(text, tokens) {
-    let out = escapeHtml(text);
+    const str = String(text);
+
+    // 1. Find every match for every token against the RAW text first
+    //    (never against text that already has <mark> tags in it).
+    const ranges = [];
     tokens.forEach(function (t) {
       if (!t) return;
-      const re = new RegExp('(' + t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'ig');
-      out = out.replace(re, '<mark>$1</mark>');
+      const re = new RegExp(t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'ig');
+      let match;
+      while ((match = re.exec(str)) !== null) {
+        ranges.push([match.index, match.index + match[0].length]);
+        if (match[0].length === 0) re.lastIndex++; // safety for empty matches
+      }
     });
+
+    if (ranges.length === 0) return escapeHtml(str);
+
+    // 2. Sort and merge overlapping/adjacent ranges so a letter covered by
+    //    two tokens (e.g. "a" and "acb" both matching inside "ACB") only
+    //    gets wrapped once.
+    ranges.sort(function (a, b) { return a[0] - b[0]; });
+    const merged = [ranges[0]];
+    for (let i = 1; i < ranges.length; i++) {
+      const last = merged[merged.length - 1];
+      const cur = ranges[i];
+      if (cur[0] <= last[1]) {
+        last[1] = Math.max(last[1], cur[1]);
+      } else {
+        merged.push(cur);
+      }
+    }
+
+    // 3. Rebuild the string once, escaping plain segments and wrapping
+    //    matched segments in <mark>. Tags are only ever added to the
+    //    final output, never fed back into another regex pass.
+    let out = '';
+    let cursor = 0;
+    merged.forEach(function (r) {
+      out += escapeHtml(str.slice(cursor, r[0]));
+      out += '<mark>' + escapeHtml(str.slice(r[0], r[1])) + '</mark>';
+      cursor = r[1];
+    });
+    out += escapeHtml(str.slice(cursor));
     return out;
   }
 
@@ -274,7 +312,7 @@
 
     const shown = matches.slice(0, MAX_RESULTS_SHOWN);
     resultsEl.innerHTML = shown.map(function (m, idx) {
-      return '<div class="resultRow" onclick="Page.openDetail(' + idx + ')" data-idx="' + idx + '">' +
+      return '<div class="resultRow" onclick="openDetail(' + idx + ')" data-idx="' + idx + '">' +
         '<span class="unit">' + escapeHtml(m.unit) + '</span>' +
         '<div class="code">' + highlight(m.ucsCode, tokens) + '</div>' +
         '<div class="short">' + highlight(m.shortText, tokens) + '</div>' +
@@ -310,33 +348,7 @@
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') closeDetail();
   });
-
-  Object.defineProperties(window.Page = {}, {
-    APPS_SCRIPT_URL: { get: function(){ return APPS_SCRIPT_URL; }, set: function(v){ APPS_SCRIPT_URL = v; }, enumerable: true, configurable: true },
-    MAX_RESULTS_SHOWN: { get: function(){ return MAX_RESULTS_SHOWN; }, set: function(v){ MAX_RESULTS_SHOWN = v; }, enumerable: true, configurable: true },
-    allMaterials: { get: function(){ return allMaterials; }, set: function(v){ allMaterials = v; }, enumerable: true, configurable: true },
-    callApi: { get: function(){ return callApi; }, set: function(v){ callApi = v; }, enumerable: true, configurable: true },
-    clearMessage: { get: function(){ return clearMessage; }, set: function(v){ clearMessage = v; }, enumerable: true, configurable: true },
-    closeDetail: { get: function(){ return closeDetail; }, set: function(v){ closeDetail = v; }, enumerable: true, configurable: true },
-    currentUser: { get: function(){ return currentUser; }, set: function(v){ currentUser = v; }, enumerable: true, configurable: true },
-    escapeHtml: { get: function(){ return escapeHtml; }, set: function(v){ escapeHtml = v; }, enumerable: true, configurable: true },
-    highlight: { get: function(){ return highlight; }, set: function(v){ highlight = v; }, enumerable: true, configurable: true },
-    loadMaterials: { get: function(){ return loadMaterials; }, set: function(v){ loadMaterials = v; }, enumerable: true, configurable: true },
-    login: { get: function(){ return login; }, set: function(v){ login = v; }, enumerable: true, configurable: true },
-    logout: { get: function(){ return logout; }, set: function(v){ logout = v; }, enumerable: true, configurable: true },
-    onSearchInput: { get: function(){ return onSearchInput; }, set: function(v){ onSearchInput = v; }, enumerable: true, configurable: true },
-    openDetail: { get: function(){ return openDetail; }, set: function(v){ openDetail = v; }, enumerable: true, configurable: true },
-    runSearch: { get: function(){ return runSearch; }, set: function(v){ runSearch = v; }, enumerable: true, configurable: true },
-    searchDebounceTimer: { get: function(){ return searchDebounceTimer; }, set: function(v){ searchDebounceTimer = v; }, enumerable: true, configurable: true },
-    showMessage: { get: function(){ return showMessage; }, set: function(v){ showMessage = v; }, enumerable: true, configurable: true }
-  });
-
-  // ---- shell auto-login: fill the page's OWN hidden login form and
-  // submit it through the page's OWN unmodified login() function, so every
-  // page's tested role-check / UI-reveal logic runs exactly as before. ----
-  document.getElementById('loginEmail').value = Shell.getUser().email;
-  document.getElementById('loginPassword').value = Shell.getUser().password;
-  login();
-
-})();
 </script>
+
+</body>
+</html>
