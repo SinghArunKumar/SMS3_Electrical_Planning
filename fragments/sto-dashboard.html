@@ -204,6 +204,34 @@
       </div>
     </div>
 
+    <!-- Pending row, still fully open (no Z04 yet): Edit Qty / UCS Code -->
+    <div id="editStoForm" style="display:none; margin-bottom:16px; border:1px solid #ddd; border-radius:6px; padding:12px; background:#fff;">
+      <div style="font-weight:bold; font-size:13px; margin-bottom:8px;">Edit STO Details</div>
+      <div style="font-size:12px; color:#666; margin-bottom:10px;">
+        Use this if the physical material differs from what was originally entered
+        (e.g. a cable drum actually holds a different length, or the store hands
+        over a different UCS Code/spec). This closes automatically once the STO
+        is received or Z04'd.
+      </div>
+      <label for="editQty">Qty</label>
+      <input type="number" id="editQty" min="1" step="1" style="width:100%;" oninput="Page.onEditUCSOrQtyInput()">
+      <div id="editQtyError" class="fieldError"></div>
+
+      <label for="editUcsCode">UCS Code (14 digits)</label>
+      <input type="text" id="editUcsCode" maxlength="14" inputmode="numeric" style="width:100%;"
+             oninput="Page.sanitizeEditUcsDigits(); Page.onEditUcsCodeInput();">
+      <div id="editUcsCodeError" class="fieldError"></div>
+      <div id="editUcsFoundBox" style="display:none; font-size:12px; color:#1e7e34; margin-top:4px;"></div>
+      <div id="editUcsNotFoundBox" style="display:none; font-size:12px; color:#c5221f; margin-top:4px;">
+        UCS Code not found in UCS_MasterList. Add it from the "Add UCS Code" page first, then come back here.
+      </div>
+
+      <div class="actionBtnRow">
+        <button type="button" id="saveEditStoBtn" disabled onclick="Page.saveEditSto()">Save Changes</button>
+      </div>
+      <div id="editStoMessage" style="margin-top:8px; font-size:13px; display:none; padding:8px; border-radius:4px;"></div>
+    </div>
+
     <!-- Locked row, admin: correction form -->
     <div id="correctForm" style="display:none;">
       <div class="adminWarning">You're editing an already-received STO. This correction is logged in the audit trail with the old and new values.</div>
@@ -262,6 +290,7 @@
 
   let currentUser = { email: '', password: '' };
   let isAdminUser = false;
+  let cachedAreaOptions = [];
 
   const PAGE_SIZE = 20;
   let currentPage = 1;
@@ -361,6 +390,15 @@
         '<button id="logoutBtn" onclick="Shell.logout()">Log out</button>';
 
       document.getElementById('endDate').max = todayLocalISO();
+
+      // Cache Area_201 options once at login -- needed by the inline 201 form
+      // mounted via SharedForms further down. Fire-and-forget: if it fails,
+      // the 201 form will simply show an empty area dropdown and the operator
+      // can hit the page's own retry path (re-login) to pick it up again.
+      callApi({ action: 'getOptionsList', email, password, category: 'Area_201' }).then(function (data) {
+        if (data.success) cachedAreaOptions = data.values || [];
+      });
+
       loadPage(1);
     } catch (err) {
       showMessage('Could not reach the server. Check your connection or the Apps Script URL.', 'error');
@@ -628,6 +666,12 @@
     if (row.pending) {
       document.getElementById('actionPanelTitle').textContent = 'Receive Material';
       document.getElementById('receiveForm').style.display = 'block';
+      if (!row.z04Done) {
+        document.getElementById('editStoForm').style.display = 'block';
+        initEditStoForm(row);
+      } else {
+        document.getElementById('editStoForm').style.display = 'none';
+      }
       document.getElementById('receivedQty').value = '';
       document.getElementById('receivedDate').value = todayLocalISO();
       document.getElementById('receivedDate').max = todayLocalISO();
@@ -636,6 +680,7 @@
       ['receivedQtyError', 'receivedDateError'].forEach(function (id) { document.getElementById(id).style.display = 'none'; });
       validateReceiveFields();
     } else if (isAdminUser) {
+      document.getElementById('editStoForm').style.display = 'none';
       document.getElementById('actionPanelTitle').textContent = 'Correct Received Info (Admin)';
       document.getElementById('correctForm').style.display = 'block';
       document.getElementById('correctQty').value = row.receivedQty;
@@ -646,6 +691,7 @@
       ['correctQtyError', 'correctDateError'].forEach(function (id) { document.getElementById(id).style.display = 'none'; });
       validateCorrectFields();
     } else {
+      document.getElementById('editStoForm').style.display = 'none';
       document.getElementById('actionPanelTitle').textContent = 'STO Details';
       document.getElementById('lockedReadOnlyDetails').innerHTML =
         '<b>Received Qty:</b> ' + row.receivedQty + ' ' + row.unit + '<br>' +
@@ -655,7 +701,153 @@
     }
   }
 
-  // ====== Z04 SUB-SECTION: on-demand detail lookup / raise link ======
+  // ====== EDIT STO DETAILS (Qty / UCS Code, pre-lock only) ======
+  let editUcsConfirmedFound = false;
+  let editUcsCheckInFlight = null;
+
+  function initEditStoForm(row) {
+    document.getElementById('editQty').value = row.qty;
+    document.getElementById('editUcsCode').value = row.ucsCode;
+    document.getElementById('editUcsFoundBox').style.display = 'none';
+    document.getElementById('editUcsNotFoundBox').style.display = 'none';
+    editUcsConfirmedFound = true; // starts valid: it's the row's own current UCS Code
+    document.getElementById('editQtyError').style.display = 'none';
+    document.getElementById('editUcsCodeError').style.display = 'none';
+    document.getElementById('editStoMessage').style.display = 'none';
+    validateEditStoForm();
+  }
+
+  function sanitizeEditUcsDigits() {
+    const field = document.getElementById('editUcsCode');
+    const cleaned = field.value.replace(/[^\d]/g, '');
+    if (cleaned !== field.value) field.value = cleaned;
+  }
+
+  function validateEditQtyField() {
+    const raw = document.getElementById('editQty').value;
+    const errEl = document.getElementById('editQtyError');
+    if (raw === '') { errEl.style.display = 'none'; return false; }
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n <= 0) {
+      errEl.textContent = 'Must be a positive whole number.';
+      errEl.style.display = 'block';
+      return false;
+    }
+    errEl.style.display = 'none';
+    return true;
+  }
+
+  function validateEditUcsFormat() {
+    const val = document.getElementById('editUcsCode').value.trim();
+    const errEl = document.getElementById('editUcsCodeError');
+    if (val === '') { errEl.style.display = 'none'; return false; }
+    if (val.length !== 14) {
+      errEl.textContent = 'Must be exactly 14 digits. Currently ' + val.length + '.';
+      errEl.style.display = 'block';
+      return false;
+    }
+    if (val.charAt(0) === '0') {
+      errEl.textContent = 'Cannot start with 0.';
+      errEl.style.display = 'block';
+      return false;
+    }
+    errEl.style.display = 'none';
+    return true;
+  }
+
+  async function onEditUcsCodeInput() {
+    editUcsConfirmedFound = false;
+    document.getElementById('editUcsFoundBox').style.display = 'none';
+    document.getElementById('editUcsNotFoundBox').style.display = 'none';
+
+    const isValidFormat = validateEditUcsFormat();
+    validateEditStoForm();
+    if (!isValidFormat) return;
+
+    const ucsCode = document.getElementById('editUcsCode').value.trim();
+    const thisCheck = Symbol();
+    editUcsCheckInFlight = thisCheck;
+
+    try {
+      const data = await callApi({
+        action: 'checkUCSCodeExists',
+        email: currentUser.email,
+        password: currentUser.password,
+        ucsCode: ucsCode
+      });
+      if (editUcsCheckInFlight !== thisCheck) return;
+
+      if (!data.success) {
+        showMessage(data.message || 'Could not check this UCS Code right now.', 'error');
+        return;
+      }
+      if (data.exists) {
+        document.getElementById('editUcsFoundBox').textContent = data.itemDescription + ' (' + data.unit + ')';
+        document.getElementById('editUcsFoundBox').style.display = 'block';
+        editUcsConfirmedFound = true;
+      } else {
+        document.getElementById('editUcsNotFoundBox').style.display = 'block';
+      }
+    } catch (err) {
+      showMessage('Could not reach the server while checking this UCS Code.', 'error');
+    } finally {
+      validateEditStoForm();
+    }
+  }
+
+  function onEditUCSOrQtyInput() {
+    validateEditQtyField();
+    validateEditStoForm();
+  }
+
+  function validateEditStoForm() {
+    const qtyOk = validateEditQtyField() && document.getElementById('editQty').value !== '';
+    const ucsOk = validateEditUcsFormat() && document.getElementById('editUcsCode').value.length === 14 && editUcsConfirmedFound;
+    document.getElementById('saveEditStoBtn').disabled = !(qtyOk && ucsOk);
+    return qtyOk && ucsOk;
+  }
+
+  async function saveEditSto() {
+    const row = currentRows[selectedIndex];
+    if (!row) return;
+    if (!validateEditStoForm()) return;
+
+    const btn = document.getElementById('saveEditStoBtn');
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+    const msgBox = document.getElementById('editStoMessage');
+    msgBox.style.display = 'none';
+
+    try {
+      const data = await callApi({
+        action: 'editSTOEntry',
+        email: currentUser.email,
+        password: currentUser.password,
+        stoNo: row.stoNo,
+        qty: Number(document.getElementById('editQty').value),
+        ucsCode: document.getElementById('editUcsCode').value.trim()
+      });
+      if (data.success) {
+        showMessage(data.message, 'success');
+        closeActionPanel();
+        loadPage(currentPage);
+      } else {
+        msgBox.className = 'error';
+        msgBox.textContent = data.message || 'Could not save these changes.';
+        msgBox.style.display = 'block';
+      }
+    } catch (err) {
+      msgBox.className = 'error';
+      msgBox.textContent = 'Could not reach the server.';
+      msgBox.style.display = 'block';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Save Changes';
+      validateEditStoForm();
+    }
+  }
+
+  // ====== Z04 SUB-SECTION: on-demand detail lookup, or inline creation ======
   let z04DetailRequestInFlight = null;
 
   function renderZ04Section(row) {
@@ -671,11 +863,24 @@
     wrap.appendChild(heading);
 
     if (!row.z04Done) {
-      const p = document.createElement('div');
-      p.style.cssText = 'font-size:13px; color:#555;';
-      p.innerHTML = 'Not yet raised. Note this STO No — <b>' + row.stoNo + '</b> — and enter it in the Z04 entry sheet from the menu.';
-      wrap.appendChild(p);
+      // Inline creation, right here, using data this page already has --
+      // no second login, no new tab. See SharedForms (shared-forms.js).
+      const formHost = document.createElement('div');
+      wrap.appendChild(formHost);
       box.appendChild(wrap);
+      SharedForms.mountZ04Form(
+        formHost,
+        { stoNo: row.stoNo, stoDate: row.stoDate, qty: row.qty },
+        {
+          callApi: function (payload) {
+            return callApi(Object.assign({ email: currentUser.email, password: currentUser.password }, payload));
+          },
+          onSuccess: function (data) {
+            showMessage(data.message, 'success');
+            loadPage(currentPage);
+          }
+        }
+      );
       return;
     }
 
@@ -715,7 +920,7 @@
     });
   }
 
-  // ====== 201 SUB-SECTION: on-demand entry list (mirrors renderZ04Section) ======
+  // ====== 201 SUB-SECTION: on-demand entry list, or inline creation (mirrors renderZ04Section) ======
   let s201RequestInFlight = null;
 
   function renderS201Section(row) {
@@ -738,12 +943,43 @@
       box.appendChild(wrap);
       return;
     }
+
+    const sharedCallApi = function (payload) {
+      return callApi(Object.assign({ email: currentUser.email, password: currentUser.password }, payload));
+    };
+
     if (row.status201 === 'pending') {
-      const p = document.createElement('div');
-      p.style.cssText = 'font-size:13px; color:#555;';
-      p.textContent = 'Z04\u2019d, but no 201 has been released against it yet.';
-      wrap.appendChild(p);
+      // Z04'd, nothing released yet -- inline 201 creation form directly.
+      // Needs Qty_Recieved_Z04 / Date_of_Receipt_Z04 for the form's bounds,
+      // so fetch the same Z04 detail the Z04 sub-section itself displays.
+      const formHost = document.createElement('div');
+      wrap.appendChild(formHost);
       box.appendChild(wrap);
+
+      callApi({
+        action: 'getZ04DetailsForSTO',
+        email: currentUser.email,
+        password: currentUser.password,
+        stoNo: row.stoNo
+      }).then(function (data) {
+        if (!data.success || !data.z04) {
+          formHost.textContent = data.message || 'Could not load Z04 details needed for this form.';
+          return;
+        }
+        SharedForms.mountS201Form(
+          formHost,
+          { stoNo: row.stoNo, dateOfReceiptZ04: data.z04.dateOfReceipt },
+          data.z04.qtyReceived,
+          {
+            callApi: sharedCallApi,
+            areaOptions: cachedAreaOptions,
+            onSuccess: function (resData) {
+              showMessage(resData.message, 'success');
+              loadPage(currentPage);
+            }
+          }
+        );
+      });
       return;
     }
 
@@ -796,6 +1032,28 @@
       });
       table.appendChild(tbody);
       wrap.appendChild(table);
+
+      // 'partial' status: balance remains, so offer the inline form below
+      // the existing entries too (dateOfReceiptZ04 not available from this
+      // endpoint, so the form simply won't apply a min-date bound here --
+      // addS201Entry() still re-validates that server-side regardless).
+      if (data.remaining > 0) {
+        const formHost2 = document.createElement('div');
+        wrap.appendChild(formHost2);
+        SharedForms.mountS201Form(
+          formHost2,
+          { stoNo: row.stoNo, dateOfReceiptZ04: null },
+          data.remaining,
+          {
+            callApi: sharedCallApi,
+            areaOptions: cachedAreaOptions,
+            onSuccess: function (resData) {
+              showMessage(resData.message, 'success');
+              loadPage(currentPage);
+            }
+          }
+        );
+      }
     }).catch(function () {
       if (s201RequestInFlight !== thisRequest) return;
       loadingEl.textContent = 'Could not reach the server while loading 201 entries.';
@@ -1000,6 +1258,7 @@
     APPS_SCRIPT_URL: { get: function(){ return APPS_SCRIPT_URL; }, set: function(v){ APPS_SCRIPT_URL = v; }, enumerable: true, configurable: true },
     PAGE_SIZE: { get: function(){ return PAGE_SIZE; }, set: function(v){ PAGE_SIZE = v; }, enumerable: true, configurable: true },
     TABLE_COLUMN_COUNT: { get: function(){ return TABLE_COLUMN_COUNT; }, set: function(v){ TABLE_COLUMN_COUNT = v; }, enumerable: true, configurable: true },
+    cachedAreaOptions: { get: function(){ return cachedAreaOptions; }, set: function(v){ cachedAreaOptions = v; }, enumerable: true, configurable: true },
     callApi: { get: function(){ return callApi; }, set: function(v){ callApi = v; }, enumerable: true, configurable: true },
     cancelConfirm: { get: function(){ return cancelConfirm; }, set: function(v){ cancelConfirm = v; }, enumerable: true, configurable: true },
     clearFilters: { get: function(){ return clearFilters; }, set: function(v){ clearFilters = v; }, enumerable: true, configurable: true },
@@ -1013,10 +1272,13 @@
     doSave: { get: function(){ return doSave; }, set: function(v){ doSave = v; }, enumerable: true, configurable: true },
     goToPage: { get: function(){ return goToPage; }, set: function(v){ goToPage = v; }, enumerable: true, configurable: true },
     hasCommaValueClient: { get: function(){ return hasCommaValueClient; }, set: function(v){ hasCommaValueClient = v; }, enumerable: true, configurable: true },
+    initEditStoForm: { get: function(){ return initEditStoForm; }, set: function(v){ initEditStoForm = v; }, enumerable: true, configurable: true },
     isAdminUser: { get: function(){ return isAdminUser; }, set: function(v){ isAdminUser = v; }, enumerable: true, configurable: true },
     listRequestInFlight: { get: function(){ return listRequestInFlight; }, set: function(v){ listRequestInFlight = v; }, enumerable: true, configurable: true },
     loadPage: { get: function(){ return loadPage; }, set: function(v){ loadPage = v; }, enumerable: true, configurable: true },
     login: { get: function(){ return login; }, set: function(v){ login = v; }, enumerable: true, configurable: true },
+    onEditUCSOrQtyInput: { get: function(){ return onEditUCSOrQtyInput; }, set: function(v){ onEditUCSOrQtyInput = v; }, enumerable: true, configurable: true },
+    onEditUcsCodeInput: { get: function(){ return onEditUcsCodeInput; }, set: function(v){ onEditUcsCodeInput = v; }, enumerable: true, configurable: true },
     onFilterChange: { get: function(){ return onFilterChange; }, set: function(v){ onFilterChange = v; }, enumerable: true, configurable: true },
     onSearchInput: { get: function(){ return onSearchInput; }, set: function(v){ onSearchInput = v; }, enumerable: true, configurable: true },
     openActionPanel: { get: function(){ return openActionPanel; }, set: function(v){ openActionPanel = v; }, enumerable: true, configurable: true },
@@ -1026,6 +1288,8 @@
     renderZ04Section: { get: function(){ return renderZ04Section; }, set: function(v){ renderZ04Section = v; }, enumerable: true, configurable: true },
     reviewAction: { get: function(){ return reviewAction; }, set: function(v){ reviewAction = v; }, enumerable: true, configurable: true },
     s201RequestInFlight: { get: function(){ return s201RequestInFlight; }, set: function(v){ s201RequestInFlight = v; }, enumerable: true, configurable: true },
+    sanitizeEditUcsDigits: { get: function(){ return sanitizeEditUcsDigits; }, set: function(v){ sanitizeEditUcsDigits = v; }, enumerable: true, configurable: true },
+    saveEditSto: { get: function(){ return saveEditSto; }, set: function(v){ saveEditSto = v; }, enumerable: true, configurable: true },
     searchDebounceTimer: { get: function(){ return searchDebounceTimer; }, set: function(v){ searchDebounceTimer = v; }, enumerable: true, configurable: true },
     selectRow: { get: function(){ return selectRow; }, set: function(v){ selectRow = v; }, enumerable: true, configurable: true },
     selectedIndex: { get: function(){ return selectedIndex; }, set: function(v){ selectedIndex = v; }, enumerable: true, configurable: true },
@@ -1036,6 +1300,9 @@
     updatePaginationBar: { get: function(){ return updatePaginationBar; }, set: function(v){ updatePaginationBar = v; }, enumerable: true, configurable: true },
     validateCorrectFields: { get: function(){ return validateCorrectFields; }, set: function(v){ validateCorrectFields = v; }, enumerable: true, configurable: true },
     validateDateRange: { get: function(){ return validateDateRange; }, set: function(v){ validateDateRange = v; }, enumerable: true, configurable: true },
+    validateEditQtyField: { get: function(){ return validateEditQtyField; }, set: function(v){ validateEditQtyField = v; }, enumerable: true, configurable: true },
+    validateEditStoForm: { get: function(){ return validateEditStoForm; }, set: function(v){ validateEditStoForm = v; }, enumerable: true, configurable: true },
+    validateEditUcsFormat: { get: function(){ return validateEditUcsFormat; }, set: function(v){ validateEditUcsFormat = v; }, enumerable: true, configurable: true },
     validateReceiveFields: { get: function(){ return validateReceiveFields; }, set: function(v){ validateReceiveFields = v; }, enumerable: true, configurable: true },
     z04DetailRequestInFlight: { get: function(){ return z04DetailRequestInFlight; }, set: function(v){ z04DetailRequestInFlight = v; }, enumerable: true, configurable: true }
   });
