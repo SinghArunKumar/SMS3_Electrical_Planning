@@ -48,11 +48,17 @@
 
   /* ---- Action panel ---- */
   #actionPanel { display:none; margin: 10px; border: 1px solid #ddd; border-radius: 8px; padding: 16px; background: #fafafa; }
-  #actionPanel h3 { margin-top:0; font-size: 16px; }
+  #actionPanelHeaderRow { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
+  #actionPanel h3 { margin-top:0; margin-bottom:2px; font-size: 16px; }
   #actionPanel .contextRow { font-size: 13px; color:#555; margin-bottom: 12px; }
   #actionPanel .fieldsGrid { display:grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+  #closePanelBtn { flex-shrink:0; background:#eee; color:#555; padding:4px 10px; font-size:13px; line-height:1; }
+  #closePanelBtn:hover { background:#e0e0e0; }
   .adminWarning { background:#fff8e1; color:#8a6d00; padding:10px; border-radius:4px; font-size:13px; margin-bottom:12px; }
   .actionBtnRow { display:flex; gap:8px; margin-top: 18px; }
+  #promptBox { font-size:13px; color:#666; padding: 4px 0 8px; }
+  #statusChoiceBox { padding: 4px 0 8px; }
+  #statusChoiceBox .choiceHint { font-size:13px; color:#555; margin-bottom:12px; }
 
   /* ---- Confirmation step ---- */
   #confirmPanel { display:none; margin-top: 16px; border: 1px solid #f2c94c; background:#fff8e1; border-radius:6px; padding:14px; }
@@ -171,42 +177,36 @@
        node (and its listeners) survive across page loads instead of being
        destroyed by tbody.innerHTML = ''. -->
   <div id="actionPanelParkingLot" style="display:none;">
-  <!-- ====== ACTION PANEL (populated based on selected row, then moved to sit directly under it) ====== -->
+  <!-- ====== ACTION PANEL ======
+       Only ONE of the sections below is ever visible at a time, driven by
+       clicking a specific badge (Status / Z04 / 201) in the table -- never
+       all at once. Selecting a row via its radio alone shows only the
+       context + a prompt; no form opens until a badge is clicked. -->
   <div id="actionPanel">
-    <h3 id="actionPanelTitle"></h3>
-    <div class="contextRow" id="actionPanelContext"></div>
-
-    <!-- ====== Z04 SECTION (own sub-block, independent of Received status) ====== -->
-    <div id="z04Section"></div>
-
-    <!-- ====== 201 SECTION (own sub-block, shows every release once Z04 is done) ====== -->
-    <div id="s201Section"></div>
-
-    <!-- Pending row: receive form -->
-    <div id="receiveForm" style="display:none;">
-      <div class="fieldsGrid">
-        <div>
-          <label for="receivedQty">Received Qty</label>
-          <input type="number" id="receivedQty" min="1" step="1" style="width:100%;" oninput="Page.validateReceiveFields()">
-          <div id="receivedQtyError" class="fieldError"></div>
-        </div>
-        <div>
-          <label for="receivedDate">Received Date</label>
-          <input type="date" id="receivedDate" style="width:100%;" oninput="Page.validateReceiveFields()">
-          <div id="receivedDateError" class="fieldError"></div>
-        </div>
+    <div id="actionPanelHeaderRow">
+      <div>
+        <h3 id="actionPanelTitle"></h3>
+        <div class="contextRow" id="actionPanelContext"></div>
       </div>
-      <label for="referencePO">Reference PO / Department</label>
-      <input type="text" id="referencePO" placeholder="e.g. TPIE, BRG, or a PO number" style="width:100%;" oninput="Page.validateReceiveFields()">
-      <div class="actionBtnRow">
-        <button type="button" id="reviewReceiveBtn" disabled onclick="Page.reviewAction('receive')">Review &amp; Confirm</button>
-        <button type="button" class="secondary" onclick="Page.closeActionPanel()">Cancel</button>
+      <button type="button" id="closePanelBtn" onclick="Page.closeActionPanel()" title="Close">&times;</button>
+    </div>
+
+    <!-- Row selected, no badge clicked yet -->
+    <div id="promptBox" style="display:none;">
+      Click <b>Status</b>, <b>Z04</b>, or <b>201</b> above on this row to take an action.
+    </div>
+
+    <!-- Status (Pending) clicked: choose what to do -->
+    <div id="statusChoiceBox" style="display:none;">
+      <div class="choiceHint">What would you like to do with this STO?</div>
+      <div class="actionBtnRow" style="margin-top:0;">
+        <button type="button" onclick="Page.chooseEditSto()">Edit Qty / UCS Code</button>
+        <button type="button" onclick="Page.chooseReceive()">Enter Receiving Details</button>
       </div>
     </div>
 
-    <!-- Pending row, still fully open (no Z04 yet): Edit Qty / UCS Code -->
-    <div id="editStoForm" style="display:none; margin-bottom:16px; border:1px solid #ddd; border-radius:6px; padding:12px; background:#fff;">
-      <div style="font-weight:bold; font-size:13px; margin-bottom:8px;">Edit STO Details</div>
+    <!-- Edit Qty / UCS Code (only reachable via the choice above) -->
+    <div id="editStoForm" style="display:none;">
       <div style="font-size:12px; color:#666; margin-bottom:10px;">
         Use this if the physical material differs from what was originally entered
         (e.g. a cable drum actually holds a different length, or the store hands
@@ -228,8 +228,31 @@
 
       <div class="actionBtnRow">
         <button type="button" id="saveEditStoBtn" disabled onclick="Page.saveEditSto()">Save Changes</button>
+        <button type="button" class="secondary" onclick="Page.backToStatusChoice()">Back</button>
       </div>
       <div id="editStoMessage" style="margin-top:8px; font-size:13px; display:none; padding:8px; border-radius:4px;"></div>
+    </div>
+
+    <!-- Enter Receiving Details (only reachable via the choice above) -->
+    <div id="receiveForm" style="display:none;">
+      <div class="fieldsGrid">
+        <div>
+          <label for="receivedQty">Received Qty</label>
+          <input type="number" id="receivedQty" min="1" step="1" style="width:100%;" oninput="Page.validateReceiveFields()">
+          <div id="receivedQtyError" class="fieldError"></div>
+        </div>
+        <div>
+          <label for="receivedDate">Received Date</label>
+          <input type="date" id="receivedDate" style="width:100%;" oninput="Page.validateReceiveFields()">
+          <div id="receivedDateError" class="fieldError"></div>
+        </div>
+      </div>
+      <label for="referencePO">Reference PO / Department</label>
+      <input type="text" id="referencePO" placeholder="e.g. TPIE, BRG, or a PO number" style="width:100%;" oninput="Page.validateReceiveFields()">
+      <div class="actionBtnRow">
+        <button type="button" id="reviewReceiveBtn" disabled onclick="Page.reviewAction('receive')">Review &amp; Confirm</button>
+        <button type="button" class="secondary" onclick="Page.backToStatusChoice()">Back</button>
+      </div>
     </div>
 
     <!-- Locked row, admin: correction form -->
@@ -264,7 +287,13 @@
       </div>
     </div>
 
-    <!-- ====== CONFIRMATION STEP ====== -->
+    <!-- ====== Z04 SECTION (only populated when the Z04 badge is clicked) ====== -->
+    <div id="z04Section"></div>
+
+    <!-- ====== 201 SECTION (only populated when the 201 badge is clicked) ====== -->
+    <div id="s201Section"></div>
+
+    <!-- ====== CONFIRMATION STEP (for Receive / Correct) ====== -->
     <div id="confirmPanel">
       <h4>Confirm before saving</h4>
       <div id="confirmSummary"></div>
@@ -298,6 +327,11 @@
   let totalCount = 0;
   let currentRows = [];       // rows currently rendered, indexed by position
   let selectedIndex = null;   // index into currentRows of the selected row
+  // Which single panel is showing for the selected row. null means "just
+  // selected, nothing chosen yet" (prompt only). One of:
+  //   null | 'statusChoice' | 'editSto' | 'receive' | 'correct' | 'locked'
+  //   | 'z04Panel' | 's201Panel'
+  let activeSection = null;
   let pendingSaveAction = null; // 'receive' | 'correct', set right before confirm step
   let listRequestInFlight = null; // Symbol guard against out-of-order responses
 
@@ -393,8 +427,7 @@
 
       // Cache Area_201 options once at login -- needed by the inline 201 form
       // mounted via SharedForms further down. Fire-and-forget: if it fails,
-      // the 201 form will simply show an empty area dropdown and the operator
-      // can hit the page's own retry path (re-login) to pick it up again.
+      // the 201 form will simply show an empty area dropdown; re-login re-fetches.
       callApi({ action: 'getOptionsList', email, password, category: 'Area_201' }).then(function (data) {
         if (data.success) cachedAreaOptions = data.values || [];
       });
@@ -526,7 +559,9 @@
       radio.type = 'radio';
       radio.name = 'rowSelect';
       radio.value = idx;
-      radio.onchange = function () { selectRow(idx); };
+      // Plain row selection opens NO form -- just context + a prompt. A
+      // specific action only opens once a badge below is clicked.
+      radio.onchange = function () { selectRow(idx, null); };
       selectTd.appendChild(radio);
       tr.appendChild(selectTd);
 
@@ -539,42 +574,40 @@
         tr.appendChild(td);
       });
 
+      // ---- Status badge: click opens the relevant single action ----
       const statusTd = document.createElement('td');
       statusTd.style.textAlign = 'center';
       const badge = document.createElement('span');
       badge.className = 'badge ' + (row.pending ? 'pending' : 'received');
       badge.textContent = row.pending ? 'Pending' : 'Received';
+      badge.style.cursor = 'pointer';
+      badge.title = row.pending
+        ? 'Click to edit this STO or enter receiving details'
+        : (isAdminUser ? 'Click to correct received info' : 'Click to view received info');
+      badge.onclick = function (e) {
+        e.stopPropagation();
+        const section = row.pending ? 'statusChoice' : (isAdminUser ? 'correct' : 'locked');
+        selectRowAndOpen(idx, section);
+      };
       statusTd.appendChild(badge);
       tr.appendChild(statusTd);
 
+      // ---- Z04 badge: click opens the Z04 form (pending) or view (done) ----
       const z04Td = document.createElement('td');
       z04Td.style.textAlign = 'center';
       const z04Badge = document.createElement('span');
       z04Badge.className = 'badge ' + (row.z04Done ? 'z04done' : 'z04pending');
       z04Badge.textContent = row.z04Done ? 'Done' : 'Pending';
-      if (row.z04Done) {
-        // View-only: shows the already-saved Z04 details inline, on this same
-        // page/session -- no new tab, no second login. Kept deliberately, unlike
-        // the "Pending" state below, which used to open add-z04.html in a new
-        // tab and was removed because it forced a second login on every hop
-        // (worse still inside a future PWA, where window.open() typically kicks
-        // the user out to the system browser entirely). See PROJECT_STATUS.md.
-        z04Badge.style.cursor = 'pointer';
-        z04Badge.title = 'Click to view the Z04 details';
-        z04Badge.onclick = function (e) {
-          e.stopPropagation(); // don't double-fire row selection
-          const radio = tr.querySelector('input[name="rowSelect"]');
-          if (radio) radio.checked = true;
-          selectRow(idx);
-        };
-      }
+      z04Badge.style.cursor = 'pointer';
+      z04Badge.title = row.z04Done ? 'Click to view the Z04 details' : 'Click to enter Z04 details';
+      z04Badge.onclick = function (e) {
+        e.stopPropagation();
+        selectRowAndOpen(idx, 'z04Panel');
+      };
       z04Td.appendChild(z04Badge);
       tr.appendChild(z04Td);
 
-      // 201 status: badge only, no qty/remaining figures shown in the table --
-      // clicking it (when Done or Partial) opens the same on-page detail panel
-      // as the Z04 badge, listing the actual 201 entries. Not clickable for
-      // Pending/N/A since there's nothing recorded yet to show.
+      // ---- 201 badge: click opens the 201 form (pending/partial) or view (done) ----
       const s201Td = document.createElement('td');
       s201Td.style.textAlign = 'center';
       const s201Badge = document.createElement('span');
@@ -582,16 +615,16 @@
       const status201 = row.status201 || 'na';
       s201Badge.className = 'badge s201' + status201;
       s201Badge.textContent = s201Labels[status201] || '\u2014';
-      if (status201 === 'done' || status201 === 'partial') {
+      if (status201 !== 'na') {
         s201Badge.style.cursor = 'pointer';
-        s201Badge.title = 'Click to view the 201 release entries';
+        s201Badge.title = status201 === 'pending'
+          ? 'Click to release material against this STO'
+          : 'Click to view/add 201 release entries';
         s201Badge.onclick = function (e) {
-          e.stopPropagation(); // don't double-fire row selection
-          const radio = tr.querySelector('input[name="rowSelect"]');
-          if (radio) radio.checked = true;
-          selectRow(idx);
+          e.stopPropagation();
+          selectRowAndOpen(idx, 's201Panel');
         };
-      } else if (status201 === 'na') {
+      } else {
         s201Badge.title = 'Not applicable until this STO is Z04\u2019d.';
       }
       s201Td.appendChild(s201Badge);
@@ -626,7 +659,15 @@
     detailRowEl = null;
   }
 
-  function selectRow(idx) {
+  /** Checks the row's radio (for visual consistency) and selects it, opening `section` directly. */
+  function selectRowAndOpen(idx, section) {
+    const tr = document.getElementById('row-' + idx);
+    const radio = tr ? tr.querySelector('input[name="rowSelect"]') : null;
+    if (radio) radio.checked = true;
+    selectRow(idx, section);
+  }
+
+  function selectRow(idx, section) {
     document.querySelectorAll('#tableBody tr').forEach(function (tr) { tr.classList.remove('selectedRow'); });
     detachActionPanel();
 
@@ -634,6 +675,7 @@
     if (tr) tr.classList.add('selectedRow');
 
     selectedIndex = idx;
+    activeSection = (section === undefined) ? null : section;
     const row = currentRows[idx];
 
     // Build a full-width row directly beneath the selected one and move
@@ -650,28 +692,50 @@
     detailRowEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
+  /**
+   * Dispatcher: shows exactly ONE section based on `activeSection`, hiding
+   * and clearing everything else first. This is the core of the "don't show
+   * every option at once" behavior -- each badge click sets activeSection
+   * and calls this; nothing here auto-opens more than what was asked for.
+   */
   function openActionPanel(row) {
     cancelConfirm();
     document.getElementById('actionPanel').style.display = 'block';
+
+    document.getElementById('promptBox').style.display = 'none';
+    document.getElementById('statusChoiceBox').style.display = 'none';
+    document.getElementById('editStoForm').style.display = 'none';
     document.getElementById('receiveForm').style.display = 'none';
     document.getElementById('correctForm').style.display = 'none';
     document.getElementById('lockedReadOnly').style.display = 'none';
+    document.getElementById('z04Section').innerHTML = '';
+    document.getElementById('s201Section').innerHTML = '';
 
     document.getElementById('actionPanelContext').textContent =
       'STO ' + row.stoNo + ' \u2014 UCS ' + row.ucsCode + ' \u2014 ' + row.itemDescription + ' \u2014 Qty ' + row.qty + ' ' + row.unit;
 
-    renderZ04Section(row);
-    renderS201Section(row);
+    if (activeSection === null) {
+      document.getElementById('actionPanelTitle').textContent = 'STO Details';
+      document.getElementById('promptBox').style.display = 'block';
+      return;
+    }
 
-    if (row.pending) {
+    if (activeSection === 'statusChoice') {
+      document.getElementById('actionPanelTitle').textContent = 'STO Actions';
+      document.getElementById('statusChoiceBox').style.display = 'block';
+      return;
+    }
+
+    if (activeSection === 'editSto') {
+      document.getElementById('actionPanelTitle').textContent = 'Edit STO Details';
+      document.getElementById('editStoForm').style.display = 'block';
+      initEditStoForm(row);
+      return;
+    }
+
+    if (activeSection === 'receive') {
       document.getElementById('actionPanelTitle').textContent = 'Receive Material';
       document.getElementById('receiveForm').style.display = 'block';
-      if (!row.z04Done) {
-        document.getElementById('editStoForm').style.display = 'block';
-        initEditStoForm(row);
-      } else {
-        document.getElementById('editStoForm').style.display = 'none';
-      }
       document.getElementById('receivedQty').value = '';
       document.getElementById('receivedDate').value = todayLocalISO();
       document.getElementById('receivedDate').max = todayLocalISO();
@@ -679,8 +743,10 @@
       document.getElementById('referencePO').value = '';
       ['receivedQtyError', 'receivedDateError'].forEach(function (id) { document.getElementById(id).style.display = 'none'; });
       validateReceiveFields();
-    } else if (isAdminUser) {
-      document.getElementById('editStoForm').style.display = 'none';
+      return;
+    }
+
+    if (activeSection === 'correct') {
       document.getElementById('actionPanelTitle').textContent = 'Correct Received Info (Admin)';
       document.getElementById('correctForm').style.display = 'block';
       document.getElementById('correctQty').value = row.receivedQty;
@@ -690,15 +756,44 @@
       document.getElementById('correctPO').value = row.referencePO;
       ['correctQtyError', 'correctDateError'].forEach(function (id) { document.getElementById(id).style.display = 'none'; });
       validateCorrectFields();
-    } else {
-      document.getElementById('editStoForm').style.display = 'none';
+      return;
+    }
+
+    if (activeSection === 'locked') {
       document.getElementById('actionPanelTitle').textContent = 'STO Details';
       document.getElementById('lockedReadOnlyDetails').innerHTML =
         '<b>Received Qty:</b> ' + row.receivedQty + ' ' + row.unit + '<br>' +
         '<b>Received Date:</b> ' + row.receivedDate + '<br>' +
         '<b>Reference PO:</b> ' + row.referencePO;
       document.getElementById('lockedReadOnly').style.display = 'block';
+      return;
     }
+
+    if (activeSection === 'z04Panel') {
+      document.getElementById('actionPanelTitle').textContent = 'Z04';
+      renderZ04Section(row);
+      return;
+    }
+
+    if (activeSection === 's201Panel') {
+      document.getElementById('actionPanelTitle').textContent = '201';
+      renderS201Section(row);
+      return;
+    }
+  }
+
+  // ====== Navigating within the panel (choice -> specific action -> back) ======
+  function backToStatusChoice() {
+    activeSection = 'statusChoice';
+    openActionPanel(currentRows[selectedIndex]);
+  }
+  function chooseEditSto() {
+    activeSection = 'editSto';
+    openActionPanel(currentRows[selectedIndex]);
+  }
+  function chooseReceive() {
+    activeSection = 'receive';
+    openActionPanel(currentRows[selectedIndex]);
   }
 
   // ====== EDIT STO DETAILS (Qty / UCS Code, pre-lock only) ======
@@ -848,6 +943,8 @@
   }
 
   // ====== Z04 SUB-SECTION: on-demand detail lookup, or inline creation ======
+  // Only ever populated when activeSection === 'z04Panel' (i.e. the Z04
+  // badge was clicked) -- never rendered alongside Status/201 sections.
   let z04DetailRequestInFlight = null;
 
   function renderZ04Section(row) {
@@ -855,12 +952,7 @@
     box.innerHTML = '';
 
     const wrap = document.createElement('div');
-    wrap.style.cssText = 'border:1px solid #ddd; border-radius:6px; padding:10px 12px; margin-bottom:14px; background:#fff;';
-
-    const heading = document.createElement('div');
-    heading.style.cssText = 'font-weight:bold; font-size:13px; margin-bottom:6px;';
-    heading.textContent = 'Z04';
-    wrap.appendChild(heading);
+    wrap.style.cssText = 'border:1px solid #ddd; border-radius:6px; padding:10px 12px; background:#fff;';
 
     if (!row.z04Done) {
       // Inline creation, right here, using data this page already has --
@@ -920,7 +1012,8 @@
     });
   }
 
-  // ====== 201 SUB-SECTION: on-demand entry list, or inline creation (mirrors renderZ04Section) ======
+  // ====== 201 SUB-SECTION: on-demand entry list, or inline creation ======
+  // Only ever populated when activeSection === 's201Panel'.
   let s201RequestInFlight = null;
 
   function renderS201Section(row) {
@@ -928,12 +1021,7 @@
     box.innerHTML = '';
 
     const wrap = document.createElement('div');
-    wrap.style.cssText = 'border:1px solid #ddd; border-radius:6px; padding:10px 12px; margin-bottom:14px; background:#fff;';
-
-    const heading = document.createElement('div');
-    heading.style.cssText = 'font-weight:bold; font-size:13px; margin-bottom:6px;';
-    heading.textContent = '201';
-    wrap.appendChild(heading);
+    wrap.style.cssText = 'border:1px solid #ddd; border-radius:6px; padding:10px 12px; background:#fff;';
 
     if (!row.z04Done) {
       const p = document.createElement('div');
@@ -951,7 +1039,8 @@
     if (row.status201 === 'pending') {
       // Z04'd, nothing released yet -- inline 201 creation form directly.
       // Needs Qty_Recieved_Z04 / Date_of_Receipt_Z04 for the form's bounds,
-      // so fetch the same Z04 detail the Z04 sub-section itself displays.
+      // fetched quietly (not displayed as a full Z04 grid, keeping this
+      // panel to just the one action).
       const formHost = document.createElement('div');
       wrap.appendChild(formHost);
       box.appendChild(wrap);
@@ -1039,6 +1128,7 @@
       // addS201Entry() still re-validates that server-side regardless).
       if (data.remaining > 0) {
         const formHost2 = document.createElement('div');
+        formHost2.style.marginTop = '12px';
         wrap.appendChild(formHost2);
         SharedForms.mountS201Form(
           formHost2,
@@ -1065,6 +1155,7 @@
     document.querySelectorAll('#tableBody tr').forEach(function (tr) { tr.classList.remove('selectedRow'); });
     document.querySelectorAll('input[name="rowSelect"]').forEach(function (r) { r.checked = false; });
     selectedIndex = null;
+    activeSection = null;
     cancelConfirm();
   }
 
@@ -1258,9 +1349,13 @@
     APPS_SCRIPT_URL: { get: function(){ return APPS_SCRIPT_URL; }, set: function(v){ APPS_SCRIPT_URL = v; }, enumerable: true, configurable: true },
     PAGE_SIZE: { get: function(){ return PAGE_SIZE; }, set: function(v){ PAGE_SIZE = v; }, enumerable: true, configurable: true },
     TABLE_COLUMN_COUNT: { get: function(){ return TABLE_COLUMN_COUNT; }, set: function(v){ TABLE_COLUMN_COUNT = v; }, enumerable: true, configurable: true },
+    activeSection: { get: function(){ return activeSection; }, set: function(v){ activeSection = v; }, enumerable: true, configurable: true },
+    backToStatusChoice: { get: function(){ return backToStatusChoice; }, set: function(v){ backToStatusChoice = v; }, enumerable: true, configurable: true },
     cachedAreaOptions: { get: function(){ return cachedAreaOptions; }, set: function(v){ cachedAreaOptions = v; }, enumerable: true, configurable: true },
     callApi: { get: function(){ return callApi; }, set: function(v){ callApi = v; }, enumerable: true, configurable: true },
     cancelConfirm: { get: function(){ return cancelConfirm; }, set: function(v){ cancelConfirm = v; }, enumerable: true, configurable: true },
+    chooseEditSto: { get: function(){ return chooseEditSto; }, set: function(v){ chooseEditSto = v; }, enumerable: true, configurable: true },
+    chooseReceive: { get: function(){ return chooseReceive; }, set: function(v){ chooseReceive = v; }, enumerable: true, configurable: true },
     clearFilters: { get: function(){ return clearFilters; }, set: function(v){ clearFilters = v; }, enumerable: true, configurable: true },
     clearMessage: { get: function(){ return clearMessage; }, set: function(v){ clearMessage = v; }, enumerable: true, configurable: true },
     closeActionPanel: { get: function(){ return closeActionPanel; }, set: function(v){ closeActionPanel = v; }, enumerable: true, configurable: true },
@@ -1292,6 +1387,7 @@
     saveEditSto: { get: function(){ return saveEditSto; }, set: function(v){ saveEditSto = v; }, enumerable: true, configurable: true },
     searchDebounceTimer: { get: function(){ return searchDebounceTimer; }, set: function(v){ searchDebounceTimer = v; }, enumerable: true, configurable: true },
     selectRow: { get: function(){ return selectRow; }, set: function(v){ selectRow = v; }, enumerable: true, configurable: true },
+    selectRowAndOpen: { get: function(){ return selectRowAndOpen; }, set: function(v){ selectRowAndOpen = v; }, enumerable: true, configurable: true },
     selectedIndex: { get: function(){ return selectedIndex; }, set: function(v){ selectedIndex = v; }, enumerable: true, configurable: true },
     showMessage: { get: function(){ return showMessage; }, set: function(v){ showMessage = v; }, enumerable: true, configurable: true },
     todayLocalISO: { get: function(){ return todayLocalISO; }, set: function(v){ todayLocalISO = v; }, enumerable: true, configurable: true },
