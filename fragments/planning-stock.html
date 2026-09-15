@@ -237,7 +237,8 @@
     { key: 'z04', label: 'Z04s' },
     { key: 's201', label: '201s' },
     { key: 'issues', label: 'Planning Issue Sheet' },
-    { key: 'localIssue', label: 'Local Issue Sheet' }
+    { key: 'localIssue', label: 'Local Issue Sheet' },
+    { key: 'poPr', label: 'PO & PR' }
   ];
 
   /** Mirrors Code.gs's hasCommaValue() -- splits a comma-separated field and checks membership. */
@@ -601,10 +602,14 @@
     const totalReceived = (data.z04 || []).reduce(function (s, r) { return s + (Number(r.qtyReceived) || 0); }, 0);
     const totalReleased201 = (data.s201 || []).reduce(function (s, r) { return s + (Number(r.qtyReleased) || 0); }, 0);
     const totalIssued = (data.issues || []).reduce(function (s, r) { return s + (Number(r.issueQty) || 0); }, 0);
+    const poPrSummary = data.poPrSummary || { count: 0, totalQty: 0 };
     document.getElementById('rangeTotals').innerHTML =
       'In current filters &mdash; Received: <b>' + totalReceived.toLocaleString() + '</b> &nbsp;|&nbsp; ' +
       'Released (201): <b>' + totalReleased201.toLocaleString() + '</b> &nbsp;|&nbsp; ' +
-      'Issued to shop: <b>' + totalIssued.toLocaleString() + '</b>';
+      'Issued to shop: <b>' + totalIssued.toLocaleString() + '</b>' +
+      (data.poPrAvailable
+        ? ' &nbsp;|&nbsp; POs: <b>' + poPrSummary.count.toLocaleString() + '</b> &nbsp;|&nbsp; Total PO Qty: <b>' + poPrSummary.totalQty.toLocaleString() + '</b>'
+        : '');
 
     renderHistoryTabs(data);
     renderHistoryTabContent(data);
@@ -616,7 +621,8 @@
       z04: (data.z04 || []).length,
       s201: (data.s201 || []).length,
       issues: (data.issues || []).length,
-      localIssue: data.localIssue && data.localIssue.available ? (data.localIssue.rows || []).length : null
+      localIssue: data.localIssue && data.localIssue.available ? (data.localIssue.rows || []).length : null,
+      poPr: (data.poPr || []).length
     };
     document.getElementById('historyTabs').innerHTML = HISTORY_TABS.map(function (t) {
       const activeClass = (t.key === historyActiveTab) ? ' active' : '';
@@ -659,6 +665,12 @@
       { key: 'issueDate', label: 'Issue Date' }, { key: 'area', label: 'Area' },
       { key: 'consumedQty', label: 'Consumed Qty' }, { key: 'issuedTo', label: 'Issued To' },
       { key: 'remarks', label: 'Remarks' }, { key: 'issuedByName', label: 'Issued By' }
+    ],
+    poPr: [
+      { key: 'prNo', label: 'PR No.' }, { key: 'poNo', label: 'PO No.' },
+      { key: 'poDate', label: 'PO Date' }, { key: 'qty', label: 'Qty' },
+      { key: 'receiptDate', label: '105 Date' }, { key: 'vendorCode', label: 'Vendor Code' },
+      { key: 'vendorName', label: 'Vendor Name' }
     ]
   };
 
@@ -670,6 +682,14 @@
       // Genuinely unavailable (shouldn't happen now that Local Issue is live,
       // but kept as a safety fallback rather than assuming the shape).
       container.innerHTML = '<div class="naNotice">Local Issue history is not available right now.</div>';
+      document.getElementById('historyExportBtn').style.display = 'none';
+      return;
+    }
+
+    if (key === 'poPr' && data.poPrError) {
+      // The external PO/PR sheet had a problem (e.g. renamed column) --
+      // fails soft so the rest of the history modal still works.
+      container.innerHTML = '<div class="naNotice">Could not load PO &amp; PR data: ' + escapeHtml(data.poPrError) + '</div>';
       document.getElementById('historyExportBtn').style.display = 'none';
       return;
     }
