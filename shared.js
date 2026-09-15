@@ -291,6 +291,7 @@ async function loadPage(key) {
       scriptEl.textContent = '(function () {\n' + scriptMatch[1] + '\n' + exposeGlobals + '\n})();';
       container.appendChild(scriptEl); // browsers execute dynamically-appended scripts
     }
+    if (window.Help) Help.mountForPage(page);
   } catch (err) {
     container.innerHTML = '<div class="pageLoading">Could not load this page (' + err.message + '). Check your connection and try again.</div>';
   }
@@ -382,6 +383,7 @@ async function shellLogin() {
     document.getElementById('appShell').style.display = 'flex';
     document.getElementById('userBadge').textContent = data.name + ' (' + data.role + ')';
     renderMenu();
+    if (window.Help) Help.onLogin();
 
     // Deep-link support: reload straight into a page from the URL hash if valid & authorized.
     const requested = window.location.hash.slice(1);
