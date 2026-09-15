@@ -56,6 +56,13 @@ const DEMAND_SHEET = 'Demand_Alerts';
 const RETURN_HEADER_SHEET = 'Return_Header';
 const RETURN_DETAILS_SHEET = 'Return_Details';
 
+// External spreadsheet (NOT this project's own Sheet) -- shared with this
+// script's owner account for read-only access. Holds PR/PO/vendor detail
+// keyed by Mat Code (== our UCS_Code). Never shared with end users directly;
+// only this script (running "as Me") reads from it.
+const PO_PR_SHEET_ID = '138vT2HDiLc-GcUHMelYuni8RoYAFZ2HfvVcVB6Qq9xI';
+const PO_PR_TAB_NAME = 'Material List';
+
 // ====== ENTRY POINTS ======
 
 function doGet(e) {
@@ -1697,6 +1704,52 @@ function canViewAreaUCSHistory(area, authorizedAreaString, roleString) {
   return canRaiseRequisition(area, authorizedAreaString, roleString);
 }
 
+/**
+ * Reads PR/PO/receipt/vendor detail for one UCS Code from the separate,
+ * externally-shared "Material List" sheet -- a different spreadsheet from
+ * this project's own, opened by ID rather than getActiveSpreadsheet().
+ * Read-only; matches on the sheet's own "Mat Code" column against our
+ * UCS_Code. Fails soft (returns []) if the tab is missing so a problem with
+ * this one sheet never breaks the rest of the history modal; throws only if
+ * the tab exists but its expected columns don't, which the caller reports
+ * back as poPrError rather than failing the whole request.
+ */
+function getPoPrRowsForUcsCode_(ucsCode, fromDate, toDate) {
+  const extSpreadsheet = SpreadsheetApp.openById(PO_PR_SHEET_ID);
+  const extSheet = extSpreadsheet.getSheetByName(PO_PR_TAB_NAME);
+  if (!extSheet) return [];
+  const values = extSheet.getDataRange().getValues();
+  if (values.length < 2) return [];
+  const h = values[0];
+  const col = {};
+  h.forEach(function (hd, idx) { col[String(hd).trim()] = idx; });
+  const required = ['Mat Code', 'PR No.', 'PO No.', 'PO Dt', 'Qty', '105_Dt', 'V Code', 'V Name'];
+  required.forEach(function (c) {
+    if (!(c in col)) throw new Error('PO&PR sheet is missing expected column: "' + c + '"');
+  });
+  const rows = [];
+  for (let i = 1; i < values.length; i++) {
+    const r = values[i];
+    if (String(r[col['Mat Code']]).trim() !== ucsCode) continue;
+    if (!withinDateRange_(r[col['105_Dt']], fromDate, toDate)) continue; // filtered by receipt date, matching Z04's convention
+    const poDateRaw = toMidnight(r[col['PO Dt']]);
+    rows.push({
+      prNo: r[col['PR No.']],
+      poNo: r[col['PO No.']],
+      poDate: formatDateOut(r[col['PO Dt']]),
+      poDateSort_: poDateRaw ? poDateRaw.getTime() : -Infinity, // used only to sort, stripped before returning
+      qty: Number(r[col['Qty']]) || 0,
+      receiptDate: formatDateOut(r[col['105_Dt']]),
+      vendorCode: r[col['V Code']],
+      vendorName: r[col['V Name']]
+    });
+  }
+  // Latest PO first -- undated rows (shouldn't normally happen) sort last, not first.
+  rows.sort(function (a, b) { return b.poDateSort_ - a.poDateSort_; });
+  rows.forEach(function (r) { delete r.poDateSort_; });
+  return rows;
+}
+
 function getUCSCodeHistory(data) {
   const login = checkLogin(data.email, data.password);
   if (!login.success) return jsonResponse(login);
@@ -1725,6 +1778,15 @@ function getUCSCodeHistory(data) {
   }
   const stoRows = [];
   const z04Rows = [];
+  let poPrRows = [];
+  let poPrError = null;
+  if (includeStoZ04) {
+    try {
+      poPrRows = getPoPrRowsForUcsCode_(ucsCode, fromDate, toDate);
+    } catch (e) {
+      poPrError = e.message; // fail soft -- STO/Z04/201/Issues still work even if this external sheet has an issue
+    }
+  }
   if (includeStoZ04) {
     const stoSheet = ss.getSheetByName(STO_SHEET);
     const stoValues = stoSheet.getDataRange().getValues();
@@ -1839,7 +1901,8 @@ function getUCSCodeHistory(data) {
     ? { labels: months, received: months.map(function (m) { return monthlyReleased[m] || 0; }), released: months.map(function (m) { return monthlyReceived[m] || 0; }) }
     : { labels: months, received: months.map(function (m) { return monthlyReceived[m] || 0; }), released: months.map(function (m) { return monthlyReleased[m] || 0; }) };
   const chartLabels = (scope === 'area') ? { received: 'Received into ' + areaFilter, released: 'Consumed locally' } : { received: 'Received (Z04)', released: 'Released (201 + Issues)' };
-  return jsonResponse({ success: true, scope: scope, area: areaFilter, ucsCode: ucsCode, itemDescription: itemDescription, unit: unit, sto: stoRows, z04: z04Rows, stoZ04Available: includeStoZ04, s201: s201Rows, issues: issueRows, localIssue: localIssue, chart: chart, chartLabels: chartLabels });
+  const poPrSummary = { count: poPrRows.length, totalQty: poPrRows.reduce(function (s, r) { return s + (Number(r.qty) || 0); }, 0) };
+  return jsonResponse({ success: true, scope: scope, area: areaFilter, ucsCode: ucsCode, itemDescription: itemDescription, unit: unit, sto: stoRows, z04: z04Rows, stoZ04Available: includeStoZ04, s201: s201Rows, issues: issueRows, localIssue: localIssue, poPr: poPrRows, poPrAvailable: includeStoZ04, poPrError: poPrError, poPrSummary: poPrSummary, chart: chart, chartLabels: chartLabels });
 }
 
 function canRecordLocalIssue(area, authorizedAreaString, roleString) { return canRaiseRequisition(area, authorizedAreaString, roleString); }
