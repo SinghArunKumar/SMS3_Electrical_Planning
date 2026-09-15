@@ -103,12 +103,29 @@ const Shell = {
   logout() {
     this.currentUser = null;
     this.clearAllIntervals();
+    this.clearAllPageCaches();
     document.getElementById('appShell').style.display = 'none';
     document.getElementById('loginScreen').style.display = 'flex';
     document.getElementById('loginEmailShell').value = '';
     document.getElementById('loginPasswordShell').value = '';
     document.getElementById('loginErrorShell').style.display = 'none';
     window.location.hash = '';
+  },
+
+  // Converted pages store their own device-local instant-paint cache
+  // (Planning Stock, Area Stock, Search UCS, etc.) under a 'smsCache:'
+  // prefixed sessionStorage key -- see each page's own CACHE_KEY. Cleared
+  // here, centrally, rather than by each page's own (now-unused) logout()
+  // function, since Shell.logout() is what the topbar's Log out button
+  // actually calls and it never does a full page reload -- without this,
+  // a stale cache would otherwise still be sitting in sessionStorage for
+  // whoever logs in next on the same device.
+  clearAllPageCaches() {
+    try {
+      Object.keys(sessionStorage)
+        .filter(k => k.indexOf('smsCache:') === 0)
+        .forEach(k => sessionStorage.removeItem(k));
+    } catch (e) { /* storage disabled -- nothing to clear */ }
   }
 };
 
