@@ -260,25 +260,28 @@ async function loadPage(key) {
       // set of bindings, so this can never happen.
       //
       // The one thing that wrapping would otherwise break: fragments call
-      // their own functions via inline onclick="doThing()", which only
-      // resolves against the GLOBAL scope -- a wrapped function's own
-      // top-level declarations are no longer visible there. Fix: scan for
-      // every onclick="name(...)" this fragment actually uses, and
-      // republish just those specific names onto window after each run.
-      // Re-running this on every visit is correct, not just tolerated --
-      // it's what makes sure a stale closure from 3 visits ago is never
-      // what a click resolves to.
+      // their own functions via inline event handler attributes --
+      // onclick="doThing()", but just as often onchange="onAreaChange()" or
+      // oninput="onSearchInput()" -- all of which only resolve against the
+      // GLOBAL scope. A wrapped function's own top-level declarations are
+      // no longer visible there. Fix: scan for every on*="name(...)" this
+      // fragment actually uses (any inline handler attribute, not just
+      // onclick), and republish just those specific names onto window
+      // after each run. Re-running this on every visit is correct, not
+      // just tolerated -- it's what makes sure a stale closure from 3
+      // visits ago is never what a click (or change, or keystroke)
+      // resolves to.
       //
       // Scanned from BOTH the static HTML and the raw script text, not
-      // just the HTML: several fragments build their onclick attributes
+      // just the HTML: several fragments build their handler attributes
       // dynamically (e.g. a table row's innerHTML assembled with
       // "...onclick=\"openDetail(' + idx + ')\"..."), so the function name
       // never appears anywhere in the page's static markup -- only as a
-      // literal substring inside the script's own source, which a
+      // literal substring inside the script's own source, which an
       // HTML-only scan would silently miss and leave broken on click.
       const onclickSource = withoutScript + '\n' + scriptMatch[1];
       const jsReservedWords = new Set(['if', 'for', 'while', 'switch', 'catch', 'function', 'return', 'typeof', 'void', 'delete', 'new', 'in', 'of', 'instanceof', 'else', 'do', 'with']);
-      const onclickNames = [...onclickSource.matchAll(/onclick=\\?["']([a-zA-Z_$][\w$]*)\(/g)]
+      const onclickNames = [...onclickSource.matchAll(/\son[a-zA-Z]+=\\?["']([a-zA-Z_$][\w$]*)\(/g)]
         .map(m => m[1])
         .filter(name => !jsReservedWords.has(name));
       const exposeGlobals = [...new Set(onclickNames)]
