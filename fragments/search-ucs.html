@@ -1,11 +1,4 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>UCS Code Search</title>
 <style>
-  body { font-family: Arial, sans-serif; max-width: 760px; margin: 40px auto; padding: 0 16px; color: #222; }
   h2 { margin-bottom: 4px; }
   .subtitle { color: #666; font-size: 13px; margin-bottom: 24px; }
   label { display: block; font-weight: bold; margin-top: 14px; margin-bottom: 4px; font-size: 14px; }
@@ -47,14 +40,13 @@
   #detailCard .detailUnit { display:inline-block; background:#f1f3f4; padding: 3px 10px; border-radius: 10px; font-size: 12px; margin-top: 4px; }
   #detailOkBtn { margin-top: 22px; width: 100%; }
 </style>
-</head>
-<body>
+
 
 <h2>UCS Code Search</h2>
 <div class="subtitle">GitHub_SMS-3 Stores Module &mdash; find a material's UCS Code by any combination of keywords<span class="readOnlyBadge">READ-ONLY</span></div>
 
 <!-- ====== LOGIN SECTION ====== -->
-<div id="loginSection">
+<div id="loginSection" style="display:none">
   <label for="loginEmail">Email</label>
   <input type="email" id="loginEmail" placeholder="you@test.com">
 
@@ -100,8 +92,7 @@
 </div>
 
 <script>
-  // TODO: paste your deployed Apps Script Web App URL here
-  const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxMXqckZThqa3Vh06rh8fPWJ8RM0fn3x9yT_YzhqQt0Ph4BKArpoVNRviDwfaEYYyVH/exec';
+  const APPS_SCRIPT_URL = Shell.APPS_SCRIPT_URL;
 
   // Kept only in memory for this page load — not persisted to browser storage.
   let currentUser = { email: '', password: '' };
@@ -354,7 +345,11 @@
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') closeDetail();
   });
-</script>
 
-</body>
-</html>
+  // ---- shell auto-login: fill the page's OWN hidden login form and
+  // submit it through the page's OWN unmodified login() function, so its
+  // tested role-check / UI-reveal logic runs exactly as before. ----
+  document.getElementById('loginEmail').value = Shell.getUser().email;
+  document.getElementById('loginPassword').value = Shell.getUser().password;
+  login();
+</script>

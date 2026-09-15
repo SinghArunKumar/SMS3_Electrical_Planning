@@ -1,11 +1,4 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Area Stock Dashboard</title>
 <style>
-  body { font-family: Arial, sans-serif; max-width: 900px; margin: 40px auto; padding: 0 16px; color: #222; }
   h2 { margin-bottom: 4px; }
   .subtitle { color: #666; font-size: 13px; margin-bottom: 24px; }
   label { display: block; font-weight: bold; margin-top: 14px; margin-bottom: 4px; font-size: 14px; }
@@ -77,14 +70,13 @@
   #historyLoading, #historyError { padding: 20px; text-align:center; font-size: 13px; }
   #historyError { color:#c5221f; }
 </style>
-</head>
-<body>
+
 
 <h2>Area Stock Dashboard</h2>
 <div class="subtitle">GitHub_SMS-3 Stores Module &mdash; live local stock balance per area<span class="readOnlyBadge">READ-ONLY</span></div>
 
 <!-- ====== LOGIN SECTION ====== -->
-<div id="loginSection">
+<div id="loginSection" style="display:none">
   <label for="loginEmail">Email</label>
   <input type="email" id="loginEmail" placeholder="you@test.com" style="width:100%;">
 
@@ -200,8 +192,7 @@
 </div>
 
 <script>
-  // TODO: paste your deployed Apps Script Web App URL here (same one used by the other pages)
-  const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxMXqckZThqa3Vh06rh8fPWJ8RM0fn3x9yT_YzhqQt0Ph4BKArpoVNRviDwfaEYYyVH/exec';
+  const APPS_SCRIPT_URL = Shell.APPS_SCRIPT_URL;
 
   const POLL_INTERVAL_MS = 8000; // 5-10s "near-real-time" polling, per project's decided architecture
 
@@ -748,7 +739,11 @@
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') closeHistory();
   });
-</script>
 
-</body>
-</html>
+  // ---- shell auto-login: fill the page's OWN hidden login form and
+  // submit it through the page's OWN unmodified login() function, so its
+  // tested role-check / UI-reveal logic runs exactly as before. ----
+  document.getElementById('loginEmail').value = Shell.getUser().email;
+  document.getElementById('loginPassword').value = Shell.getUser().password;
+  login();
+</script>
