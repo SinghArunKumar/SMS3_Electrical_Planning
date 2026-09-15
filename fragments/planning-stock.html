@@ -304,13 +304,24 @@
   }
 
   function highlight(text, tokens) {
-    let out = escapeHtml(text);
-    tokens.forEach(function (t) {
-      if (!t) return;
-      const re = new RegExp('(' + t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'ig');
-      out = out.replace(re, '<mark>$1</mark>');
-    });
-    return out;
+    const escaped = escapeHtml(text);
+    const validTokens = (tokens || []).filter(Boolean);
+    if (!validTokens.length) return escaped;
+
+    // Single-pass replace: one combined regex for every token instead of
+    // calling .replace() once per token on the same string. Doing it token
+    // by token was the bug that produced stray "ark>" text on screen --
+    // after the first token wrapped a match in <mark>...</mark>, the NEXT
+    // token's regex ran over that already-modified HTML too, and could
+    // match letters inside the tag markup itself (e.g. token "a" matching
+    // the "a" in the word "mark"), corrupting the tag. A single alternation
+    // pass only ever scans the original escaped text once.
+    // Longest-first ordering avoids a short token (e.g. "a") claiming part
+    // of a longer token's match before the longer one gets a chance.
+    const sorted = validTokens.slice().sort(function (a, b) { return b.length - a.length; });
+    const pattern = sorted.map(function (t) { return t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }).join('|');
+    const re = new RegExp('(' + pattern + ')', 'ig');
+    return escaped.replace(re, '<mark>$1</mark>');
   }
 
   // ====== LOGIN ======
