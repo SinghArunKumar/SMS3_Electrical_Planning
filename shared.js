@@ -103,12 +103,29 @@ const Shell = {
   logout() {
     this.currentUser = null;
     this.clearAllIntervals();
+    this.clearAllPageCaches();
     document.getElementById('appShell').style.display = 'none';
     document.getElementById('loginScreen').style.display = 'flex';
     document.getElementById('loginEmailShell').value = '';
     document.getElementById('loginPasswordShell').value = '';
     document.getElementById('loginErrorShell').style.display = 'none';
     window.location.hash = '';
+  },
+
+  // Converted pages store their own device-local instant-paint cache
+  // (Planning Stock, Area Stock, Search UCS, etc.) under a 'smsCache:'
+  // prefixed sessionStorage key -- see each page's own CACHE_KEY. Cleared
+  // here, centrally, rather than by each page's own (now-unused) logout()
+  // function, since Shell.logout() is what the topbar's Log out button
+  // actually calls and it never does a full page reload -- without this,
+  // a stale cache would otherwise still be sitting in sessionStorage for
+  // whoever logs in next on the same device.
+  clearAllPageCaches() {
+    try {
+      Object.keys(sessionStorage)
+        .filter(k => k.indexOf('smsCache:') === 0)
+        .forEach(k => sessionStorage.removeItem(k));
+    } catch (e) { /* storage disabled -- nothing to clear */ }
   }
 };
 
@@ -227,7 +244,36 @@ async function loadPage(key) {
 
     if (scriptMatch) {
       const scriptEl = document.createElement('script');
-      scriptEl.textContent = scriptMatch[1];
+
+      // Every fragment was originally authored as a standalone page whose
+      // <script> ran exactly once per real browser page load. Here, the
+      // SAME script text gets re-injected and re-executed every time the
+      // user revisits this page within one session -- and top-level
+      // const/let in a classic <script> live in ONE shared global lexical
+      // scope for the whole document, not per-<script>-tag. So the second
+      // visit to any page re-declares e.g. `const APPS_SCRIPT_URL` and
+      // throws "Identifier has already been declared" -- a parse-time
+      // error that kills the ENTIRE script silently, not just that one
+      // line. The page LOOKS loaded (its HTML is there) but is completely
+      // inert: no login, no data, no button does anything. Wrapping each
+      // run in its own function scope gives every visit a fresh, private
+      // set of bindings, so this can never happen.
+      //
+      // The one thing that wrapping would otherwise break: every fragment's
+      // HTML calls its own functions via inline onclick="doThing()", which
+      // only resolves against the GLOBAL scope -- a wrapped function's own
+      // top-level declarations are no longer visible there. Fix: scan this
+      // fragment's OWN HTML (not the script) for every onclick="name(...)"
+      // it actually uses, and republish just those specific names onto
+      // window after each run. Re-running this on every visit is correct,
+      // not just tolerated -- it's what makes sure a stale closure from
+      // 3 visits ago is never what a click resolves to.
+      const onclickNames = [...withoutScript.matchAll(/onclick="([a-zA-Z_$][\w$]*)\(/g)].map(m => m[1]);
+      const exposeGlobals = [...new Set(onclickNames)]
+        .map(name => `if (typeof ${name} === 'function') { window.${name} = ${name}; }`)
+        .join('\n');
+
+      scriptEl.textContent = '(function () {\n' + scriptMatch[1] + '\n' + exposeGlobals + '\n})();';
       container.appendChild(scriptEl); // browsers execute dynamically-appended scripts
     }
   } catch (err) {
