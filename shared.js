@@ -259,16 +259,28 @@ async function loadPage(key) {
       // run in its own function scope gives every visit a fresh, private
       // set of bindings, so this can never happen.
       //
-      // The one thing that wrapping would otherwise break: every fragment's
-      // HTML calls its own functions via inline onclick="doThing()", which
-      // only resolves against the GLOBAL scope -- a wrapped function's own
-      // top-level declarations are no longer visible there. Fix: scan this
-      // fragment's OWN HTML (not the script) for every onclick="name(...)"
-      // it actually uses, and republish just those specific names onto
-      // window after each run. Re-running this on every visit is correct,
-      // not just tolerated -- it's what makes sure a stale closure from
-      // 3 visits ago is never what a click resolves to.
-      const onclickNames = [...withoutScript.matchAll(/onclick="([a-zA-Z_$][\w$]*)\(/g)].map(m => m[1]);
+      // The one thing that wrapping would otherwise break: fragments call
+      // their own functions via inline onclick="doThing()", which only
+      // resolves against the GLOBAL scope -- a wrapped function's own
+      // top-level declarations are no longer visible there. Fix: scan for
+      // every onclick="name(...)" this fragment actually uses, and
+      // republish just those specific names onto window after each run.
+      // Re-running this on every visit is correct, not just tolerated --
+      // it's what makes sure a stale closure from 3 visits ago is never
+      // what a click resolves to.
+      //
+      // Scanned from BOTH the static HTML and the raw script text, not
+      // just the HTML: several fragments build their onclick attributes
+      // dynamically (e.g. a table row's innerHTML assembled with
+      // "...onclick=\"openDetail(' + idx + ')\"..."), so the function name
+      // never appears anywhere in the page's static markup -- only as a
+      // literal substring inside the script's own source, which a
+      // HTML-only scan would silently miss and leave broken on click.
+      const onclickSource = withoutScript + '\n' + scriptMatch[1];
+      const jsReservedWords = new Set(['if', 'for', 'while', 'switch', 'catch', 'function', 'return', 'typeof', 'void', 'delete', 'new', 'in', 'of', 'instanceof', 'else', 'do', 'with']);
+      const onclickNames = [...onclickSource.matchAll(/onclick=\\?["']([a-zA-Z_$][\w$]*)\(/g)]
+        .map(m => m[1])
+        .filter(name => !jsReservedWords.has(name));
       const exposeGlobals = [...new Set(onclickNames)]
         .map(name => `if (typeof ${name} === 'function') { window.${name} = ${name}; }`)
         .join('\n');
