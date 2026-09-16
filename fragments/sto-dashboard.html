@@ -59,6 +59,7 @@
   #promptBox { font-size:13px; color:#666; padding: 4px 0 8px; }
   #statusChoiceBox { padding: 4px 0 8px; }
   #statusChoiceBox .choiceHint { font-size:13px; color:#555; margin-bottom:12px; }
+  #editStoLockedHint { font-size:12px; color:#a35a00; margin-top:10px; }
 
   /* ---- Confirmation step ---- */
   #confirmPanel { display:none; margin-top: 16px; border: 1px solid #f2c94c; background:#fff8e1; border-radius:6px; padding:14px; }
@@ -200,9 +201,15 @@
     <div id="statusChoiceBox" style="display:none;">
       <div class="choiceHint">What would you like to do with this STO?</div>
       <div class="actionBtnRow" style="margin-top:0;">
-        <button type="button" onclick="Page.chooseEditSto()">Edit Qty / UCS Code</button>
+        <button type="button" id="editStoChoiceBtn" onclick="Page.chooseEditSto()">Edit Qty / UCS Code</button>
         <button type="button" onclick="Page.chooseReceive()">Enter Receiving Details</button>
       </div>
+      <!-- Shown only when a Z04 already exists for this STO -- Qty/UCS Code
+           editing locks the moment a Z04 is entered (isSTOLocked_ in
+           Code.gs), same as it locks on receiving. Previously the button
+           above stayed clickable in this case and only failed after the
+           person had filled the whole edit form and hit Save. -->
+      <div id="editStoLockedHint" style="display:none;">This STO already has a Z04 entry, so Qty/UCS Code can no longer be edited &mdash; only receiving details can still be entered.</div>
     </div>
 
     <!-- Edit Qty / UCS Code (only reachable via the choice above) -->
@@ -582,7 +589,7 @@
       badge.textContent = row.pending ? 'Pending' : 'Received';
       badge.style.cursor = 'pointer';
       badge.title = row.pending
-        ? 'Click to edit this STO or enter receiving details'
+        ? (row.z04Done ? 'Click to enter receiving details (this STO already has a Z04, so Qty/UCS Code can no longer be edited)' : 'Click to edit this STO or enter receiving details')
         : (isAdminUser ? 'Click to correct received info' : 'Click to view received info');
       badge.onclick = function (e) {
         e.stopPropagation();
@@ -723,6 +730,14 @@
     if (activeSection === 'statusChoice') {
       document.getElementById('actionPanelTitle').textContent = 'STO Actions';
       document.getElementById('statusChoiceBox').style.display = 'block';
+      // Mirrors isSTOLocked_() in Code.gs: Qty/UCS Code editing closes the
+      // moment a Z04 exists for this STO, even if receiving details were
+      // never entered (Status can still show "Pending" in that case --
+      // Status and Z04 are two independent locks, either one closes Edit).
+      // Disabled here, not hidden, so the "why" is visible instead of the
+      // option just quietly disappearing.
+      document.getElementById('editStoChoiceBtn').disabled = !!row.z04Done;
+      document.getElementById('editStoLockedHint').style.display = row.z04Done ? 'block' : 'none';
       return;
     }
 
@@ -788,6 +803,12 @@
     openActionPanel(currentRows[selectedIndex]);
   }
   function chooseEditSto() {
+    // Guards the disabled state above in case this is ever reached another
+    // way (e.g. a stale keyboard focus triggering a click) -- editSTOEntry()
+    // would reject it server-side regardless, but this avoids opening a
+    // form that's already known to be a dead end.
+    const row = currentRows[selectedIndex];
+    if (row && row.z04Done) return;
     activeSection = 'editSto';
     openActionPanel(currentRows[selectedIndex]);
   }
