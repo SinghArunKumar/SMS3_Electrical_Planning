@@ -534,9 +534,24 @@ function getSTOList(data) {
       return true;
     });
   }
-  const searchTerm = String(data.search || '').trim();
+  // Bug fix: this previously only checked STO No and UCS Code, case-
+  // sensitively -- despite the search box's own label promising "STO No,
+  // UCS Code, or description". Item_Description was never included at all
+  // (typing "vvvf" against a row whose description contains "VVVF" found
+  // nothing, on two independent counts: the field wasn't searched, and even
+  // .indexOf() itself is case-sensitive). Every other list/search screen in
+  // this project already lowercases both sides before comparing
+  // (search-ucs.html, planning-stock.html, area-stock-dashboard.html) --
+  // this is the one server-side search that had drifted from that
+  // convention. Not something this session's changes touched or caused;
+  // getSTOList() was untouched until now.
+  const searchTerm = String(data.search || '').trim().toLowerCase();
   if (searchTerm) {
-    allRows = allRows.filter(function (row) { return row.stoNo.indexOf(searchTerm) !== -1 || row.ucsCode.indexOf(searchTerm) !== -1; });
+    allRows = allRows.filter(function (row) {
+      return row.stoNo.toLowerCase().indexOf(searchTerm) !== -1 ||
+        row.ucsCode.toLowerCase().indexOf(searchTerm) !== -1 ||
+        String(row.itemDescription || '').toLowerCase().indexOf(searchTerm) !== -1;
+    });
   }
   const statusFilter = String(data.status || 'all').trim().toLowerCase();
   if (statusFilter === 'pending') allRows = allRows.filter(function (row) { return row.pending; });
