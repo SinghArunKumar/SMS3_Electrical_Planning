@@ -1851,9 +1851,75 @@ function getUCSCodeHistory(data) {
       const qty = Number(r[col['Issue_Qty']]) || 0;
       addToMonth_(monthlyReleased, r[col['Issue_Date']], qty);
       if (!withinDateRange_(r[col['Issue_Date']], fromDate, toDate)) continue;
-      issueRows.push({ issueDate: formatDateOut(r[col['Issue_Date']]), issueQty: qty, issuedTo: r[col['Issued_to']], area: area, reqSlipNumber: r[col['Req_Slip_number']] });
+      issueRows.push({
+        issueDate: formatDateOut(r[col['Issue_Date']]),
+        issueDateSort_: (toMidnight(r[col['Issue_Date']]) || new Date(0)).getTime(),
+        issueQty: qty, issuedTo: r[col['Issued_to']], area: area, reqSlipNumber: r[col['Req_Slip_number']],
+        type: 'issue'
+      });
     }
   }
+
+  // -- RETURN MODULE ADDITION: merge completed returns into this same feed
+  // as negative rows. These are the exact mirror-image credits
+  // computePlanningStockMap_() already nets into the balance shown on the
+  // dashboard, but until now had no visible trail anywhere in the UI --
+  // Return_Header/Return_Details are a separate pair of sheets from
+  // PLNG_ISSUE_SHEET, never joined into this history feed before. Filtered
+  // by areaFilter the same way issueRows above are, since Return_Header's
+  // Area is the same "which area held this material" concept as
+  // PLNG_ISSUE_SHEET's Area column (including the literal value
+  // 'PLANNING', for material that was issued and returned without ever
+  // leaving Planning's own custody).
+  const retHeaderSheet2 = ss.getSheetByName(RETURN_HEADER_SHEET);
+  const retHeaderValues2 = retHeaderSheet2.getDataRange().getValues();
+  const returnHeaderById_ = {};
+  if (retHeaderValues2.length >= 2) {
+    const rh = retHeaderValues2[0];
+    const rCol = {};
+    rh.forEach(function (hd, idx) { rCol[hd] = idx; });
+    for (let i = 1; i < retHeaderValues2.length; i++) {
+      const row = retHeaderValues2[i];
+      returnHeaderById_[String(row[rCol['Return_ID']])] = { area: String(row[rCol['Area']]).trim(), raisedByName: row[rCol['Raised_By_Name']] };
+    }
+  }
+  const retDetailsSheet2 = ss.getSheetByName(RETURN_DETAILS_SHEET);
+  const retDetailsValues2 = retDetailsSheet2.getDataRange().getValues();
+  if (retDetailsValues2.length >= 2) {
+    const rd = retDetailsValues2[0];
+    const dCol2 = {};
+    rd.forEach(function (hd, idx) { dCol2[hd] = idx; });
+    for (let i = 1; i < retDetailsValues2.length; i++) {
+      const r = retDetailsValues2[i];
+      if (String(r[dCol2['Slip_Status']]) !== 'Completed') continue;
+      if (String(r[dCol2['UCS_Code']]).trim() !== ucsCode) continue;
+      const header = returnHeaderById_[String(r[dCol2['Return_ID']])] || { area: '', raisedByName: '' };
+      if (areaFilter && header.area !== areaFilter) continue;
+      const qtyApproved = Number(r[dCol2['Qty_Approved']]) || 0;
+      if (qtyApproved === 0) continue; // fully-rejected return (0 approved) -- nothing was actually credited back, nothing to show
+      const approvedTs = r[dCol2['Approved_Timestamp']];
+      addToMonth_(monthlyReleased, approvedTs, -qtyApproved);
+      if (!withinDateRange_(approvedTs, fromDate, toDate)) continue;
+      issueRows.push({
+        issueDate: formatDateOut(approvedTs),
+        issueDateSort_: (toMidnight(approvedTs) || new Date(0)).getTime(),
+        issueQty: -qtyApproved,
+        issuedTo: '(Return) ' + (header.raisedByName || ''),
+        area: header.area,
+        reqSlipNumber: r[dCol2['Return_ID']],
+        type: 'return'
+      });
+    }
+  }
+  // Chronological order across the merged issue+return rows, oldest first.
+  // Every other tab in this modal relies on sheet-append-order already
+  // being chronological order and never sorts explicitly; merging two
+  // different sheets into one feed breaks that assumption, so this tab
+  // needs its own explicit sort (same pattern as getPoPrRowsForUcsCode_'s
+  // poDateSort_, including stripping the sort key before returning).
+  issueRows.sort(function (a, b) { return a.issueDateSort_ - b.issueDateSort_; });
+  issueRows.forEach(function (r) { delete r.issueDateSort_; });
+
   const localSheet = ss.getSheetByName(LOCAL_ISSUE_SHEET);
   const localValues = localSheet.getDataRange().getValues();
   const localIssueRows = [];
@@ -1921,6 +1987,15 @@ function recordLocalIssue(data) {
   if (!canRecordLocalIssue(area, login.authorizedArea, login.role)) return jsonResponse({ success: false, message: 'You are not authorized to record local issues for ' + area + '.' });
   const validAreas = readOptionsColumn('Area_201');
   if (validAreas.indexOf(area) === -1) return jsonResponse({ success: false, message: 'Unknown area: ' + area });
+  // PLANNING material is issued only via the Requisition -> Issue path
+  // (recorded in PLNG_ISSUE_SHEET), never as a "local issue." Rejected
+  // server-side, not just hidden from the area dropdown: computeAreaStockMap_()
+  // has no PLANNING exclusion on its LOCAL_ISSUE_SHEET pass (unlike its S_201/
+  // PLNG_ISSUE_SHEET/Return passes, which all skip it), so an Area=PLANNING
+  // row here would silently create a phantom PLANNING pseudo-area in
+  // AREA_STOCK with consumption but no matching inflow -- a permanent
+  // negative balance with no legitimate transaction behind it.
+  if (area.toUpperCase() === 'PLANNING') return jsonResponse({ success: false, message: 'Local issues cannot be recorded for PLANNING. Planning material is issued through the Requisition module (Raise Requisition -> Issue), not local consumption.' });
   const issuedTo = String(data.issuedTo || '').trim();
   if (!issuedTo) return jsonResponse({ success: false, message: 'Issued To is required.' });
   if (issuedTo.length > 200) return jsonResponse({ success: false, message: 'Issued To is too long (max 200 characters).' });
@@ -2167,7 +2242,15 @@ function getAreaStockList(data) {
   const allAreaOptions = readOptionsColumn('Area_201');
   const myAreas = String(login.authorizedArea || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean);
   const isPlanning = isPlanningAreaStaff(login.authorizedArea);
-  const availableAreas = isPlanning ? allAreaOptions : allAreaOptions.filter(function (a) { return myAreas.indexOf(a) !== -1; });
+  // PLANNING is a valid Area_201 value (S_201's "Released to Area" dropdown
+  // needs it, for a release that stays in Planning's own custody rather
+  // than going out to a physical area) but it is not a real area with its
+  // own local stock -- computeAreaStockMap_() always excludes it, so it
+  // would only ever render here as a permanent, empty "0 of 0" option.
+  // Excluded here rather than from Options_List itself, since the 201
+  // form's own dropdown reads that same column and still needs the value.
+  const availableAreas = (isPlanning ? allAreaOptions : allAreaOptions.filter(function (a) { return myAreas.indexOf(a) !== -1; }))
+    .filter(function (a) { return String(a).trim().toUpperCase() !== 'PLANNING'; });
   const requestedArea = String(data.area || '').trim();
   if (!requestedArea) return jsonResponse({ success: true, availableAreas: availableAreas, area: '', items: [] });
   if (availableAreas.indexOf(requestedArea) === -1) return jsonResponse({ success: false, message: 'You are not authorized to view ' + requestedArea + "'s stock." });
