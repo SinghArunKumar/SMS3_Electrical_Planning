@@ -252,7 +252,16 @@
       // Area Store Supervisor or Area Incharge, for each of their own areas.
       const isSupervisor = hasCommaValueClient(data.role, 'Area Store Supervisor');
       const isIncharge = hasCommaValueClient(data.role, 'Area Incharge');
-      eligibleAreas = (isSupervisor || isIncharge) ? myAreas : [];
+      // PLANNING material never goes through a "local issue" -- it always
+      // leaves via the Requisition -> Issue path instead (recorded in the
+      // Planning Issue Sheet, not the Local Issue Sheet), so it's excluded
+      // here even for a login whose Authorized_Area happens to include it
+      // (e.g. someone who is both Planning staff and an Area Incharge
+      // elsewhere). Server-side, recordLocalIssue() rejects Area='PLANNING'
+      // outright regardless of what this dropdown offers.
+      eligibleAreas = (isSupervisor || isIncharge)
+        ? myAreas.filter(function (a) { return a.toUpperCase() !== 'PLANNING'; })
+        : [];
 
       document.getElementById('loginSection').style.display = 'none';
 

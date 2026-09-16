@@ -71,6 +71,13 @@
   .historyTabBtn.active { background:#e8f0fe; color:#1a73e8; font-weight:bold; }
   #historyTabContent { min-height: 80px; }
   #historyTabContent table { font-size:12px; }
+  /* Planning Issue Sheet tab: a completed return shows as a negative-qty
+     row (see Code.gs's getUCSCodeHistory) right in this same list, styled
+     light green as a visual "this came back" cue -- deliberately not a
+     separate tab, so the credit sits chronologically next to the issue
+     it's correcting instead of requiring a second lookup. */
+  #historyTabContent tr.returnRow { background:#e6f4ea; color:#1e7e34; }
+  #historyTabContent tr.returnRow td { font-weight:600; }
   #historyExportBtn { margin-top: 8px; }
   .naNotice { padding: 16px; text-align:center; color:#888; font-size:13px; background:#fafafa; border-radius:6px; }
   #historyLoading, #historyError { padding: 20px; text-align:center; font-size: 13px; }
@@ -756,7 +763,11 @@
       columns.map(function (c) { return '<th>' + escapeHtml(c.label) + '</th>'; }).join('') +
       '</tr></thead><tbody>' +
       rows.map(function (r) {
-        return '<tr>' + columns.map(function (c) {
+        // Only the merged Planning Issue Sheet feed carries a return's
+        // negative row (r.type === 'return', from Code.gs) -- every other
+        // tab's rows simply won't have this field, so this never fires there.
+        const rowClass = (r.type === 'return') ? ' class="returnRow"' : '';
+        return '<tr' + rowClass + '>' + columns.map(function (c) {
           const v = r[c.key];
           return '<td>' + (v === null || v === undefined || v === '' ? '&mdash;' : escapeHtml(v)) + '</td>';
         }).join('') + '</tr>';
