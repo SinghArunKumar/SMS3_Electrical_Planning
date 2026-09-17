@@ -86,6 +86,8 @@ function doPost(e) {
     if (action === 'receiveSTOMaterial') { return receiveSTOMaterial(data); }
     if (action === 'editSTOReceivedInfo') { return editSTOReceivedInfo(data); }
     if (action === 'editSTOEntry') { return editSTOEntry(data); }
+    if (action === 'deleteSTOEntry') { return deleteSTOEntry(data); }
+    if (action === 'restoreSTOEntry') { return restoreSTOEntry(data); }
     if (action === 'getEligibleSTOsForZ04') { return getEligibleSTOsForZ04(data); }
     if (action === 'checkMatDocNoExists') { return checkMatDocNoExists(data); }
     if (action === 'addZ04Entry') { return addZ04Entry(data); }
@@ -353,7 +355,13 @@ function checkSTONoExists(data) {
   const col = {};
   headers.forEach((h, idx) => { col[h] = idx; });
   for (let i = 1; i < values.length; i++) {
-    if (String(values[i][col['STO_No']]).trim() === stoNo) return jsonResponse({ success: true, exists: true });
+    if (String(values[i][col['STO_No']]).trim() === stoNo) {
+      const row = values[i];
+      if (isSTODeleted_(row, col)) {
+        return jsonResponse({ success: true, exists: true, deleted: true, deletedDate: formatDateOut(row[col['Deleted_Timestamp']]), deletedReason: row[col['Deleted_Reason']] || '' });
+      }
+      return jsonResponse({ success: true, exists: true });
+    }
   }
   return jsonResponse({ success: true, exists: false });
 }
@@ -474,6 +482,11 @@ function addSTOEntry(data) {
 function getSTOList(data) {
   const check = requireSTOAccess(data);
   if (!check.ok) return check.response;
+  const login = check.login;
+  // Approver-only "Show deleted" view -- a non-admin passing this flag is
+  // silently ignored rather than errored, same spirit as any other
+  // client-supplied flag this app doesn't trust blindly.
+  const includeDeleted = !!data.includeDeleted && !!login.isAdmin;
   const pageSize = Number(data.pageSize) > 0 ? Number(data.pageSize) : 20;
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(STO_SHEET);
   const values = sheet.getDataRange().getValues();
@@ -511,6 +524,8 @@ function getSTOList(data) {
   let allRows = [];
   for (let i = 1; i < values.length; i++) {
     const r = values[i];
+    const isDeleted = isSTODeleted_(r, col);
+    if (isDeleted && !includeDeleted) continue;
     const receivedQty = r[col['Received_Qty']];
     const receivedDate = r[col['Received_Date']];
     const referencePO = r[col['Reference_PO']];
@@ -520,7 +535,8 @@ function getSTOList(data) {
       stoDateObj: toMidnight(r[col['STO_Date']]), stoDate: formatDateOut(r[col['STO_Date']]), stoNo: stoNo,
       ucsCode: String(r[col['UCS_Code']]).trim(), itemDescription: r[col['Item_Description']], qty: r[col['Qty']], unit: r[col['Unit']],
       receivedQty: isBlankCell(receivedQty) ? '' : receivedQty, receivedDate: formatDateOut(receivedDate), referencePO: referencePO || '',
-      pending: pending, z04Done: !!z04Done[stoNo], status201: compute201Status(stoNo)
+      pending: pending, z04Done: !!z04Done[stoNo], status201: compute201Status(stoNo),
+      isDeleted: isDeleted, deletedBy: isDeleted ? r[col['Deleted_By']] : '', deletedDate: isDeleted ? formatDateOut(r[col['Deleted_Timestamp']]) : '', deletedReason: isDeleted ? (r[col['Deleted_Reason']] || '') : ''
     });
   }
 
@@ -571,7 +587,7 @@ function getSTOList(data) {
   if (page > totalPages) page = totalPages;
   const startIdx = (page - 1) * pageSize;
   const pageRows = allRows.slice(startIdx, startIdx + pageSize).map(function (row) {
-    return { stoDate: row.stoDate, stoNo: row.stoNo, ucsCode: row.ucsCode, itemDescription: row.itemDescription, qty: row.qty, unit: row.unit, receivedQty: row.receivedQty, receivedDate: row.receivedDate, referencePO: row.referencePO, pending: row.pending, z04Done: row.z04Done, status201: row.status201 };
+    return { stoDate: row.stoDate, stoNo: row.stoNo, ucsCode: row.ucsCode, itemDescription: row.itemDescription, qty: row.qty, unit: row.unit, receivedQty: row.receivedQty, receivedDate: row.receivedDate, referencePO: row.referencePO, pending: row.pending, z04Done: row.z04Done, status201: row.status201, isDeleted: row.isDeleted, deletedBy: row.deletedBy, deletedDate: row.deletedDate, deletedReason: row.deletedReason };
   });
   return jsonResponse({ success: true, rows: pageRows, totalCount: totalCount, currentPage: page, totalPages: totalPages, pageSize: pageSize });
 }
@@ -600,6 +616,7 @@ function receiveSTOMaterial(data) {
     }
     if (targetIndex === -1) return jsonResponse({ success: false, message: 'STO No not found.' });
     const row = values[targetIndex];
+    if (isSTODeleted_(row, col)) return jsonResponse({ success: false, message: 'STO ' + stoNo + ' has been deleted and can no longer be received.' });
     const existingQty = row[col['Received_Qty']];
     const existingDate = row[col['Received_Date']];
     const existingPO = row[col['Reference_PO']];
@@ -623,6 +640,122 @@ function receiveSTOMaterial(data) {
     sheet.getRange(rowNum, col['Reference_PO'] + 1).setValue(refPO);
     logAudit(login.name, data.email, 'RECEIVE_STO_MATERIAL', 'STO ' + stoNo + ' | Received Qty ' + recQty + ' | Received Date ' + recDateStr + ' | Ref PO ' + refPO);
     return jsonResponse({ success: true, message: 'STO ' + stoNo + ' marked as received and locked.' });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * True once an STO has been soft-deleted (Deleted_Status = 'Deleted').
+ * col must be the header map for STO_MasterList; blank/missing column
+ * (sheet not yet updated with the 4 new headers) reads as "not deleted"
+ * rather than throwing, so this stays safe to call everywhere immediately,
+ * even before the one-time sheet setup step is done.
+ */
+function isSTODeleted_(stoRow, col) {
+  if (col['Deleted_Status'] === undefined) return false;
+  return String(stoRow[col['Deleted_Status']] || '').trim() === 'Deleted';
+}
+
+/**
+ * Soft-deletes an STO: tags it Deleted_Status/By/Timestamp/Reason rather
+ * than removing the row, so the STO_No can never be reused (checkSTONoExists
+ * / addSTOEntry's dup-check scans every row regardless of status) and the
+ * full trail stays recoverable. Approver-only, same tier as correcting
+ * received info or editing UCS text. Precondition mirrors isSTOLocked_ --
+ * blocked once EITHER receiving is filled OR a Z04 exists, not just Z04:
+ * a received-but-not-yet-Z04'd STO still represents material physically
+ * sitting somewhere, and deleting the paper trail under it would orphan
+ * that receipt.
+ */
+function deleteSTOEntry(data) {
+  const check = requireAdmin(data);
+  if (!check.ok) return check.response;
+  const login = check.login;
+  const stoNo = String(data.stoNo || '').trim();
+  const reason = String(data.reason || '').trim();
+  if (!stoNo) return jsonResponse({ success: false, message: 'STO No is required.' });
+  if (!reason) return jsonResponse({ success: false, message: 'A reason is required to delete an STO.' });
+  if (reason.length > 500) return jsonResponse({ success: false, message: 'Reason is too long (max 500 characters).' });
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(STO_SHEET);
+    const values = sheet.getDataRange().getValues();
+    const headers = values[0];
+    const col = {};
+    headers.forEach(function (h, idx) { col[h] = idx; });
+    ['Deleted_Status', 'Deleted_By', 'Deleted_Timestamp', 'Deleted_Reason'].forEach(function (h) {
+      if (col[h] === undefined) throw new Error('STO_MasterList is missing column "' + h + '" -- add it as a new header before using Delete/Restore.');
+    });
+
+    let targetIndex = -1;
+    for (let i = 1; i < values.length; i++) {
+      if (String(values[i][col['STO_No']]).trim() === stoNo) { targetIndex = i; break; }
+    }
+    if (targetIndex === -1) return jsonResponse({ success: false, message: 'STO No not found.' });
+    const row = values[targetIndex];
+
+    if (isSTODeleted_(row, col)) return jsonResponse({ success: false, message: 'STO ' + stoNo + ' is already deleted.' });
+    // Fresh re-check, inside the lock -- someone may have just received or
+    // Z04'd this exact STO a moment ago.
+    if (isSTOLocked_(row, col, stoNo)) {
+      return jsonResponse({ success: false, message: 'STO ' + stoNo + ' can no longer be deleted -- it has already been received and/or Z04\'d. Refresh the dashboard.' });
+    }
+
+    const now = new Date();
+    const rowNum = targetIndex + 1;
+    sheet.getRange(rowNum, col['Deleted_Status'] + 1).setValue('Deleted');
+    sheet.getRange(rowNum, col['Deleted_By'] + 1).setValue(login.name);
+    sheet.getRange(rowNum, col['Deleted_Timestamp'] + 1).setValue(now);
+    sheet.getRange(rowNum, col['Deleted_Reason'] + 1).setValue(reason);
+    logAudit(login.name, data.email, 'DELETE_STO_ENTRY', 'STO ' + stoNo + ' | UCS ' + row[col['UCS_Code']] + ' | Qty ' + row[col['Qty']] + ' | Reason: ' + reason);
+    return jsonResponse({ success: true, message: 'STO ' + stoNo + ' deleted. It will no longer appear on any dashboard, and its number can never be reused.' });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * Undoes a deleteSTOEntry() tag. Approver-only, symmetric with delete --
+ * a wrong tag shouldn't need a manual sheet edit to fix.
+ */
+function restoreSTOEntry(data) {
+  const check = requireAdmin(data);
+  if (!check.ok) return check.response;
+  const login = check.login;
+  const stoNo = String(data.stoNo || '').trim();
+  if (!stoNo) return jsonResponse({ success: false, message: 'STO No is required.' });
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(STO_SHEET);
+    const values = sheet.getDataRange().getValues();
+    const headers = values[0];
+    const col = {};
+    headers.forEach(function (h, idx) { col[h] = idx; });
+    ['Deleted_Status', 'Deleted_By', 'Deleted_Timestamp', 'Deleted_Reason'].forEach(function (h) {
+      if (col[h] === undefined) throw new Error('STO_MasterList is missing column "' + h + '" -- add it as a new header before using Delete/Restore.');
+    });
+
+    let targetIndex = -1;
+    for (let i = 1; i < values.length; i++) {
+      if (String(values[i][col['STO_No']]).trim() === stoNo) { targetIndex = i; break; }
+    }
+    if (targetIndex === -1) return jsonResponse({ success: false, message: 'STO No not found.' });
+    const row = values[targetIndex];
+    if (!isSTODeleted_(row, col)) return jsonResponse({ success: false, message: 'STO ' + stoNo + ' is not currently deleted.' });
+
+    const oldReason = row[col['Deleted_Reason']];
+    const rowNum = targetIndex + 1;
+    sheet.getRange(rowNum, col['Deleted_Status'] + 1).setValue('');
+    sheet.getRange(rowNum, col['Deleted_By'] + 1).setValue('');
+    sheet.getRange(rowNum, col['Deleted_Timestamp'] + 1).setValue('');
+    sheet.getRange(rowNum, col['Deleted_Reason'] + 1).setValue('');
+    logAudit(login.name, data.email, 'RESTORE_STO_ENTRY', 'STO ' + stoNo + ' | Previously deleted -- reason was: ' + oldReason);
+    return jsonResponse({ success: true, message: 'STO ' + stoNo + ' restored.' });
   } finally {
     lock.releaseLock();
   }
@@ -699,6 +832,8 @@ function editSTOEntry(data) {
 
     const row = values[targetIndex];
 
+    if (isSTODeleted_(row, col)) return jsonResponse({ success: false, message: 'STO ' + stoNo + ' has been deleted and can no longer be edited.' });
+
     // Fresh re-check, inside the lock -- someone may have just received or
     // Z04'd this exact STO a moment ago.
     if (isSTOLocked_(row, col, stoNo)) {
@@ -774,6 +909,7 @@ function editSTOReceivedInfo(data) {
   }
   if (targetIndex === -1) return jsonResponse({ success: false, message: 'STO No not found.' });
   const row = values[targetIndex];
+  if (isSTODeleted_(row, col)) return jsonResponse({ success: false, message: 'STO ' + stoNo + ' has been deleted and can no longer be corrected.' });
   const requestedQty = Number(row[col['Qty']]);
   if (recQty > requestedQty) return jsonResponse({ success: false, message: 'Received Qty cannot exceed the requested Qty (' + requestedQty + ').' });
   const stoDateMidnight = toMidnight(row[col['STO_Date']]);
@@ -811,6 +947,7 @@ function getEligibleSTOsForZ04(data) {
     const row = stoValues[i];
     const stoNo = String(row[stoCol['STO_No']]).trim();
     if (alreadyZ04d[stoNo]) continue;
+    if (isSTODeleted_(row, stoCol)) continue;
     eligible.push({ stoNo: stoNo, stoDate: formatDateOut(row[stoCol['STO_Date']]), ucsCode: String(row[stoCol['UCS_Code']]).trim(), itemDescription: row[stoCol['Item_Description']], unit: row[stoCol['Unit']], orderedQty: row[stoCol['Qty']] });
   }
   eligible.reverse();
@@ -898,6 +1035,7 @@ function addZ04Entry(data) {
   let stoRow = null;
   for (let i = 1; i < stoValues.length; i++) { if (String(stoValues[i][stoCol['STO_No']]).trim() === stoNo) { stoRow = stoValues[i]; break; } }
   if (!stoRow) return jsonResponse({ success: false, message: 'STO No ' + stoNo + ' was not found in STO_MasterList.' });
+  if (isSTODeleted_(stoRow, stoCol)) return jsonResponse({ success: false, message: 'STO No ' + stoNo + ' has been deleted and can no longer be Z04\'d.' });
   const stoDateMidnight = toMidnight(stoRow[stoCol['STO_Date']]);
   if (stoDateMidnight && dateOfReceiptObj < stoDateMidnight) return jsonResponse({ success: false, message: 'Date of Receipt (Z04) cannot be earlier than the STO Date.' });
   const orderedQty = Number(stoRow[stoCol['Qty']]);
@@ -1812,6 +1950,7 @@ function getUCSCodeHistory(data) {
       for (let i = 1; i < stoValues.length; i++) {
         const r = stoValues[i];
         if (String(r[col['UCS_Code']]).trim() !== ucsCode) continue;
+        if (isSTODeleted_(r, col)) continue;
         if (!withinDateRange_(r[col['STO_Date']], fromDate, toDate)) continue;
         stoRows.push({ stoNo: r[col['STO_No']], stoDate: formatDateOut(r[col['STO_Date']]), qty: r[col['Qty']], unit: r[col['Unit']], receivedQty: isBlankCell(r[col['Received_Qty']]) ? null : r[col['Received_Qty']], receivedDate: formatDateOut(r[col['Received_Date']]), referencePO: r[col['Reference_PO']] });
       }
