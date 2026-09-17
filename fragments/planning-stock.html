@@ -83,6 +83,31 @@
   #historyLoading, #historyError { padding: 20px; text-align:center; font-size: 13px; }
   #historyError { color:#c5221f; }
 
+  /* ---- PR / PO / UCS drill-down panels (stacked, cascaded, non-draggable) ----
+     Opened from inside the PO & PR history tab (and from each other). One
+     shared dim backdrop behind the whole stack; each panel is its own
+     closeable card, cascaded by a fixed offset per stack depth so an
+     operator can see there's a stack without them fully overlapping.
+     Deliberately not draggable -- see PROJECT_STATUS.md discussion: a
+     centered/cascaded stack covers the "open PR, then open PO, then open
+     UCS" traversal without the cost/risk of a real window manager, and it
+     degrades cleanly to a full-width sheet on narrow (mobile/PWA) screens. */
+  #drillBackdrop { display:none; position: fixed; top:0; left:0; right:0; bottom:0; background: rgba(0,0,0,0.35); z-index: 40; }
+  .drillPanel { display:flex; flex-direction:column; position: fixed; background: white; border-radius: 10px; box-shadow: 0 10px 40px rgba(0,0,0,0.35); width: 640px; max-width: calc(100vw - 32px); max-height: calc(100vh - 32px); z-index: 41; }
+  .drillPanel .drillHead { display:flex; justify-content:space-between; align-items:flex-start; padding: 16px 18px 10px 18px; border-bottom: 1px solid #eee; flex-shrink:0; }
+  .drillPanel .drillTitle { font-family: 'Courier New', monospace; font-weight: bold; font-size: 16px; color: #1a73e8; word-break: break-all; }
+  .drillPanel .drillSubtitle { font-size: 12px; color: #666; margin-top: 2px; }
+  .drillPanel .drillCloseBtn { background:#666; padding:4px 12px; font-size:12px; flex-shrink:0; margin-left:10px; }
+  .drillPanel .drillBody { padding: 14px 18px 18px 18px; overflow-y: auto; }
+  .drillPanel .drillBody table { font-size: 12px; }
+  .drillPanel .detailLabel { font-weight: bold; font-size: 12px; color: #888; text-transform: uppercase; margin-top: 14px; margin-bottom: 4px; }
+  .drillPanel .detailLabel:first-child { margin-top: 0; }
+  .drillPanel .detailValue { font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
+  .drillPanel .detailUnit { display:inline-block; background:#f1f3f4; padding: 3px 10px; border-radius: 10px; font-size: 12px; margin-top: 4px; }
+  @media (max-width: 700px) {
+    .drillPanel { left: 16px !important; right: 16px; top: 16px !important; bottom: 16px; width: auto; max-width: none; max-height: none; }
+  }
+
 </style>
 
 
@@ -159,6 +184,9 @@
 </div>
 
 <div id="message"></div>
+
+<!-- ====== PR / PO / UCS drill-down panel stack (see CSS above) ====== -->
+<div id="drillBackdrop" onclick="Page.closeAllDrillPanels()"></div>
 
 <!-- ====== HISTORY DRILL-DOWN MODAL (Planning-area staff only) ====== -->
 <div id="historyOverlay" onclick="if(event.target===this) Page.closeHistory()">
@@ -582,6 +610,7 @@
     document.getElementById('historyOverlay').style.display = 'none';
     historyUcsCode = null;
     historyData = null;
+    closeAllDrillPanels(); // don't leave PR/PO/UCS panels (or their backdrop) orphaned behind the closed modal
   }
 
   function applyHistoryFilters() {
@@ -723,12 +752,63 @@
       { key: 'remarks', label: 'Remarks' }, { key: 'issuedByName', label: 'Issued By' }
     ],
     poPr: [
-      { key: 'prNo', label: 'PR No.' }, { key: 'poNo', label: 'PO No.' },
+      { key: 'prNo', label: 'PR No.', render: renderPRCell },
+      { key: 'poNo', label: 'PO No.', render: renderPOCell },
       { key: 'poDate', label: 'PO Date' }, { key: 'qty', label: 'Qty' },
       { key: 'receiptDate', label: '105 Date' }, { key: 'vendorCode', label: 'Vendor Code' },
       { key: 'vendorName', label: 'Vendor Name' }
     ]
   };
+
+  // Column-level cell renderers -- shared by the top-level PO&PR history tab
+  // AND by the PR/PO drill-down panels below, so a PR/PO/UCS click behaves
+  // identically no matter which table it was clicked from.
+  function renderPRCell(v) {
+    if (v === null || v === undefined || v === '') return '&mdash;';
+    const safe = escapeHtml(v).replace(/'/g, "\\'");
+    return '<span class="clickableCode" onclick="Page.openDrillPanel(\'pr\', \'' + safe + '\')" title="Click for full PR details">' + escapeHtml(v) + '</span>';
+  }
+  function renderPOCell(v) {
+    if (v === null || v === undefined || v === '') return '&mdash;';
+    const safe = escapeHtml(v).replace(/'/g, "\\'");
+    return '<span class="clickableCode" onclick="Page.openDrillPanel(\'po\', \'' + safe + '\')" title="Click for full PO details">' + escapeHtml(v) + '</span>';
+  }
+  function renderUCSCell(v) {
+    if (v === null || v === undefined || v === '') return '&mdash;';
+    const safe = escapeHtml(v).replace(/'/g, "\\'");
+    return '<span class="clickableCode" onclick="Page.openDrillPanel(\'ucs\', \'' + safe + '\')" title="Click for Short/Long Text">' + escapeHtml(v) + '</span>';
+  }
+
+  // Column sets for the PR and PO drill-down panels (built fresh per panel,
+  // not stored in TAB_COLUMNS, since these tables are keyed by PR/PO No.
+  // rather than by one UCS Code -- they need their own UCS Code + Item
+  // Description columns instead of the top-level poPr tab's fixed scope).
+  const PR_PANEL_COLUMNS = [
+    { key: 'ucsCode', label: 'UCS Code', render: renderUCSCell }, { key: 'itemDescription', label: 'Item Description' },
+    { key: 'poNo', label: 'PO No.', render: renderPOCell }, { key: 'poDate', label: 'PO Date' },
+    { key: 'qty', label: 'Qty' }, { key: 'receiptDate', label: '105 Date' },
+    { key: 'vendorCode', label: 'Vendor Code' }, { key: 'vendorName', label: 'Vendor Name' }
+  ];
+  const PO_PANEL_COLUMNS = [
+    { key: 'ucsCode', label: 'UCS Code', render: renderUCSCell }, { key: 'itemDescription', label: 'Item Description' },
+    { key: 'prNo', label: 'PR No.', render: renderPRCell }, { key: 'poDate', label: 'PO Date' },
+    { key: 'qty', label: 'Qty' }, { key: 'receiptDate', label: '105 Date' },
+    { key: 'vendorCode', label: 'Vendor Code' }, { key: 'vendorName', label: 'Vendor Name' }
+  ];
+
+  /** Shared by the history tab table and the drill-down panel tables. */
+  function renderDataTable(rows, columns) {
+    return '<div class="tableWrap"><table><thead><tr>' +
+      columns.map(function (c) { return '<th>' + escapeHtml(c.label) + '</th>'; }).join('') +
+      '</tr></thead><tbody>' +
+      rows.map(function (r) {
+        return '<tr>' + columns.map(function (c) {
+          const v = r[c.key];
+          return '<td>' + (c.render ? c.render(v, r) : (v === null || v === undefined || v === '' ? '&mdash;' : escapeHtml(v))) + '</td>';
+        }).join('') + '</tr>';
+      }).join('') +
+      '</tbody></table></div>';
+  }
 
   function renderHistoryTabContent(data) {
     const container = document.getElementById('historyTabContent');
@@ -769,7 +849,7 @@
         const rowClass = (r.type === 'return') ? ' class="returnRow"' : '';
         return '<tr' + rowClass + '>' + columns.map(function (c) {
           const v = r[c.key];
-          return '<td>' + (v === null || v === undefined || v === '' ? '&mdash;' : escapeHtml(v)) + '</td>';
+          return '<td>' + (c.render ? c.render(v, r) : (v === null || v === undefined || v === '' ? '&mdash;' : escapeHtml(v))) + '</td>';
         }).join('') + '</tr>';
       }).join('') +
       '</tbody></table></div>';
@@ -822,8 +902,140 @@
   }
 
   document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape') closeHistory();
+    if (e.key !== 'Escape') return;
+    // Layered close: Escape pops the topmost PR/PO/UCS drill panel first (if
+    // any are open) rather than the whole history modal underneath it.
+    if (drillPanelStack.length) { closeDrillPanel(drillPanelStack[drillPanelStack.length - 1].id); return; }
+    closeHistory();
   });
+
+  // ====== PR / PO / UCS drill-down panels ======
+  // Stack of { id, type, key, el } for currently-open panels. type is
+  // 'pr' | 'po' | 'ucs', key is the PR No. / PO No. / UCS Code it shows.
+  // Non-draggable by design (see CSS comment) -- cascaded by a fixed offset
+  // per stack depth instead, and fully stateless between opens (no caching
+  // beyond the single fetch each panel makes on open).
+  let drillPanelStack = [];
+  let drillPanelSeq = 0;
+  const DRILL_CASCADE_STEP = 28; // px offset per stack depth
+  const DRILL_CASCADE_BASE_TOP = 50;
+  const DRILL_CASCADE_BASE_LEFT = '50%'; // first panel centers; deeper ones cascade right/down from there
+
+  function drillTypeLabel(type) {
+    return type === 'pr' ? 'Purchase Requisition' : (type === 'po' ? 'Purchase Order' : 'UCS Code');
+  }
+
+  function openDrillPanel(type, key) {
+    // Dedupe: re-clicking a PR/PO/UCS that's already open brings it to
+    // front instead of stacking a second identical panel.
+    const existing = drillPanelStack.find(function (p) { return p.type === type && p.key === key; });
+    if (existing) { bringDrillPanelToFront(existing); return; }
+
+    const id = 'drill-' + (++drillPanelSeq);
+    const depth = drillPanelStack.length;
+    const el = document.createElement('div');
+    el.className = 'drillPanel';
+    el.id = id;
+    el.style.top = (DRILL_CASCADE_BASE_TOP + depth * DRILL_CASCADE_STEP) + 'px';
+    if (depth === 0) {
+      el.style.left = DRILL_CASCADE_BASE_LEFT;
+      el.style.transform = 'translateX(-50%)';
+    } else {
+      // Once cascading, anchor from a fixed left so each new panel steps
+      // right of the previous rather than re-centering (re-centering would
+      // make every panel land in the same spot).
+      el.style.left = 'calc(50% - 320px + ' + (depth * DRILL_CASCADE_STEP) + 'px)';
+    }
+    el.innerHTML =
+      '<div class="drillHead">' +
+        '<div><div class="drillTitle" id="' + id + '-title"></div><div class="drillSubtitle" id="' + id + '-subtitle"></div></div>' +
+        '<button type="button" class="drillCloseBtn" onclick="Page.closeDrillPanel(\'' + id + '\')">Close</button>' +
+      '</div>' +
+      '<div class="drillBody" id="' + id + '-body">Loading&hellip;</div>';
+
+    document.getElementById('drillBackdrop').style.display = 'block';
+    document.body.appendChild(el);
+    const panel = { id: id, type: type, key: key, el: el };
+    drillPanelStack.push(panel);
+    bringDrillPanelToFront(panel);
+
+    document.getElementById(id + '-title').textContent = drillTypeLabel(type) + ': ' + key;
+    loadDrillPanelContent(panel);
+  }
+
+  function bringDrillPanelToFront(panel) {
+    // Move to the end of the stack array (paint/z-index order) and bump
+    // z-index above every other open panel.
+    drillPanelStack = drillPanelStack.filter(function (p) { return p.id !== panel.id; });
+    drillPanelStack.push(panel);
+    drillPanelStack.forEach(function (p, idx) { p.el.style.zIndex = 41 + idx; });
+  }
+
+  function closeDrillPanel(id) {
+    const panel = drillPanelStack.find(function (p) { return p.id === id; });
+    if (!panel) return;
+    panel.el.remove();
+    drillPanelStack = drillPanelStack.filter(function (p) { return p.id !== id; });
+    if (!drillPanelStack.length) document.getElementById('drillBackdrop').style.display = 'none';
+  }
+
+  function closeAllDrillPanels() {
+    drillPanelStack.forEach(function (p) { p.el.remove(); });
+    drillPanelStack = [];
+    document.getElementById('drillBackdrop').style.display = 'none';
+  }
+
+  async function loadDrillPanelContent(panel) {
+    const bodyEl = document.getElementById(panel.id + '-body');
+    if (panel.type === 'ucs') {
+      renderUCSDrillPanel(panel, bodyEl);
+      return;
+    }
+    try {
+      const action = panel.type === 'pr' ? 'getPRItems' : 'getPOItems';
+      const payload = { action: action };
+      if (panel.type === 'pr') payload.prNo = panel.key; else payload.poNo = panel.key;
+      const data = await callApi(payload);
+      if (!document.getElementById(panel.id)) return; // closed while the request was in flight
+      if (!data.success) {
+        bodyEl.innerHTML = '<div class="naNotice">' + escapeHtml(data.message || 'Could not load this detail.') + '</div>';
+        return;
+      }
+      const rows = data.rows || [];
+      document.getElementById(panel.id + '-subtitle').textContent =
+        rows.length + ' item' + (rows.length === 1 ? '' : 's') + (panel.type === 'pr' ? ' under this PR' : ' under this PO');
+      if (rows.length === 0) {
+        bodyEl.innerHTML = '<div class="naNotice">No line items found.</div>';
+        return;
+      }
+      const columns = panel.type === 'pr' ? PR_PANEL_COLUMNS : PO_PANEL_COLUMNS;
+      bodyEl.innerHTML = renderDataTable(rows, columns);
+    } catch (e) {
+      if (!document.getElementById(panel.id)) return;
+      bodyEl.innerHTML = '<div class="naNotice">Could not reach the server.</div>';
+    }
+  }
+
+  /**
+   * UCS detail popup -- deliberately NOT a server call. Planning Stock
+   * already loads every UCS Code's Short/Long Text up front (allItems,
+   * from getPlanningStockList), so a UCS click inside any drill panel is
+   * just a lookup into data already in memory. A code that isn't found
+   * (bought against a PR/PO before it was ever formally UCS-coded) gets an
+   * explicit "not yet in UCS Master List" state rather than a blank card.
+   */
+  function renderUCSDrillPanel(panel, bodyEl) {
+    document.getElementById(panel.id + '-subtitle').textContent = '';
+    const item = allItems.find(function (m) { return m.ucsCode === panel.key; });
+    if (!item) {
+      bodyEl.innerHTML = '<div class="naNotice">This UCS Code was not found in UCS_MasterList -- it may have been bought against this PR/PO before it was ever formally UCS-coded.</div>';
+      return;
+    }
+    bodyEl.innerHTML =
+      (item.unit ? '<span class="detailUnit">' + escapeHtml(item.unit) + '</span>' : '') +
+      '<div class="detailLabel">Short Text</div><div class="detailValue">' + escapeHtml(item.itemDescription || '') + '</div>' +
+      '<div class="detailLabel">Long Text</div><div class="detailValue">' + escapeHtml(item.longText || '') + '</div>';
+  }
 
   // ====== CSV EXPORT (Planning staff only -- button itself is hidden otherwise) ======
   function csvEscape(val) {
@@ -860,22 +1072,33 @@
   Object.defineProperties(window.Page = {}, {
     APPS_SCRIPT_URL: { get: function(){ return APPS_SCRIPT_URL; }, set: function(v){ APPS_SCRIPT_URL = v; }, enumerable: true, configurable: true },
     CACHE_KEY: { get: function(){ return CACHE_KEY; }, set: function(v){ CACHE_KEY = v; }, enumerable: true, configurable: true },
+    DRILL_CASCADE_BASE_LEFT: { get: function(){ return DRILL_CASCADE_BASE_LEFT; }, set: function(v){ DRILL_CASCADE_BASE_LEFT = v; }, enumerable: true, configurable: true },
+    DRILL_CASCADE_BASE_TOP: { get: function(){ return DRILL_CASCADE_BASE_TOP; }, set: function(v){ DRILL_CASCADE_BASE_TOP = v; }, enumerable: true, configurable: true },
+    DRILL_CASCADE_STEP: { get: function(){ return DRILL_CASCADE_STEP; }, set: function(v){ DRILL_CASCADE_STEP = v; }, enumerable: true, configurable: true },
     HISTORY_TABS: { get: function(){ return HISTORY_TABS; }, set: function(v){ HISTORY_TABS = v; }, enumerable: true, configurable: true },
     PAGE_SIZE: { get: function(){ return PAGE_SIZE; }, set: function(v){ PAGE_SIZE = v; }, enumerable: true, configurable: true },
+    PO_PANEL_COLUMNS: { get: function(){ return PO_PANEL_COLUMNS; }, set: function(v){ PO_PANEL_COLUMNS = v; }, enumerable: true, configurable: true },
     POLL_INTERVAL_MS: { get: function(){ return POLL_INTERVAL_MS; }, set: function(v){ POLL_INTERVAL_MS = v; }, enumerable: true, configurable: true },
+    PR_PANEL_COLUMNS: { get: function(){ return PR_PANEL_COLUMNS; }, set: function(v){ PR_PANEL_COLUMNS = v; }, enumerable: true, configurable: true },
     TAB_COLUMNS: { get: function(){ return TAB_COLUMNS; }, set: function(v){ TAB_COLUMNS = v; }, enumerable: true, configurable: true },
     allItems: { get: function(){ return allItems; }, set: function(v){ allItems = v; }, enumerable: true, configurable: true },
     applyHistoryFilters: { get: function(){ return applyHistoryFilters; }, set: function(v){ applyHistoryFilters = v; }, enumerable: true, configurable: true },
+    bringDrillPanelToFront: { get: function(){ return bringDrillPanelToFront; }, set: function(v){ bringDrillPanelToFront = v; }, enumerable: true, configurable: true },
     buildChartSvg: { get: function(){ return buildChartSvg; }, set: function(v){ buildChartSvg = v; }, enumerable: true, configurable: true },
     callApi: { get: function(){ return callApi; }, set: function(v){ callApi = v; }, enumerable: true, configurable: true },
     clearFilters: { get: function(){ return clearFilters; }, set: function(v){ clearFilters = v; }, enumerable: true, configurable: true },
     clearHistoryFilters: { get: function(){ return clearHistoryFilters; }, set: function(v){ clearHistoryFilters = v; }, enumerable: true, configurable: true },
     clearMessage: { get: function(){ return clearMessage; }, set: function(v){ clearMessage = v; }, enumerable: true, configurable: true },
+    closeAllDrillPanels: { get: function(){ return closeAllDrillPanels; }, set: function(v){ closeAllDrillPanels = v; }, enumerable: true, configurable: true },
+    closeDrillPanel: { get: function(){ return closeDrillPanel; }, set: function(v){ closeDrillPanel = v; }, enumerable: true, configurable: true },
     closeHistory: { get: function(){ return closeHistory; }, set: function(v){ closeHistory = v; }, enumerable: true, configurable: true },
     csvEscape: { get: function(){ return csvEscape; }, set: function(v){ csvEscape = v; }, enumerable: true, configurable: true },
     currentPage: { get: function(){ return currentPage; }, set: function(v){ currentPage = v; }, enumerable: true, configurable: true },
     currentUser: { get: function(){ return currentUser; }, set: function(v){ currentUser = v; }, enumerable: true, configurable: true },
     downloadCsv: { get: function(){ return downloadCsv; }, set: function(v){ downloadCsv = v; }, enumerable: true, configurable: true },
+    drillPanelSeq: { get: function(){ return drillPanelSeq; }, set: function(v){ drillPanelSeq = v; }, enumerable: true, configurable: true },
+    drillPanelStack: { get: function(){ return drillPanelStack; }, set: function(v){ drillPanelStack = v; }, enumerable: true, configurable: true },
+    drillTypeLabel: { get: function(){ return drillTypeLabel; }, set: function(v){ drillTypeLabel = v; }, enumerable: true, configurable: true },
     escapeHtml: { get: function(){ return escapeHtml; }, set: function(v){ escapeHtml = v; }, enumerable: true, configurable: true },
     exportHistoryTabCsv: { get: function(){ return exportHistoryTabCsv; }, set: function(v){ exportHistoryTabCsv = v; }, enumerable: true, configurable: true },
     exportMainCsv: { get: function(){ return exportMainCsv; }, set: function(v){ exportMainCsv = v; }, enumerable: true, configurable: true },
@@ -890,19 +1113,26 @@
     lastRenderedRows: { get: function(){ return lastRenderedRows; }, set: function(v){ lastRenderedRows = v; }, enumerable: true, configurable: true },
     listRequestInFlight: { get: function(){ return listRequestInFlight; }, set: function(v){ listRequestInFlight = v; }, enumerable: true, configurable: true },
     loadCache: { get: function(){ return loadCache; }, set: function(v){ loadCache = v; }, enumerable: true, configurable: true },
+    loadDrillPanelContent: { get: function(){ return loadDrillPanelContent; }, set: function(v){ loadDrillPanelContent = v; }, enumerable: true, configurable: true },
     loadStock: { get: function(){ return loadStock; }, set: function(v){ loadStock = v; }, enumerable: true, configurable: true },
     login: { get: function(){ return login; }, set: function(v){ login = v; }, enumerable: true, configurable: true },
     logout: { get: function(){ return logout; }, set: function(v){ logout = v; }, enumerable: true, configurable: true },
     nextPage: { get: function(){ return nextPage; }, set: function(v){ nextPage = v; }, enumerable: true, configurable: true },
     onSearchInput: { get: function(){ return onSearchInput; }, set: function(v){ onSearchInput = v; }, enumerable: true, configurable: true },
+    openDrillPanel: { get: function(){ return openDrillPanel; }, set: function(v){ openDrillPanel = v; }, enumerable: true, configurable: true },
     openHistory: { get: function(){ return openHistory; }, set: function(v){ openHistory = v; }, enumerable: true, configurable: true },
     pollTimer: { get: function(){ return pollTimer; }, set: function(v){ pollTimer = v; }, enumerable: true, configurable: true },
     populateAreaOptions: { get: function(){ return populateAreaOptions; }, set: function(v){ populateAreaOptions = v; }, enumerable: true, configurable: true },
     prevPage: { get: function(){ return prevPage; }, set: function(v){ prevPage = v; }, enumerable: true, configurable: true },
+    renderDataTable: { get: function(){ return renderDataTable; }, set: function(v){ renderDataTable = v; }, enumerable: true, configurable: true },
     renderHistoryBody: { get: function(){ return renderHistoryBody; }, set: function(v){ renderHistoryBody = v; }, enumerable: true, configurable: true },
     renderHistoryTabContent: { get: function(){ return renderHistoryTabContent; }, set: function(v){ renderHistoryTabContent = v; }, enumerable: true, configurable: true },
     renderHistoryTabs: { get: function(){ return renderHistoryTabs; }, set: function(v){ renderHistoryTabs = v; }, enumerable: true, configurable: true },
+    renderPOCell: { get: function(){ return renderPOCell; }, set: function(v){ renderPOCell = v; }, enumerable: true, configurable: true },
+    renderPRCell: { get: function(){ return renderPRCell; }, set: function(v){ renderPRCell = v; }, enumerable: true, configurable: true },
     renderTable: { get: function(){ return renderTable; }, set: function(v){ renderTable = v; }, enumerable: true, configurable: true },
+    renderUCSCell: { get: function(){ return renderUCSCell; }, set: function(v){ renderUCSCell = v; }, enumerable: true, configurable: true },
+    renderUCSDrillPanel: { get: function(){ return renderUCSDrillPanel; }, set: function(v){ renderUCSDrillPanel = v; }, enumerable: true, configurable: true },
     saveCache: { get: function(){ return saveCache; }, set: function(v){ saveCache = v; }, enumerable: true, configurable: true },
     searchDebounceTimer: { get: function(){ return searchDebounceTimer; }, set: function(v){ searchDebounceTimer = v; }, enumerable: true, configurable: true },
     setSort: { get: function(){ return setSort; }, set: function(v){ setSort = v; }, enumerable: true, configurable: true },
