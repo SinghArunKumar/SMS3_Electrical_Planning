@@ -1827,6 +1827,7 @@ function getPlanningStockList(data) {
   const ucsHeaders = ucsValues[0];
   const ucsCodeCol = getColIndexOrThrow_(ucsHeaders, 'UCS_Code', UCS_SHEET);
   const ucsShortCol = getColIndexOrThrow_(ucsHeaders, 'Short_Text', UCS_SHEET);
+  const ucsLongCol = getColIndexOrThrow_(ucsHeaders, 'Long_Text', UCS_SHEET);
   const ucsUnitCol = getColIndexOrThrow_(ucsHeaders, 'Unit', UCS_SHEET);
   const map = computePlanningStockMap_();
   const items = [];
@@ -1834,7 +1835,7 @@ function getPlanningStockList(data) {
     const code = String(ucsValues[i][ucsCodeCol]).trim();
     if (!code) continue;
     const entry = map[code] || { received: 0, released: 0, balance: 0 };
-    items.push({ ucsCode: code, itemDescription: ucsValues[i][ucsShortCol], unit: ucsValues[i][ucsUnitCol], received: entry.received, released: entry.released, balance: entry.balance });
+    items.push({ ucsCode: code, itemDescription: ucsValues[i][ucsShortCol], longText: ucsValues[i][ucsLongCol], unit: ucsValues[i][ucsUnitCol], received: entry.received, released: entry.released, balance: entry.balance });
   }
   return jsonResponse({ success: true, items: items });
 }
@@ -2389,6 +2390,28 @@ function refreshAreaStockEndpoint(data) {
   }
 }
 
+/**
+ * UCS_Code -> Long_Text lookup, used to enrich list endpoints (Area Stock,
+ * Planning Stock) whose own source sheets (S_201 / PLNG_ISSUE_SHEET /
+ * LOCAL_ISSUE_SHEET / UCS_MasterList itself) don't all carry Long_Text, so
+ * the client can search it the same way search-ucs.html already does.
+ */
+function getUCSLongTextMap_() {
+  const ucsSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(UCS_SHEET);
+  const ucsValues = ucsSheet.getDataRange().getValues();
+  const map = {};
+  if (ucsValues.length < 1) return map;
+  const ucsHeaders = ucsValues[0];
+  const codeCol = getColIndexOrThrow_(ucsHeaders, 'UCS_Code', UCS_SHEET);
+  const longCol = getColIndexOrThrow_(ucsHeaders, 'Long_Text', UCS_SHEET);
+  for (let i = 1; i < ucsValues.length; i++) {
+    const code = String(ucsValues[i][codeCol]).trim();
+    if (!code) continue;
+    map[code] = ucsValues[i][longCol];
+  }
+  return map;
+}
+
 function getAreaStockList(data) {
   const check = requireAnyUser(data);
   if (!check.ok) return check.response;
@@ -2408,7 +2431,9 @@ function getAreaStockList(data) {
   const requestedArea = String(data.area || '').trim();
   if (!requestedArea) return jsonResponse({ success: true, availableAreas: availableAreas, area: '', items: [] });
   if (availableAreas.indexOf(requestedArea) === -1) return jsonResponse({ success: false, message: 'You are not authorized to view ' + requestedArea + "'s stock." });
-  const items = computeAreaStockMap_().filter(function (r) { return r.area === requestedArea; });
+  const longTextMap = getUCSLongTextMap_();
+  const items = computeAreaStockMap_().filter(function (r) { return r.area === requestedArea; })
+    .map(function (r) { return Object.assign({}, r, { longText: longTextMap[r.ucsCode] || '' }); });
   return jsonResponse({ success: true, availableAreas: availableAreas, area: requestedArea, items: items });
 }
 
