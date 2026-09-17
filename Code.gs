@@ -108,6 +108,8 @@ function doPost(e) {
     if (action === 'getPlanningStockList') { return getPlanningStockList(data); }
     if (action === 'refreshPlanningStock') { return refreshPlanningStockEndpoint(data); }
     if (action === 'getUCSCodeHistory') { return getUCSCodeHistory(data); }
+    if (action === 'getPRItems') { return getPRItems(data); }
+    if (action === 'getPOItems') { return getPOItems(data); }
     if (action === 'recordLocalIssue') { return recordLocalIssue(data); }
     if (action === 'getMyLocalIssues') { return getMyLocalIssues(data); }
     if (action === 'getAreaStockList') { return getAreaStockList(data); }
@@ -1902,6 +1904,114 @@ function getPoPrRowsForUcsCode_(ucsCode, fromDate, toDate) {
   rows.sort(function (a, b) { return b.poDateSort_ - a.poDateSort_; });
   rows.forEach(function (r) { delete r.poDateSort_; });
   return rows;
+}
+
+/**
+ * UCS_Code -> Short_Text lookup (this project's own UCS_MasterList, not the
+ * external PO/PR sheet). Used only to label PR/PO drill-down rows with a
+ * human-readable description -- the actual short/long text detail popup on
+ * the client is served from data it already has in memory (Planning Stock
+ * loads every UCS Code's full text up front), not from this endpoint.
+ */
+function getUCSShortTextMap_() {
+  const ucsSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(UCS_SHEET);
+  const ucsValues = ucsSheet.getDataRange().getValues();
+  const map = {};
+  if (ucsValues.length < 1) return map;
+  const h = ucsValues[0];
+  const codeCol = getColIndexOrThrow_(h, 'UCS_Code', UCS_SHEET);
+  const shortCol = getColIndexOrThrow_(h, 'Short_Text', UCS_SHEET);
+  for (let i = 1; i < ucsValues.length; i++) {
+    const code = String(ucsValues[i][codeCol]).trim();
+    if (code) map[code] = ucsValues[i][shortCol];
+  }
+  return map;
+}
+
+/**
+ * Generic reader for the external PO/PR "Material List" sheet (see
+ * getPoPrRowsForUcsCode_ above -- same sheet, same required columns, same
+ * fail-soft-on-missing-tab / throw-on-missing-columns contract), but
+ * filtered by an arbitrary column instead of Mat Code. Powers the PR/PO
+ * drill-down panels: "click a PR No., see every item and PO under it" and
+ * vice versa. No date-range filtering here -- these panels show a PR/PO's
+ * full paper trail, not a time-windowed view.
+ */
+function getPoPrRowsByField_(filterColumnName, filterValue) {
+  const extSpreadsheet = SpreadsheetApp.openById(PO_PR_SHEET_ID);
+  const extSheet = extSpreadsheet.getSheetByName(PO_PR_TAB_NAME);
+  if (!extSheet) return [];
+  const values = extSheet.getDataRange().getValues();
+  if (values.length < 2) return [];
+  const h = values[0];
+  const col = {};
+  h.forEach(function (hd, idx) { col[String(hd).trim()] = idx; });
+  const required = ['Mat Code', 'PR No.', 'PO No.', 'PO Dt', 'Qty', '105_Dt', 'V Code', 'V Name'];
+  required.forEach(function (c) {
+    if (!(c in col)) throw new Error('PO&PR sheet is missing expected column: "' + c + '"');
+  });
+  const filterCol = col[filterColumnName];
+  const target = String(filterValue).trim();
+  const rows = [];
+  for (let i = 1; i < values.length; i++) {
+    const r = values[i];
+    if (String(r[filterCol]).trim() !== target) continue;
+    const poDateRaw = toMidnight(r[col['PO Dt']]);
+    rows.push({
+      ucsCode: String(r[col['Mat Code']]).trim(),
+      prNo: r[col['PR No.']],
+      poNo: r[col['PO No.']],
+      poDate: formatDateOut(r[col['PO Dt']]),
+      poDateSort_: poDateRaw ? poDateRaw.getTime() : -Infinity, // sort key only, stripped before returning
+      qty: Number(r[col['Qty']]) || 0,
+      receiptDate: formatDateOut(r[col['105_Dt']]),
+      vendorCode: r[col['V Code']],
+      vendorName: r[col['V Name']]
+    });
+  }
+  rows.sort(function (a, b) { return b.poDateSort_ - a.poDateSort_; }); // latest PO first
+  rows.forEach(function (r) { delete r.poDateSort_; });
+  return rows;
+}
+
+/**
+ * Planning-staff-only (same tier as the PO&PR tab itself). All items and
+ * their POs under a single PR No. -- one PR can carry several materials,
+ * and each material line can be split across more than one PO, so this is
+ * intentionally raw rows, not aggregated per material.
+ */
+function getPRItems(data) {
+  const check = requirePlanningAreaStaff(data);
+  if (!check.ok) return check.response;
+  const prNo = String(data.prNo || '').trim();
+  if (!prNo) return jsonResponse({ success: false, message: 'PR No. is required.' });
+  try {
+    const rows = getPoPrRowsByField_('PR No.', prNo);
+    const shortTextMap = getUCSShortTextMap_();
+    rows.forEach(function (r) { r.itemDescription = shortTextMap[r.ucsCode] || ''; });
+    return jsonResponse({ success: true, prNo: prNo, rows: rows });
+  } catch (e) {
+    return jsonResponse({ success: false, message: 'Could not load PR details: ' + e.message });
+  }
+}
+
+/**
+ * Planning-staff-only. All items under a single PO No., with the PR each
+ * line was raised against.
+ */
+function getPOItems(data) {
+  const check = requirePlanningAreaStaff(data);
+  if (!check.ok) return check.response;
+  const poNo = String(data.poNo || '').trim();
+  if (!poNo) return jsonResponse({ success: false, message: 'PO No. is required.' });
+  try {
+    const rows = getPoPrRowsByField_('PO No.', poNo);
+    const shortTextMap = getUCSShortTextMap_();
+    rows.forEach(function (r) { r.itemDescription = shortTextMap[r.ucsCode] || ''; });
+    return jsonResponse({ success: true, poNo: poNo, rows: rows });
+  } catch (e) {
+    return jsonResponse({ success: false, message: 'Could not load PO details: ' + e.message });
+  }
 }
 
 function getUCSCodeHistory(data) {
