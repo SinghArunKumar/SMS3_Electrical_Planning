@@ -504,7 +504,7 @@
     let rows = allItems.filter(function (m) {
       if (zeroOnly && Number(m.balance) > 0) return false;
       if (!tokens.length) return true;
-      const haystack = (m.ucsCode + ' ' + m.itemDescription).toLowerCase();
+      const haystack = (m.ucsCode + ' ' + m.itemDescription + ' ' + (m.longText || '')).toLowerCase();
       return tokens.every(function (t) { return haystack.indexOf(t) !== -1; });
     });
 

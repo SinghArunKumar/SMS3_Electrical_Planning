@@ -490,7 +490,7 @@
 
     let filtered = allItems.filter(function (it) {
       if (tokens.length === 0) return true;
-      const haystack = (it.ucsCode + ' ' + it.itemDescription).toLowerCase();
+      const haystack = (it.ucsCode + ' ' + it.itemDescription + ' ' + (it.longText || '')).toLowerCase();
       return tokens.every(function (t) { return haystack.indexOf(t) !== -1; });
     });
 
