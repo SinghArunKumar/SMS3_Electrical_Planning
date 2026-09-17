@@ -41,6 +41,11 @@
   .badge.s201pending { background: #fce8e6; color: #c5221f; }
   .badge.s201na { background: #f1f3f4; color: #888; }
   #emptyState { padding: 24px; text-align: center; color: #666; font-size: 14px; display:none; }
+  tr.deletedRow { color: #999; background: #fafafa; }
+  tr.deletedRow td { text-decoration: line-through; }
+  tr.deletedRow td.noStrike { text-decoration: none; }
+  .badge.deleted { background: #f1f3f4; color: #666; }
+  button.restoreBtn { background: #5f6368; padding: 3px 10px; font-size: 12px; text-decoration: none; }
 
   /* ---- Pagination ---- */
   #paginationBar { display:flex; align-items:center; justify-content:space-between; margin-top: 12px; font-size: 13px; color:#444; }
@@ -139,6 +144,13 @@
     <div>
       <button type="button" onclick="Page.loadPage(Page.currentPage)">Refresh</button>
     </div>
+    <!-- Approver-only -- shown/hidden entirely via JS at login, matching
+         deleteStoChoiceBtn's approach, since a deleted STO means nothing
+         to anyone who can't also restore or investigate one. -->
+    <div id="showDeletedWrap" style="display:none; flex-direction:row; align-items:center; gap:6px;">
+      <input type="checkbox" id="showDeletedCheckbox" onchange="Page.onFilterChange()" style="margin:0;">
+      <label for="showDeletedCheckbox" style="margin:0; font-weight:normal;">Show deleted</label>
+    </div>
   </div>
   <div id="dateRangeError" class="fieldError"></div>
 
@@ -203,6 +215,11 @@
       <div class="actionBtnRow" style="margin-top:0;">
         <button type="button" id="editStoChoiceBtn" onclick="Page.chooseEditSto()">Edit Qty / UCS Code</button>
         <button type="button" onclick="Page.chooseReceive()">Enter Receiving Details</button>
+        <!-- Approver-only, hidden entirely (not just disabled) for everyone
+             else -- deleting an STO isn't a "correction" like the two
+             buttons above, it's a step up in consequence, so it doesn't
+             belong in front of ordinary Planning staff at all. -->
+        <button type="button" id="deleteStoChoiceBtn" class="secondary" style="display:none; background:#c5221f;" onclick="Page.chooseDeleteSto()">Delete this STO</button>
       </div>
       <!-- Shown only when a Z04 already exists for this STO -- Qty/UCS Code
            editing locks the moment a Z04 is entered (isSTOLocked_ in
@@ -211,6 +228,25 @@
            person had filled the whole edit form and hit Save. -->
       <div id="editStoLockedHint" style="display:none;">This STO already has a Z04 entry, so Qty/UCS Code can no longer be edited &mdash; only receiving details can still be entered.</div>
     </div>
+
+    <!-- Delete this STO (Approver only, only reachable via the choice above) -->
+    <div id="deleteStoForm" style="display:none;">
+      <div class="adminWarning" style="background:#fce8e6; color:#c5221f;">
+        This does not free up the STO number for reuse &mdash; SAP-side
+        classification changes or corrections mean this number can never be
+        re-raised in this tool, even after deletion. It will disappear from
+        every dashboard and report, but stays recorded (and restorable) in
+        the audit trail.
+      </div>
+      <label for="deleteReason">Reason for deletion (required)</label>
+      <textarea id="deleteReason" rows="3" style="width:100%;" maxlength="500" oninput="Page.validateDeleteFields()"></textarea>
+      <div id="deleteReasonError" class="fieldError"></div>
+      <div class="actionBtnRow">
+        <button type="button" id="reviewDeleteBtn" disabled onclick="Page.reviewAction('delete')">Review &amp; Confirm</button>
+        <button type="button" class="secondary" onclick="Page.backToStatusChoice()">Back</button>
+      </div>
+    </div>
+
 
     <!-- Edit Qty / UCS Code (only reachable via the choice above) -->
     <div id="editStoForm" style="display:none;">
@@ -336,10 +372,10 @@
   let selectedIndex = null;   // index into currentRows of the selected row
   // Which single panel is showing for the selected row. null means "just
   // selected, nothing chosen yet" (prompt only). One of:
-  //   null | 'statusChoice' | 'editSto' | 'receive' | 'correct' | 'locked'
+  //   null | 'statusChoice' | 'editSto' | 'receive' | 'deleteSto' | 'correct' | 'locked'
   //   | 'z04Panel' | 's201Panel'
   let activeSection = null;
-  let pendingSaveAction = null; // 'receive' | 'correct', set right before confirm step
+  let pendingSaveAction = null; // 'receive' | 'correct' | 'delete', set right before confirm step
   let listRequestInFlight = null; // Symbol guard against out-of-order responses
 
   function showMessage(text, type) {
@@ -421,6 +457,12 @@
       currentUser = { email, password };
       isAdminUser = !!data.isAdmin;
 
+      // Both are pure UI convenience -- deleteSTOEntry/getSTOList's
+      // includeDeleted are re-gated server-side regardless of what this
+      // client shows or sends.
+      document.getElementById('deleteStoChoiceBtn').style.display = isAdminUser ? 'inline-block' : 'none';
+      document.getElementById('showDeletedWrap').style.display = isAdminUser ? 'flex' : 'none';
+
       document.getElementById('loginSection').style.display = 'none';
       document.getElementById('dashboardSection').style.display = 'block';
 
@@ -481,6 +523,7 @@
     document.getElementById('statusFilter').value = 'all';
     document.getElementById('z04Filter').value = 'all';
     document.getElementById('status201Filter').value = 'all';
+    document.getElementById('showDeletedCheckbox').checked = false;
     document.getElementById('dateRangeError').style.display = 'none';
     loadPage(1);
   }
@@ -516,6 +559,7 @@
     if (status && status !== 'all') payload.status = status;
     if (z04Status && z04Status !== 'all') payload.z04Status = z04Status;
     if (status201 && status201 !== 'all') payload.status201 = status201;
+    if (isAdminUser && document.getElementById('showDeletedCheckbox').checked) payload.includeDeleted = true;
 
     try {
       const data = await callApi(payload);
@@ -560,6 +604,7 @@
     currentRows.forEach(function (row, idx) {
       const tr = document.createElement('tr');
       tr.id = 'row-' + idx;
+      if (row.isDeleted) tr.classList.add('deletedRow');
 
       const selectTd = document.createElement('td');
       const radio = document.createElement('input');
@@ -580,6 +625,37 @@
         td.textContent = val;
         tr.appendChild(td);
       });
+
+      // ---- Deleted row: no Status/Z04/201 actions -- a single "Deleted"
+      // badge (with who/when/why in its tooltip) plus a Restore button,
+      // both in a cell that ISN'T struck through, so they stay legible.
+      // Z04/201 cells are just left blank; a deleted STO can never have
+      // entries there (deletion requires isSTOLocked_() to be false), so
+      // there is nothing those two cells could ever need to show. ----
+      if (row.isDeleted) {
+        const statusTd = document.createElement('td');
+        statusTd.style.textAlign = 'center';
+        statusTd.classList.add('noStrike');
+        const badge = document.createElement('span');
+        badge.className = 'badge deleted';
+        badge.textContent = 'Deleted';
+        badge.title = 'Deleted by ' + (row.deletedBy || '?') + ' on ' + (row.deletedDate || '?') + '\nReason: ' + (row.deletedReason || '');
+        statusTd.appendChild(badge);
+        if (isAdminUser) {
+          const restoreBtn = document.createElement('button');
+          restoreBtn.type = 'button';
+          restoreBtn.className = 'restoreBtn';
+          restoreBtn.textContent = 'Restore';
+          restoreBtn.style.marginLeft = '6px';
+          restoreBtn.onclick = function (e) { e.stopPropagation(); restoreSto(row.stoNo); };
+          statusTd.appendChild(restoreBtn);
+        }
+        tr.appendChild(statusTd);
+        tr.appendChild(document.createElement('td'));
+        tr.appendChild(document.createElement('td'));
+        tbody.appendChild(tr);
+        return;
+      }
 
       // ---- Status badge: click opens the relevant single action ----
       const statusTd = document.createElement('td');
@@ -713,6 +789,7 @@
     document.getElementById('statusChoiceBox').style.display = 'none';
     document.getElementById('editStoForm').style.display = 'none';
     document.getElementById('receiveForm').style.display = 'none';
+    document.getElementById('deleteStoForm').style.display = 'none';
     document.getElementById('correctForm').style.display = 'none';
     document.getElementById('lockedReadOnly').style.display = 'none';
     document.getElementById('z04Section').innerHTML = '';
@@ -738,6 +815,21 @@
       // option just quietly disappearing.
       document.getElementById('editStoChoiceBtn').disabled = !!row.z04Done;
       document.getElementById('editStoLockedHint').style.display = row.z04Done ? 'block' : 'none';
+      // Delete uses the same precondition as Edit (isSTOLocked_ in
+      // Code.gs), deliberately stricter than "no Z04" alone -- see
+      // deleteSTOEntry()'s own comment for why. isAdminUser visibility was
+      // already set once at login; this only toggles the per-row disabled
+      // state on top of that.
+      document.getElementById('deleteStoChoiceBtn').disabled = !!row.z04Done;
+      return;
+    }
+
+    if (activeSection === 'deleteSto') {
+      document.getElementById('actionPanelTitle').textContent = 'Delete STO';
+      document.getElementById('deleteStoForm').style.display = 'block';
+      document.getElementById('deleteReason').value = '';
+      document.getElementById('deleteReasonError').style.display = 'none';
+      validateDeleteFields();
       return;
     }
 
@@ -815,6 +907,42 @@
   function chooseReceive() {
     activeSection = 'receive';
     openActionPanel(currentRows[selectedIndex]);
+  }
+  function chooseDeleteSto() {
+    // Same guard reasoning as chooseEditSto() -- deleteSTOEntry() would
+    // reject server-side regardless, but this avoids opening a dead-end form.
+    const row = currentRows[selectedIndex];
+    if (!isAdminUser || (row && row.z04Done)) return;
+    activeSection = 'deleteSto';
+    openActionPanel(currentRows[selectedIndex]);
+  }
+  function validateDeleteFields() {
+    const reason = document.getElementById('deleteReason').value.trim();
+    const errEl = document.getElementById('deleteReasonError');
+    const ok = reason.length > 0 && reason.length <= 500;
+    if (reason.length > 500) { errEl.textContent = 'Max 500 characters.'; errEl.style.display = 'block'; }
+    else errEl.style.display = 'none';
+    document.getElementById('reviewDeleteBtn').disabled = !ok;
+    return ok;
+  }
+  async function restoreSto(stoNo) {
+    if (!confirm('Restore STO ' + stoNo + '? It will reappear on the dashboard and its number will remain reserved either way.')) return;
+    try {
+      const data = await callApi({
+        action: 'restoreSTOEntry',
+        email: currentUser.email,
+        password: currentUser.password,
+        stoNo: stoNo
+      });
+      if (data.success) {
+        showMessage(data.message, 'success');
+        loadPage(currentPage);
+      } else {
+        showMessage(data.message || 'Could not restore this STO.', 'error');
+      }
+    } catch (err) {
+      showMessage('Could not reach the server. Check your connection or the Apps Script URL.', 'error');
+    }
   }
 
   // ====== EDIT STO DETAILS (Qty / UCS Code, pre-lock only) ======
@@ -1285,6 +1413,22 @@
     if (!row) return;
 
     pendingSaveAction = kind;
+
+    if (kind === 'delete') {
+      if (!validateDeleteFields()) return;
+      const reason = document.getElementById('deleteReason').value.trim();
+      const summaryHtml =
+        '<div><b>STO No:</b> ' + row.stoNo + '</div>' +
+        '<div><b>UCS Code:</b> ' + row.ucsCode + ' (' + row.itemDescription + ')</div>' +
+        '<div><b>Qty:</b> ' + row.qty + ' ' + row.unit + '</div>' +
+        '<div><b>Reason:</b> ' + reason + '</div>' +
+        '<div style="margin-top:8px; color:#c5221f;">This STO will disappear from every dashboard and report. Its number can never be reused, even after deletion, and this action is logged in the audit trail.</div>';
+      document.getElementById('confirmSummary').innerHTML = summaryHtml;
+      document.getElementById('confirmPanel').style.display = 'block';
+      document.getElementById('confirmPanel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      return;
+    }
+
     let qty, date, po;
     if (kind === 'receive') {
       if (!validateReceiveFields()) return;
@@ -1328,7 +1472,15 @@
 
     try {
       let payload;
-      if (pendingSaveAction === 'receive') {
+      if (pendingSaveAction === 'delete') {
+        payload = {
+          action: 'deleteSTOEntry',
+          email: currentUser.email,
+          password: currentUser.password,
+          stoNo: row.stoNo,
+          reason: document.getElementById('deleteReason').value.trim()
+        };
+      } else if (pendingSaveAction === 'receive') {
         payload = {
           action: 'receiveSTOMaterial',
           email: currentUser.email,
@@ -1376,6 +1528,7 @@
     callApi: { get: function(){ return callApi; }, set: function(v){ callApi = v; }, enumerable: true, configurable: true },
     cancelConfirm: { get: function(){ return cancelConfirm; }, set: function(v){ cancelConfirm = v; }, enumerable: true, configurable: true },
     chooseEditSto: { get: function(){ return chooseEditSto; }, set: function(v){ chooseEditSto = v; }, enumerable: true, configurable: true },
+    chooseDeleteSto: { get: function(){ return chooseDeleteSto; }, set: function(v){ chooseDeleteSto = v; }, enumerable: true, configurable: true },
     chooseReceive: { get: function(){ return chooseReceive; }, set: function(v){ chooseReceive = v; }, enumerable: true, configurable: true },
     clearFilters: { get: function(){ return clearFilters; }, set: function(v){ clearFilters = v; }, enumerable: true, configurable: true },
     clearMessage: { get: function(){ return clearMessage; }, set: function(v){ clearMessage = v; }, enumerable: true, configurable: true },
@@ -1402,6 +1555,7 @@
     renderS201Section: { get: function(){ return renderS201Section; }, set: function(v){ renderS201Section = v; }, enumerable: true, configurable: true },
     renderTable: { get: function(){ return renderTable; }, set: function(v){ renderTable = v; }, enumerable: true, configurable: true },
     renderZ04Section: { get: function(){ return renderZ04Section; }, set: function(v){ renderZ04Section = v; }, enumerable: true, configurable: true },
+    restoreSto: { get: function(){ return restoreSto; }, set: function(v){ restoreSto = v; }, enumerable: true, configurable: true },
     reviewAction: { get: function(){ return reviewAction; }, set: function(v){ reviewAction = v; }, enumerable: true, configurable: true },
     s201RequestInFlight: { get: function(){ return s201RequestInFlight; }, set: function(v){ s201RequestInFlight = v; }, enumerable: true, configurable: true },
     sanitizeEditUcsDigits: { get: function(){ return sanitizeEditUcsDigits; }, set: function(v){ sanitizeEditUcsDigits = v; }, enumerable: true, configurable: true },
@@ -1417,6 +1571,7 @@
     updatePaginationBar: { get: function(){ return updatePaginationBar; }, set: function(v){ updatePaginationBar = v; }, enumerable: true, configurable: true },
     validateCorrectFields: { get: function(){ return validateCorrectFields; }, set: function(v){ validateCorrectFields = v; }, enumerable: true, configurable: true },
     validateDateRange: { get: function(){ return validateDateRange; }, set: function(v){ validateDateRange = v; }, enumerable: true, configurable: true },
+    validateDeleteFields: { get: function(){ return validateDeleteFields; }, set: function(v){ validateDeleteFields = v; }, enumerable: true, configurable: true },
     validateEditQtyField: { get: function(){ return validateEditQtyField; }, set: function(v){ validateEditQtyField = v; }, enumerable: true, configurable: true },
     validateEditStoForm: { get: function(){ return validateEditStoForm; }, set: function(v){ validateEditStoForm = v; }, enumerable: true, configurable: true },
     validateEditUcsFormat: { get: function(){ return validateEditUcsFormat; }, set: function(v){ validateEditUcsFormat = v; }, enumerable: true, configurable: true },

@@ -337,7 +337,9 @@
 
       const dupEl = document.getElementById('stoNoDuplicateError');
       if (data.exists) {
-        dupEl.textContent = 'STO No ' + stoNo + ' already exists. STO numbers must be unique.';
+        dupEl.textContent = data.deleted
+          ? 'STO No ' + stoNo + ' already exists \u2014 it was deleted on ' + data.deletedDate + ' ("' + data.deletedReason + '"). STO numbers can never be reused.'
+          : 'STO No ' + stoNo + ' already exists. STO numbers must be unique.';
         dupEl.style.display = 'block';
         stoNoConfirmedUnique = false;
       } else {
