@@ -233,6 +233,13 @@
   }
   #navMenu a.navItem { display: flex !important; width: auto !important; }
 
+  /* Tap-outside-to-close backdrop for the mobile off-canvas sidebar.
+     Hidden by default (and irrelevant above 860px, where the sidebar is
+     never off-canvas); only shown+clickable once the sidebar is .open
+     on a narrow screen. Clicking it calls closeSidebarOnMobile(), NOT
+     loadPage() -- so dismissing the menu never triggers a page reload. */
+  #sidebarBackdrop { display: none; }
+
   @media (max-width: 860px) {
     #appShell { position: relative; }
     #sidebar {
@@ -242,6 +249,10 @@
     #sidebar.open { margin-left: 0; box-shadow: 4px 0 16px rgba(0,0,0,0.25); }
     #sidebar.collapsed { width: 250px !important; } /* on mobile, "collapsed" has no meaning -- off-canvas open/close only */
     #pageContainer { padding: 16px; }
+    #sidebarBackdrop.open {
+      display: block; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.4); z-index: 19;
+    }
   }
 </style>
 </head>
@@ -276,6 +287,7 @@
     </div>
     <div id="navMenu"></div>
   </div>
+  <div id="sidebarBackdrop" onclick="closeSidebarOnMobile()"></div>
 
   <div id="mainArea">
     <div id="topbar">
