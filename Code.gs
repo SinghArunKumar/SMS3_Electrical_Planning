@@ -63,6 +63,39 @@ const RETURN_DETAILS_SHEET = 'Return_Details';
 const PO_PR_SHEET_ID = '138vT2HDiLc-GcUHMelYuni8RoYAFZ2HfvVcVB6Qq9xI';
 const PO_PR_TAB_NAME = 'Material List';
 
+// ---- PR/PO Dashboard additions (same external spreadsheet, second tab) ----
+// Tab name is spelled exactly "PR LIst" (capital I) in the actual sheet --
+// getSheetByName() is exact-match, so this typo must be preserved here.
+const PR_LIST_TAB_NAME = 'PR LIst';
+// PR List's real header row is row 2 (index 1) -- row 1 is a banner row
+// holding just a date, not headers. Data starts row 3 (index 2).
+const PR_LIST_HEADER_ROW_INDEX = 1;
+// PR List column AC (index 28) carries the literal text "Deleted" for a
+// voided PR, with no header of its own above it.
+const PR_LIST_DELETED_COL_INDEX = 28;
+// Material List has three column-name collisions ("Qty" appears at index
+// 7 and 19; "PO Qty" appears at index 29 and 42) -- header-name lookup
+// would silently grab the FIRST match every time, which is wrong for two
+// of these. Read by fixed index instead, confirmed against the real sheet.
+const ML_COL = {
+  PR_NO: 1,
+  MAT_CODE: 4,
+  DESCRIPTION: 5,
+  LINE_QTY: 7,        // PR-side ordered qty (first "Qty" column)
+  PO_NO: 16,
+  PO_DT: 17,
+  PO_LINE_QTY: 19,    // PO-side line qty (second "Qty" column) -- confirmed by project owner
+  V_CODE: 26,
+  V_NAME: 27,
+  PO_QTY: 29,         // used for the fully-received comparison -- confirmed by project owner
+  QTY_105: 34,
+  DT_105: 41,
+  PO_DP: 24,          // PO-level delivery period -- same value across every item on one PO
+  ALT_DP: 25,         // per-item alternate delivery period
+  PO_RATE: 20,        // per-unit PO rate -- used with outstanding qty (PO Qty - 105 Qty) to compute PO Value Outstanding
+  PO_VALUE: 21        // per-item full PO value -- no longer used for the outstanding calc, kept in case it's needed elsewhere
+};
+
 // ====== ENTRY POINTS ======
 
 function doGet(e) {
@@ -110,6 +143,7 @@ function doPost(e) {
     if (action === 'getUCSCodeHistory') { return getUCSCodeHistory(data); }
     if (action === 'getPRItems') { return getPRItems(data); }
     if (action === 'getPOItems') { return getPOItems(data); }
+    if (action === 'getPRPODashboardData') { return getPRPODashboardData(data); }
     if (action === 'recordLocalIssue') { return recordLocalIssue(data); }
     if (action === 'getMyLocalIssues') { return getMyLocalIssues(data); }
     if (action === 'getAreaStockList') { return getAreaStockList(data); }
@@ -2011,6 +2045,277 @@ function getPOItems(data) {
     return jsonResponse({ success: true, poNo: poNo, rows: rows });
   } catch (e) {
     return jsonResponse({ success: false, message: 'Could not load PO details: ' + e.message });
+  }
+}
+
+// Ordering used for the PR/PO Dashboard's worst-case rollup and funnel bar.
+// "Fully Received" never actually appears in that endpoint's output (those
+// items are archived before this array is ever consulted) -- kept here only
+// so stageRank_() has a defined, consistent position for it.
+const STAGE_ORDER_ = ['Pending Release', 'Released - Pending Enquiry', 'Under Enquiry', 'Pending PO Award', 'Pending Delivery', 'Partial', 'Fully Received'];
+function stageRank_(s) { const idx = STAGE_ORDER_.indexOf(s); return idx === -1 ? STAGE_ORDER_.length : idx; }
+
+/**
+ * PR/PO Dashboard -- read-only, Planning-staff-only (excluding Store
+ * Incharge, per project brief), bird's-eye view of every open PR/PO from
+ * raising through receipt. Returns one entry per PR still "open" (see
+ * archive rule below) plus a funnel count by stage.
+ *
+ * STAGE MODEL (confirmed across this project's design conversation):
+ * - Stages 1-4 (Pending Release -> Released -> Under Enquiry -> Pending PO
+ *   Award) are uniform across every item in a PR -- driven entirely
+ *   by PR List's own PR-level dates, never by Material List.
+ * - Once an item gets a PO No. in Material List, tracking moves to the
+ *   PO level: each PO is judged independently by whether every one of
+ *   its line items has 105 Qty >= PO Qty (ML_COL.QTY_105 / ML_COL.PO_QTY).
+ * - A PO where every line item is fully received is ARCHIVED: dropped
+ *   from the response entirely, permanently, with no toggle to reveal it
+ *   here (confirmed decision -- downstream STO/Z04 tracking belongs to
+ *   the existing STO Dashboard, not this one).
+ * - A PR whose every item is either archived-fully-received leaves
+ *   nothing open, so the whole PR is dropped from the response too.
+ * - A PR marked "Deleted" in PR List column AC is excluded outright
+ *   (confirmed: a PO can never survive under a deleted PR).
+ *
+ * Fails soft on a missing tab (returns success:false with a clear
+ * message) rather than partial/garbage data, since this dashboard has
+ * no other source to fall back on the way getUCSCodeHistory() does.
+ */
+function getPRPODashboardData(data) {
+  const check = requireSTOAccess(data); // Planning, excluding Store Incharge -- matches the stated audience exactly
+  if (!check.ok) return check.response;
+
+  try {
+    const extSpreadsheet = SpreadsheetApp.openById(PO_PR_SHEET_ID);
+
+    // ---- PR List ----
+    const prSheet = extSpreadsheet.getSheetByName(PR_LIST_TAB_NAME);
+    if (!prSheet) return jsonResponse({ success: false, message: 'Tab "' + PR_LIST_TAB_NAME + '" not found in the PO/PR sheet.' });
+    const prValues = prSheet.getDataRange().getValues();
+    if (prValues.length <= PR_LIST_HEADER_ROW_INDEX + 1) return jsonResponse({ success: true, prs: [], funnel: {}, stageOrder: STAGE_ORDER_ });
+
+    const prHeaders = prValues[PR_LIST_HEADER_ROW_INDEX];
+    const prCol = {};
+    prHeaders.forEach(function (h, idx) { prCol[String(h).trim()] = idx; });
+    const prRequired = ['PR No.', 'PR Text', 'PR Cr Dt', 'Fund Centre', 'Section', 'Cr name', 'PR Tot Value', 'Pur Officer', 'Final rel.', 'Enq No./CFN', 'QSDt', 'QO Dt', 'TechSuit Dt'];
+    for (let k = 0; k < prRequired.length; k++) {
+      if (!(prRequired[k] in prCol)) {
+        return jsonResponse({ success: false, message: 'PR LIst sheet is missing expected column: "' + prRequired[k] + '". Check row ' + (PR_LIST_HEADER_ROW_INDEX + 1) + ' for exact spelling.' });
+      }
+    }
+
+    // A dummy PR (raised only to mask a section's real budget allocation) is
+    // marked by a non-black font on its "PR No." cell -- confirmed only
+    // black is used for real PRs, so anything else means "skip this row."
+    // getFontColors() reads the WHOLE column in one batch call rather than
+    // one getFontColor() per row, which would be one extra Apps Script API
+    // call per PR (1,200+ of them) instead of a single call total.
+    const prNoSheetCol = prCol['PR No.'] + 1; // getRange() is 1-indexed; prCol is 0-indexed against the same getDataRange() array as prValues
+    const prNoFontColors = prSheet.getRange(PR_LIST_HEADER_ROW_INDEX + 2, prNoSheetCol, prValues.length - PR_LIST_HEADER_ROW_INDEX - 1, 1).getFontColors();
+    function isBlackFont_(color) {
+      // Missing/blank reads as black (Sheets' own default), not excluded --
+      // this only excludes a color that was deliberately, explicitly set.
+      if (!color) return true;
+      return String(color).toLowerCase() === '#000000';
+    }
+
+    // ---- Material List ----
+    const mlSheet = extSpreadsheet.getSheetByName(PO_PR_TAB_NAME);
+    if (!mlSheet) return jsonResponse({ success: false, message: 'Tab "' + PO_PR_TAB_NAME + '" not found in the PO/PR sheet.' });
+    const mlValues = mlSheet.getDataRange().getValues();
+
+    // Same "only black font is a real row" rule as PR List (see prNoFontColors
+    // above), applied here too -- Material List can carry the same dummy/
+    // masked rows. WORKING ASSUMPTION: checked against Material List's own
+    // "PR No." column (ML_COL.PR_NO, sheet column B) since that's the closest
+    // analog to what PR List uses; change this column if it turns out the
+    // actual gray marking lives elsewhere in Material List.
+    const mlPrNoSheetCol = ML_COL.PR_NO + 1;
+    const mlFontColors = mlValues.length > 1
+      ? mlSheet.getRange(2, mlPrNoSheetCol, mlValues.length - 1, 1).getFontColors()
+      : [];
+
+    const itemsByPR = {};
+    for (let i = 1; i < mlValues.length; i++) {
+      const r = mlValues[i];
+      const prNo = String(r[ML_COL.PR_NO]).trim();
+      if (!prNo) continue;
+      if (!isBlackFont_(mlFontColors[i - 1][0])) continue; // dummy/masked Material List row -- not real
+      if (!itemsByPR[prNo]) itemsByPR[prNo] = [];
+      itemsByPR[prNo].push(r);
+    }
+
+    // UCS Long/Short Text, keyed by our own UCS_MasterList (== Mat Code
+    // space) -- used to enrich the drill-down with full text on click,
+    // same source getPOItems()/getPRItems() already use for short text.
+    const longTextMap = getUCSLongTextMap_();
+
+    const today = startOfToday();
+
+    // A PR is only "released" once Final rel. holds an actual DATE -- your
+    // team sometimes writes the name of whoever it's currently pending with
+    // into that same cell while awaiting release, and that text must not be
+    // mistaken for a release date. getValues() returns a real Date object
+    // only for genuinely date-formatted cells; any string (a name, a dash,
+    // anything else) fails this check and correctly stays Pending Release.
+    function isRealDate_(val) {
+      return Object.prototype.toString.call(val) === '[object Date]' && !isNaN(val.getTime());
+    }
+
+    function prLevelStage_(row) {
+      const finalRel = row[prCol['Final rel.']];
+      if (!isRealDate_(finalRel)) return 'Pending Release';
+      const enqNo = String(row[prCol['Enq No./CFN']] || '').trim();
+      if (!enqNo || enqNo === '-') return 'Released - Pending Enquiry';
+      const qsDt = toMidnight(row[prCol['QSDt']]);
+      if (!qsDt || today <= qsDt) return 'Under Enquiry';
+      // Past bid-closing with no PO awarded yet is the SAME waiting state
+      // whether it's the whole PR (nobody has a PO) or just this one item
+      // (siblings already got theirs) -- both are "Pending PO Award" now,
+      // per confirmed decision to fold the separate "Tech/Comm Evaluation"
+      // label into this one.
+      return 'Pending PO Award';
+    }
+
+    const funnelCounts = {};
+    STAGE_ORDER_.forEach(function (s) { funnelCounts[s] = 0; });
+
+    const outPRs = [];
+
+    for (let i = PR_LIST_HEADER_ROW_INDEX + 1; i < prValues.length; i++) {
+      const row = prValues[i];
+      const prNo = String(row[prCol['PR No.']]).trim();
+      if (!prNo) continue;
+      if (String(row[PR_LIST_DELETED_COL_INDEX] || '').trim() === 'Deleted') continue; // excluded per confirmed rule
+      const fontColor = prNoFontColors[i - PR_LIST_HEADER_ROW_INDEX - 1][0];
+      if (!isBlackFont_(fontColor)) continue; // dummy PR (non-black font), used only to mask budget -- not real procurement
+
+      const lineItems = itemsByPR[prNo] || [];
+      const preMLStage = prLevelStage_(row); // used whenever an item has no PO yet
+
+      const itemStates = [];      // one stage-name entry per PO-group/pending-item, for the worst-case STAGE rollup only
+      const poGroupsOut = [];     // non-archived POs, for the drill-down panel
+      let pendingPOAwardOut = []; // items still with no PO No. at all
+      let receivedItemCount = 0;  // TRUE item-level count for Progress -- counts each item whose own 105 Qty >= PO Qty, independent of its PO siblings or archiving
+
+      if (lineItems.length === 0) {
+        itemStates.push(preMLStage);
+      } else {
+        const withPO = lineItems.filter(function (r) { return String(r[ML_COL.PO_NO]).trim() !== ''; });
+        const withoutPO = lineItems.filter(function (r) { return String(r[ML_COL.PO_NO]).trim() === ''; });
+
+        withoutPO.forEach(function () { itemStates.push(withPO.length > 0 ? 'Pending PO Award' : preMLStage); });
+        pendingPOAwardOut = withoutPO.map(function (r) {
+          const code = String(r[ML_COL.MAT_CODE]).trim();
+          return { ucsCode: code, description: r[ML_COL.DESCRIPTION], longText: longTextMap[code] || '', qty: r[ML_COL.LINE_QTY] };
+        });
+
+        const byPO = {};
+        withPO.forEach(function (r) {
+          const poNo = String(r[ML_COL.PO_NO]).trim();
+          if (!byPO[poNo]) byPO[poNo] = [];
+          byPO[poNo].push(r);
+        });
+
+        Object.keys(byPO).forEach(function (poNo) {
+          const items = byPO[poNo];
+          const itemIsReceived = items.map(function (r) {
+            const qty105 = Number(r[ML_COL.QTY_105]) || 0;
+            const poQty = Number(r[ML_COL.PO_QTY]) || 0;
+            return poQty > 0 && qty105 >= poQty;
+          });
+          const fullyReceivedCount = itemIsReceived.filter(Boolean).length;
+          receivedItemCount += fullyReceivedCount; // counted whether this PO ends up archived or still open below
+
+          let status;
+          if (fullyReceivedCount === items.length) status = 'Fully Received';
+          else if (fullyReceivedCount > 0) status = 'Partial';
+          else status = 'Pending Delivery';
+
+          if (status === 'Fully Received') return; // ARCHIVE RULE: dropped entirely, no trace kept here
+
+          // PO Value Outstanding = the actual money still tied up in this PO:
+          // for each item, (PO Qty - 105 Qty) x PO Rate -- NOT the item's
+          // full original value. A partially-received item (e.g. 20 of 30
+          // delivered) should only count the remaining 10 units' worth, not
+          // its whole line value, since 20 units' worth has already arrived.
+          let poValueOutstanding = 0;
+          items.forEach(function (r) {
+            const poQty = Number(r[ML_COL.PO_QTY]) || 0;
+            const qty105 = Number(r[ML_COL.QTY_105]) || 0;
+            const outstandingQty = Math.max(poQty - qty105, 0);
+            const rate = Number(r[ML_COL.PO_RATE]) || 0;
+            poValueOutstanding += outstandingQty * rate;
+          });
+
+          itemStates.push(status);
+          poGroupsOut.push({
+            poNo: poNo,
+            poDate: formatDateOut(items[0][ML_COL.PO_DT]),
+            vendorCode: items[0][ML_COL.V_CODE],
+            vendorName: items[0][ML_COL.V_NAME],
+            poDP: formatDateOut(items[0][ML_COL.PO_DP]),
+            poValueOutstanding: poValueOutstanding,
+            status: status,
+            items: items.map(function (r) {
+              const code = String(r[ML_COL.MAT_CODE]).trim();
+              return {
+                ucsCode: code,
+                description: r[ML_COL.DESCRIPTION],
+                longText: longTextMap[code] || '',
+                qty: r[ML_COL.PO_LINE_QTY],
+                poQty: r[ML_COL.PO_QTY],
+                altDP: formatDateOut(r[ML_COL.ALT_DP]),
+                qty105: r[ML_COL.QTY_105],
+                date105: formatDateOut(r[ML_COL.DT_105])
+              };
+            })
+          });
+        });
+      }
+
+      if (itemStates.length === 0) continue; // every item done & archived -- whole PR drops off too
+
+      let overallStage = itemStates[0];
+      itemStates.forEach(function (s) { if (stageRank_(s) < stageRank_(overallStage)) overallStage = s; });
+
+      const totalCount = lineItems.length || 1;
+      const doneCount = lineItems.length === 0 ? 0 : receivedItemCount; // real items received, not PO-groups closed
+
+      // PR-level rollup, for showing alongside PR Value -- null (not 0) when
+      // this PR has no live PO yet at all, so the client can render "-"
+      // rather than a misleading ₹0.00 for a PR that simply hasn't reached
+      // PO stage.
+      const poValueOutstandingTotal = poGroupsOut.length > 0
+        ? poGroupsOut.reduce(function (sum, g) { return sum + g.poValueOutstanding; }, 0)
+        : null;
+
+      funnelCounts[overallStage] = (funnelCounts[overallStage] || 0) + 1;
+
+      outPRs.push({
+        prNo: prNo,
+        prText: row[prCol['PR Text']],
+        prCrDt: formatDateOut(row[prCol['PR Cr Dt']]),
+        fundCentre: row[prCol['Fund Centre']],
+        section: row[prCol['Section']],
+        crName: row[prCol['Cr name']],
+        prTotValue: row[prCol['PR Tot Value']],
+        poValueOutstanding: poValueOutstandingTotal,
+        purOfficer: row[prCol['Pur Officer']],
+        qoDt: formatDateOut(row[prCol['QO Dt']]),
+        techSuitDt: formatDateOut(row[prCol['TechSuit Dt']]),
+        overallStage: overallStage,
+        progress: doneCount + '/' + totalCount,
+        poGroups: poGroupsOut,
+        itemsPendingPOAward: pendingPOAwardOut
+      });
+    }
+
+    outPRs.sort(function (a, b) { return (b.prCrDt || '').localeCompare(a.prCrDt || ''); }); // newest first, oldest last
+
+    return jsonResponse({ success: true, prs: outPRs, funnel: funnelCounts, stageOrder: STAGE_ORDER_ });
+  } catch (e) {
+    return jsonResponse({ success: false, message: 'Could not load PR/PO dashboard: ' + e.message });
   }
 }
 
