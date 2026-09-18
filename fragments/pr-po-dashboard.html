@@ -258,7 +258,7 @@
   // for PRs not yet in Material List, per the confirmed search design).
   function matchesSearch(pr, terms) {
     if (terms.length === 0) return { matched: true, hitItems: {} };
-    const haystacks = [String(pr.prText || '').toLowerCase()];
+    const haystacks = [String(pr.prText || '').toLowerCase(), String(pr.prNo || '').toLowerCase()];
     const hitItems = {};
     function collect(items, keyPrefix) {
       (items || []).forEach(function (it, idx) {
@@ -268,7 +268,10 @@
         if (terms.every(function (t) { return blob.indexOf(t) !== -1; })) hitItems[key] = true;
       });
     }
-    (pr.poGroups || []).forEach(function (g, gi) { collect(g.items, 'po' + gi + '_'); });
+    (pr.poGroups || []).forEach(function (g, gi) {
+      haystacks.push(String(g.poNo || '').toLowerCase());
+      collect(g.items, 'po' + gi + '_');
+    });
     collect(pr.itemsPendingPOAward, 'pend_');
     const combined = haystacks.join(' ');
     const matched = terms.every(function (t) { return combined.indexOf(t) !== -1; });
@@ -332,7 +335,7 @@
       '<td><span class="ucsLink" onclick="event.stopPropagation(); Page.showLongText(\'' + it.ucsCode + '\',\'' + escapeHtml(it.longText || it.description).replace(/'/g, "\\'") + '\')">' + escapeHtml(it.ucsCode) + '</span></td>' +
       '<td>' + escapeHtml(it.description) + '</td>' +
       '<td>' + escapeHtml(it.qty) + '</td>' +
-      (it.poQty !== undefined ? '<td>' + escapeHtml(it.poQty) + '</td><td>' + escapeHtml(it.qty105) + '</td><td>' + escapeHtml(it.date105) + '</td>' : '') +
+      (it.poQty !== undefined ? '<td>' + escapeHtml(it.altDP) + '</td><td>' + escapeHtml(it.poQty) + '</td><td>' + escapeHtml(it.qty105) + '</td><td>' + escapeHtml(it.date105) + '</td>' : '') +
     '</tr>';
   }
 
@@ -342,10 +345,10 @@
       pr.poGroups.forEach(function (g, gi) {
         html += '<div class="poGroup">' +
           '<div class="poGroupHead">' +
-            '<div><b>PO ' + escapeHtml(g.poNo) + '</b> &middot; ' + escapeHtml(g.poDate) + ' &middot; ' + escapeHtml(g.vendorName) + '</div>' +
+            '<div><b>PO ' + escapeHtml(g.poNo) + '</b> &middot; ' + escapeHtml(g.poDate) + ' &middot; ' + escapeHtml(g.vendorName) + (g.poDP ? ' &middot; PO DP: ' + escapeHtml(g.poDP) : '') + '</div>' +
             '<div><span class="' + stageClass(g.status) + '">' + escapeHtml(g.status) + '</span></div>' +
           '</div>' +
-          '<table class="poItemsTable"><thead><tr><th>UCS Code</th><th>Description</th><th>Qty</th><th>PO Qty</th><th>105 Qty</th><th>105 Date</th></tr></thead><tbody>' +
+          '<table class="poItemsTable"><thead><tr><th>UCS Code</th><th>Description</th><th>Qty</th><th>Alt DP</th><th>PO Qty</th><th>105 Qty</th><th>105 Date</th></tr></thead><tbody>' +
           g.items.map(function (it, idx) { return itemRow(it, 'po' + gi + '_' + idx, hitItems); }).join('') +
           '</tbody></table></div>';
       });
