@@ -1,0 +1,384 @@
+<style>
+
+  h2 { margin-bottom: 4px; }
+  .subtitle { color: #666; font-size: 13px; margin-bottom: 20px; }
+  label { display: block; font-weight: bold; margin-top: 14px; margin-bottom: 4px; font-size: 14px; }
+  input, select { padding: 8px; box-sizing: border-box; font-size: 14px; border: 1px solid #ccc; border-radius: 4px; }
+  button { padding: 8px 14px; font-size: 14px; border: none; border-radius: 4px; background: #1a73e8; color: white; cursor: pointer; }
+  button.secondary { background: #5f6368; }
+  button:disabled { background: #999; cursor: not-allowed; }
+  #message { margin-top: 14px; padding: 10px; border-radius: 4px; font-size: 14px; display: none; }
+  .success { background: #e6f4ea; color: #1e7e34; display: block !important; }
+  .error { background: #fce8e6; color: #c5221f; display: block !important; }
+  #loggedInBar { display:none; font-size: 13px; color:#555; margin-bottom: 10px; }
+  #logoutBtn { width:auto; padding:4px 10px; font-size:12px; background:#666; margin-left:8px; }
+  .lockedNotice { background:#fce8e6; color:#c5221f; padding:14px; border-radius:4px; font-size:14px; }
+  .emptyNote { color:#888; font-size:13px; font-style:italic; padding:14px 0; }
+
+  .toolbar { display:flex; gap:10px; align-items:center; margin-bottom: 14px; flex-wrap: wrap; }
+  #searchInput { flex: 1; min-width: 220px; }
+
+  .funnelBar { display:flex; gap:8px; margin-bottom:18px; flex-wrap: wrap; }
+  .funnelCard { flex:1; min-width:120px; padding:10px 12px; border-radius:6px; background:#f5f6f8; border:1px solid #e3e5e8; cursor:pointer; text-align:center; }
+  .funnelCard.active { border-color:#1a73e8; background:#eaf1fd; }
+  .funnelCard .n { font-size:20px; font-weight:bold; color:#222; }
+  .funnelCard .lbl { font-size:11px; color:#666; margin-top:2px; }
+
+  table { width:100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align:left; padding:8px; border-bottom:1px solid #eee; vertical-align: top; }
+  th { background:#fafafa; }
+  tr.prRow:hover { background:#fafcff; }
+  tr.prRow { cursor:pointer; }
+  .detailRow td { background:#f8f9fb; padding: 4px 8px 14px 28px; }
+
+  .badge { display:inline-block; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:bold; color:white; white-space:nowrap; }
+  .badgePendingRelease, .badgeReleasedPendingEnquiry { background:#999; }
+  .badgeUnderEnquiry, .badgeTechCommEvaluation { background:#e8710a; }
+  .badgePendingPOAward, .badgePendingDelivery { background:#c5221f; }
+  .badgePartial { background:#1a73e8; }
+
+  .poGroup { margin: 10px 0; border:1px solid #e3e5e8; border-radius:6px; overflow:hidden; }
+  .poGroupHead { padding:8px 10px; background:#eef0f3; font-size:12px; display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+  .poItemsTable { font-size:12px; }
+  .poItemsTable td, .poItemsTable th { padding:5px 8px; }
+  .pendingSection { margin-top:8px; }
+  .pendingSection .hdr { font-size:12px; color:#888; margin-bottom:4px; }
+
+  .ucsLink { color:#1a73e8; cursor:pointer; text-decoration: underline dotted; }
+  .hit { background: #fff3b0; }
+
+  .modalOverlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.35); z-index:1000; align-items:center; justify-content:center; }
+  .modalOverlay.open { display:flex; }
+  .modalBox { background:white; border-radius:8px; padding:20px; max-width:520px; width:90%; max-height:70vh; overflow-y:auto; }
+  .modalBox h4 { margin-top:0; }
+  .modalClose { float:right; cursor:pointer; color:#888; }
+
+</style>
+
+
+<h2>PR / PO Dashboard</h2>
+<div class="subtitle">Planning staff only (excluding Store Incharge). Read-only bird's-eye view of every open PR/PO, raising through receipt. A PR drops off automatically once every PO under it is fully received.</div>
+
+<!-- ====== LOGIN SECTION ====== -->
+<div id="loginSection" style="display:none">
+  <label for="loginEmail">Email</label>
+  <input type="email" id="loginEmail" placeholder="you@test.com" style="width:100%;">
+  <label for="loginPassword">Password</label>
+  <input type="password" id="loginPassword" placeholder="Password" style="width:100%;">
+  <button id="loginBtn" onclick="Page.login()" style="width:100%; margin-top:20px;">Log In</button>
+</div>
+
+<!-- ====== NOT AUTHORIZED NOTICE ====== -->
+<div id="notAuthorizedNotice" style="display:none;" class="lockedNotice">
+  You're logged in, but only Planning staff (excluding Store Incharge) can view this dashboard. If you believe this is wrong, contact the project owner.
+</div>
+
+<!-- ====== DASHBOARD SECTION ====== -->
+<div id="dashSection" style="display:none;">
+  <div id="loggedInBar"></div>
+
+  <div id="funnelBar" class="funnelBar"></div>
+
+  <div class="toolbar">
+    <input type="text" id="searchInput" placeholder="Search UCS Code, short text, long text, or PR text (e.g. ABB Drive)&hellip;" oninput="Page.onSearchInput()">
+    <button class="secondary" onclick="Page.loadData()">Refresh now</button>
+    <span id="pollNote" style="font-size:12px; color:#888;">Loaded once &mdash; click Refresh after your SAP update</span>
+  </div>
+
+  <div id="tableWrap">
+    <table>
+      <thead><tr>
+        <th>PR No.</th><th>PR Text</th><th>Section</th><th>Cr Name</th><th>Pur Officer</th>
+        <th>PR Value</th><th>Stage</th><th>Progress</th><th>Age (days)</th>
+      </tr></thead>
+      <tbody id="tableBody"></tbody>
+    </table>
+    <div id="emptyState" class="emptyNote" style="display:none;">No PRs match this filter.</div>
+  </div>
+</div>
+
+<div id="message"></div>
+
+<!-- ====== LONG TEXT MODAL ====== -->
+<div id="longTextModal" class="modalOverlay" onclick="if(event.target===this) Page.closeModal();">
+  <div class="modalBox">
+    <span class="modalClose" onclick="Page.closeModal()">&times;</span>
+    <h4 id="modalUcsCode"></h4>
+    <div id="modalLongText" style="font-size:13px; white-space:pre-wrap;"></div>
+  </div>
+</div>
+
+
+<script>
+(function(){
+
+  const APPS_SCRIPT_URL = Shell.APPS_SCRIPT_URL;
+
+  let currentUser = { email: '', password: '' };
+  let allPRs = [];
+  let stageOrder = [];
+  let funnel = {};
+  let activeStageFilter = null;
+  let expandedPRNo = null;
+  let searchTimer = null;
+
+  function showMessage(text, type) {
+    const el = document.getElementById('message');
+    el.textContent = text;
+    el.className = type;
+  }
+  function clearMessage() {
+    const el = document.getElementById('message');
+    el.textContent = '';
+    el.className = '';
+  }
+  function escapeHtml(str) {
+    return String(str == null ? '' : str).replace(/[&<>"']/g, function (c) {
+      return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
+    });
+  }
+  function hasCommaValueClient(str, target) {
+    if (!str) return false;
+    return String(str).split(',').map(function (s) { return s.trim().toLowerCase(); }).indexOf(target.toLowerCase()) !== -1;
+  }
+  function stageClass(stage) {
+    return 'badge badge' + String(stage).replace(/[^a-zA-Z]/g, '');
+  }
+
+  async function rawPost(body) {
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    if (data && data.status === 'ok' && data.message === 'Apps Script backend is running.') {
+      const retryRes = await fetch(APPS_SCRIPT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(body)
+      });
+      return retryRes.json();
+    }
+    return data;
+  }
+
+  async function callApi(payload) {
+    return rawPost(Object.assign({ email: currentUser.email, password: currentUser.password }, payload));
+  }
+
+  async function login() {
+    const email = document.getElementById('loginEmail').value.trim();
+    const password = document.getElementById('loginPassword').value;
+    clearMessage();
+    if (!email || !password) { showMessage('Please enter email and password.', 'error'); return; }
+
+    const loginBtn = document.getElementById('loginBtn');
+    loginBtn.disabled = true;
+    loginBtn.textContent = 'Logging in...';
+
+    try {
+      const data = await rawPost({ action: 'login', email: email, password: password });
+      if (!data.success) { showMessage(data.message || 'Login failed.', 'error'); return; }
+
+      // Mirrors requireSTOAccess() server-side: Planning, excluding Store Incharge.
+      const isAllowed = hasCommaValueClient(data.authorizedArea, 'Planning') && !hasCommaValueClient(data.role, 'Store Incharge');
+
+      currentUser = { email: email, password: password };
+      document.getElementById('loginSection').style.display = 'none';
+
+      if (!isAllowed) {
+        document.getElementById('notAuthorizedNotice').style.display = 'block';
+        return;
+      }
+
+      document.getElementById('dashSection').style.display = 'block';
+      const bar = document.getElementById('loggedInBar');
+      bar.style.display = 'block';
+      bar.innerHTML = 'Logged in as <b>' + escapeHtml(data.name) + '</b> (' + escapeHtml(data.role) + ')' +
+        '<button id="logoutBtn" onclick="Shell.logout()">Log out</button>';
+
+      loadData();
+    } catch (err) {
+      showMessage('Could not reach the server. Check your connection.', 'error');
+    } finally {
+      loginBtn.disabled = false;
+      loginBtn.textContent = 'Log In';
+    }
+  }
+
+  async function loadData() {
+    clearMessage();
+    try {
+      const data = await callApi({ action: 'getPRPODashboardData' });
+      if (!data.success) { showMessage(data.message || 'Could not load the dashboard.', 'error'); return; }
+      allPRs = data.prs || [];
+      stageOrder = data.stageOrder || [];
+      funnel = data.funnel || {};
+      expandedPRNo = null;
+      renderFunnel();
+      renderTable();
+    } catch (err) {
+      showMessage('Could not reach the server. Check your connection.', 'error');
+    }
+  }
+
+  function renderFunnel() {
+    const bar = document.getElementById('funnelBar');
+    // "Fully Received" never appears (archived before it reaches the client) -- skip it in the bar.
+    const shown = stageOrder.filter(function (s) { return s !== 'Fully Received'; });
+    bar.innerHTML = shown.map(function (stage) {
+      const n = funnel[stage] || 0;
+      const activeCls = (activeStageFilter === stage) ? ' active' : '';
+      return '<div class="funnelCard' + activeCls + '" onclick="Page.toggleStageFilter(\'' + stage.replace(/'/g, "\\'") + '\')">' +
+        '<div class="n">' + n + '</div><div class="lbl">' + escapeHtml(stage) + '</div></div>';
+    }).join('');
+  }
+
+  function toggleStageFilter(stage) {
+    activeStageFilter = (activeStageFilter === stage) ? null : stage;
+    renderFunnel();
+    renderTable();
+  }
+
+  function daysSince(dateStr) {
+    if (!dateStr) return '';
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return '';
+    return Math.floor((Date.now() - d.getTime()) / 86400000);
+  }
+
+  // Multi-keyword, order-independent match across UCS Code / description /
+  // long text of every item on the PR, plus PR Text itself (the fallback
+  // for PRs not yet in Material List, per the confirmed search design).
+  function matchesSearch(pr, terms) {
+    if (terms.length === 0) return { matched: true, hitItems: {} };
+    const haystacks = [String(pr.prText || '').toLowerCase()];
+    const hitItems = {};
+    function collect(items, keyPrefix) {
+      (items || []).forEach(function (it, idx) {
+        const blob = (it.ucsCode + ' ' + it.description + ' ' + it.longText).toLowerCase();
+        haystacks.push(blob);
+        const key = keyPrefix + idx;
+        if (terms.every(function (t) { return blob.indexOf(t) !== -1; })) hitItems[key] = true;
+      });
+    }
+    (pr.poGroups || []).forEach(function (g, gi) { collect(g.items, 'po' + gi + '_'); });
+    collect(pr.itemsPendingPOAward, 'pend_');
+    const combined = haystacks.join(' ');
+    const matched = terms.every(function (t) { return combined.indexOf(t) !== -1; });
+    return { matched: matched, hitItems: hitItems };
+  }
+
+  function onSearchInput() {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(renderTable, 150); // all in-memory -- this is just to avoid re-rendering every keystroke
+  }
+
+  function renderTable() {
+    const body = document.getElementById('tableBody');
+    const emptyState = document.getElementById('emptyState');
+    const searchTerm = document.getElementById('searchInput').value.trim().toLowerCase();
+    const terms = searchTerm ? searchTerm.split(/\s+/) : [];
+
+    let rows = allPRs;
+    if (activeStageFilter) rows = rows.filter(function (pr) { return pr.overallStage === activeStageFilter; });
+
+    const withHits = rows.map(function (pr) {
+      const m = matchesSearch(pr, terms);
+      return { pr: pr, hitItems: m.hitItems, matched: m.matched };
+    }).filter(function (r) { return r.matched; });
+
+    if (withHits.length === 0) {
+      body.innerHTML = '';
+      emptyState.style.display = 'block';
+      return;
+    }
+    emptyState.style.display = 'none';
+
+    body.innerHTML = withHits.map(function (r) {
+      const pr = r.pr;
+      const out = [
+        '<tr class="prRow" onclick="Page.toggleExpand(\'' + pr.prNo + '\')">' +
+          '<td>' + escapeHtml(pr.prNo) + '</td>' +
+          '<td>' + escapeHtml(pr.prText) + '</td>' +
+          '<td>' + escapeHtml(pr.section) + '</td>' +
+          '<td>' + escapeHtml(pr.crName) + '</td>' +
+          '<td>' + escapeHtml(pr.purOfficer) + '</td>' +
+          '<td>' + escapeHtml(pr.prTotValue) + '</td>' +
+          '<td><span class="' + stageClass(pr.overallStage) + '">' + escapeHtml(pr.overallStage) + '</span></td>' +
+          '<td>' + escapeHtml(pr.progress) + '</td>' +
+          '<td>' + daysSince(pr.prCrDt) + '</td>' +
+        '</tr>'
+      ];
+      if (expandedPRNo === pr.prNo) {
+        out.push('<tr class="detailRow"><td colspan="9">' + renderDetail(pr, r.hitItems) + '</td></tr>');
+      }
+      return out.join('');
+    }).join('');
+  }
+
+  function itemRow(it, key, hitItems) {
+    const cls = hitItems[key] ? ' class="hit"' : '';
+    return '<tr' + cls + '>' +
+      '<td><span class="ucsLink" onclick="event.stopPropagation(); Page.showLongText(\'' + it.ucsCode + '\',\'' + escapeHtml(it.longText || it.description).replace(/'/g, "\\'") + '\')">' + escapeHtml(it.ucsCode) + '</span></td>' +
+      '<td>' + escapeHtml(it.description) + '</td>' +
+      '<td>' + escapeHtml(it.qty) + '</td>' +
+      (it.poQty !== undefined ? '<td>' + escapeHtml(it.poQty) + '</td><td>' + escapeHtml(it.qty105) + '</td><td>' + escapeHtml(it.date105) + '</td>' : '') +
+    '</tr>';
+  }
+
+  function renderDetail(pr, hitItems) {
+    let html = '';
+    if (pr.poGroups && pr.poGroups.length) {
+      pr.poGroups.forEach(function (g, gi) {
+        html += '<div class="poGroup">' +
+          '<div class="poGroupHead">' +
+            '<div><b>PO ' + escapeHtml(g.poNo) + '</b> &middot; ' + escapeHtml(g.poDate) + ' &middot; ' + escapeHtml(g.vendorName) + '</div>' +
+            '<div><span class="' + stageClass(g.status) + '">' + escapeHtml(g.status) + '</span></div>' +
+          '</div>' +
+          '<table class="poItemsTable"><thead><tr><th>UCS Code</th><th>Description</th><th>Qty</th><th>PO Qty</th><th>105 Qty</th><th>105 Date</th></tr></thead><tbody>' +
+          g.items.map(function (it, idx) { return itemRow(it, 'po' + gi + '_' + idx, hitItems); }).join('') +
+          '</tbody></table></div>';
+      });
+    }
+    if (pr.itemsPendingPOAward && pr.itemsPendingPOAward.length) {
+      html += '<div class="pendingSection"><div class="hdr">Items still pending PO award:</div>' +
+        '<table class="poItemsTable"><thead><tr><th>UCS Code</th><th>Description</th><th>Qty</th></tr></thead><tbody>' +
+        pr.itemsPendingPOAward.map(function (it, idx) { return itemRow(it, 'pend_' + idx, hitItems); }).join('') +
+        '</tbody></table></div>';
+    }
+    if (!html) html = '<div class="emptyNote">No Material List entries yet for this PR.</div>';
+    return html;
+  }
+
+  function toggleExpand(prNo) {
+    expandedPRNo = (expandedPRNo === prNo) ? null : prNo;
+    renderTable();
+  }
+
+  function showLongText(ucsCode, longText) {
+    document.getElementById('modalUcsCode').textContent = ucsCode;
+    document.getElementById('modalLongText').textContent = longText || '(no long text on file)';
+    document.getElementById('longTextModal').classList.add('open');
+  }
+  function closeModal() {
+    document.getElementById('longTextModal').classList.remove('open');
+  }
+
+  Object.defineProperties(window.Page = {}, {
+    login: { value: login, enumerable: true },
+    loadData: { value: loadData, enumerable: true },
+    toggleStageFilter: { value: toggleStageFilter, enumerable: true },
+    onSearchInput: { value: onSearchInput, enumerable: true },
+    toggleExpand: { value: toggleExpand, enumerable: true },
+    showLongText: { value: showLongText, enumerable: true },
+    closeModal: { value: closeModal, enumerable: true }
+  });
+
+  document.getElementById('loginEmail').value = Shell.getUser().email;
+  document.getElementById('loginPassword').value = Shell.getUser().password;
+  login();
+
+})();
+</script>
