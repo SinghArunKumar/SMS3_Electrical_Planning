@@ -154,6 +154,10 @@ const Access = {
 // One entry per fragment. `group` controls menu sectioning.
 
 const PAGES = [
+  // --- Procurement (flagship dashboard -- deliberately placed first, above
+  // every other group, and bold-styled in the sidebar) ---
+  { key: 'pr-po-dashboard', file: 'pr-po-dashboard.html', label: 'Procurement Dashboard', icon: 'clipboardList', group: 'Procurement', access: Access.canManageSTO, bold: true },
+
   // --- UCS Codes ---
   { key: 'search-ucs', file: 'search-ucs.html', label: 'Search UCS Codes', icon: 'search', group: 'UCS Codes', access: Access.anyLoggedIn },
   { key: 'add-ucs-code', file: 'add-ucs-code.html', label: 'Add UCS Code', icon: 'filePlus', group: 'UCS Codes', access: Access.canManageSTO },
@@ -166,7 +170,6 @@ const PAGES = [
   { key: 'add-201', file: 'add-201.html', label: 'Create 201 Entry', icon: 'packageOut', group: 'Planning', access: Access.canManageSTO },
   { key: 'planning-stock', file: 'planning-stock.html', label: 'Planning Stock', icon: 'boxes', group: 'Planning', access: Access.anyLoggedIn },
   { key: 'demand-dashboard', file: 'demand-dashboard.html', label: 'Demand Dashboard', icon: 'trend', group: 'Planning', access: Access.canManageSTO },
-  { key: 'pr-po-dashboard', file: 'pr-po-dashboard.html', label: 'PR/PO Dashboard', icon: 'clipboardList', group: 'Planning', access: Access.canManageSTO },
 
   // --- Requisition flow ---
   { key: 'raise-requisition', file: 'raise-requisition.html', label: 'Raise Requisition', icon: 'clipboardPlus', group: 'Requisitions', access: Access.isAreaSupervisorOrIncharge },
@@ -335,6 +338,7 @@ function renderMenu() {
       a.dataset.key = p.key;
       a.title = p.label; // native tooltip -- shows the page name on hover when the sidebar is collapsed to icons
       a.innerHTML = '<span class="navIcon">' + (ICONS[p.icon] || '') + '</span><span class="navLabel">' + p.label + '</span>';
+      if (p.bold) a.style.fontWeight = '700'; // flagship dashboard -- visually distinct from the rest of the menu
       a.onclick = (e) => { e.preventDefault(); loadPage(p.key); };
       nav.appendChild(a);
     });
