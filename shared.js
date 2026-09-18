@@ -148,21 +148,6 @@ const Access = {
   isAreaSupervisorOrIncharge: (u) => hasCommaValue(u.role, 'Area Store Supervisor') || hasCommaValue(u.role, 'Area Incharge'),
   isAreaIncharge: (u) => hasCommaValue(u.role, 'Area Incharge'),
   isStoreIncharge: (u) => hasCommaValue(u.role, 'Store Incharge'),
-  // Same role check as isAreaSupervisorOrIncharge, PLUS at least one real
-  // (non-PLANNING) area on the login -- add-local-issue.html itself now
-  // excludes PLANNING from its area picker (recordLocalIssue() rejects it
-  // outright: Planning material is issued via the Requisition module, never
-  // as a "local issue"), so a Supervisor/Incharge whose Authorized_Area is
-  // PLANNING-only would click through to a page with nothing to do but show
-  // a "you're not authorized" notice. Hiding the nav link for that case is
-  // a convenience only -- add-local-issue.html's own login() still shows
-  // that same notice as the real fallback for anyone who reaches it via a
-  // direct link or an old bookmark.
-  hasLocalIssueArea: (u) => {
-    if (!hasCommaValue(u.role, 'Area Store Supervisor') && !hasCommaValue(u.role, 'Area Incharge')) return false;
-    return String(u.authorizedArea || '').split(',').map(s => s.trim())
-      .some(a => a && a.toUpperCase() !== 'PLANNING');
-  },
 };
 
 // ====== PAGE REGISTRY ======
@@ -181,6 +166,7 @@ const PAGES = [
   { key: 'add-201', file: 'add-201.html', label: 'Create 201 Entry', icon: 'packageOut', group: 'Planning', access: Access.canManageSTO },
   { key: 'planning-stock', file: 'planning-stock.html', label: 'Planning Stock', icon: 'boxes', group: 'Planning', access: Access.anyLoggedIn },
   { key: 'demand-dashboard', file: 'demand-dashboard.html', label: 'Demand Dashboard', icon: 'trend', group: 'Planning', access: Access.canManageSTO },
+  { key: 'pr-po-dashboard', file: 'pr-po-dashboard.html', label: 'PR/PO Dashboard', icon: 'clipboardList', group: 'Planning', access: Access.canManageSTO },
 
   // --- Requisition flow ---
   { key: 'raise-requisition', file: 'raise-requisition.html', label: 'Raise Requisition', icon: 'clipboardPlus', group: 'Requisitions', access: Access.isAreaSupervisorOrIncharge },
@@ -189,7 +175,7 @@ const PAGES = [
   { key: 'issue-dashboard', file: 'issue-dashboard.html', label: 'Issue Dashboard', icon: 'checkCircle', group: 'Requisitions', access: Access.isStoreIncharge },
 
   // --- Area / local stock ---
-  { key: 'add-local-issue', file: 'add-local-issue.html', label: 'Record Local Issue', icon: 'handReceive', group: 'Area Stock', access: Access.hasLocalIssueArea },
+  { key: 'add-local-issue', file: 'add-local-issue.html', label: 'Record Local Issue', icon: 'handReceive', group: 'Area Stock', access: Access.isAreaSupervisorOrIncharge },
   { key: 'area-stock-dashboard', file: 'area-stock-dashboard.html', label: 'Area Stock Dashboard', icon: 'warehouse', group: 'Area Stock', access: Access.anyLoggedIn },
   { key: 'raise-demand-alert', file: 'raise-demand-alert.html', label: 'Raise Demand Alert', icon: 'alert', group: 'Area Stock', access: Access.isAreaIncharge },
 
@@ -314,7 +300,6 @@ async function loadPage(key) {
 function closeSidebarOnMobile() {
   if (window.innerWidth <= 860) {
     document.getElementById('sidebar').classList.remove('open');
-    document.getElementById('sidebarBackdrop').classList.remove('open');
   }
 }
 
@@ -419,7 +404,6 @@ function toggleSidebar() {
   const sidebar = document.getElementById('sidebar');
   if (window.innerWidth <= 860) {
     sidebar.classList.toggle('open');
-    document.getElementById('sidebarBackdrop').classList.toggle('open');
   } else {
     sidebar.classList.toggle('collapsed');
   }
