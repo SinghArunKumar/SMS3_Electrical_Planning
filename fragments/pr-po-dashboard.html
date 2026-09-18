@@ -149,6 +149,11 @@
   function stageClass(stage) {
     return 'badge badge' + String(stage).replace(/[^a-zA-Z]/g, '');
   }
+  function formatINR(val) {
+    const n = Number(val);
+    if (val === '' || val === null || val === undefined || !isFinite(n)) return escapeHtml(val);
+    return n.toLocaleString('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 });
+  }
 
   async function rawPost(body) {
     const res = await fetch(APPS_SCRIPT_URL, {
@@ -316,7 +321,7 @@
           '<td>' + escapeHtml(pr.prNo) + '</td>' +
           '<td>' + escapeHtml(pr.prText) + '</td>' +
           '<td>' + escapeHtml(pr.purOfficer) + '</td>' +
-          '<td>' + escapeHtml(pr.prTotValue) + '</td>' +
+          '<td>' + formatINR(pr.prTotValue) + '</td>' +
           '<td><span class="' + stageClass(pr.overallStage) + '">' + escapeHtml(pr.overallStage) + '</span></td>' +
           '<td>' + escapeHtml(pr.progress) + '</td>' +
           '<td>' + daysSince(pr.prCrDt) + '</td>' +
@@ -345,7 +350,7 @@
       pr.poGroups.forEach(function (g, gi) {
         html += '<div class="poGroup">' +
           '<div class="poGroupHead">' +
-            '<div><b>PO ' + escapeHtml(g.poNo) + '</b> &middot; ' + escapeHtml(g.poDate) + ' &middot; ' + escapeHtml(g.vendorName) + (g.poDP ? ' &middot; PO DP: ' + escapeHtml(g.poDP) : '') + '</div>' +
+            '<div><b>PO ' + escapeHtml(g.poNo) + '</b> &middot; ' + escapeHtml(g.poDate) + ' &middot; ' + escapeHtml(g.vendorName) + (g.poDP ? ' &middot; PO DP: ' + escapeHtml(g.poDP) : '') + ' &middot; Pending PO Value: ' + formatINR(g.pendingPOValue) + '</div>' +
             '<div><span class="' + stageClass(g.status) + '">' + escapeHtml(g.status) + '</span></div>' +
           '</div>' +
           '<table class="poItemsTable"><thead><tr><th>UCS Code</th><th>Description</th><th>Qty</th><th>Alt DP</th><th>PO Qty</th><th>105 Qty</th><th>105 Date</th></tr></thead><tbody>' +
