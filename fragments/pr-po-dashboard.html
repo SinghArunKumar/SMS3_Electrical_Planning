@@ -350,7 +350,7 @@
       pr.poGroups.forEach(function (g, gi) {
         html += '<div class="poGroup">' +
           '<div class="poGroupHead">' +
-            '<div><b>PO ' + escapeHtml(g.poNo) + '</b> &middot; ' + escapeHtml(g.poDate) + ' &middot; ' + escapeHtml(g.vendorName) + (g.poDP ? ' &middot; PO DP: ' + escapeHtml(g.poDP) : '') + ' &middot; Pending PO Value: ' + formatINR(g.pendingPOValue) + '</div>' +
+            '<div><b>PO ' + escapeHtml(g.poNo) + '</b> &middot; ' + escapeHtml(g.poDate) + ' &middot; ' + escapeHtml(g.vendorName) + (g.poDP ? ' &middot; PO DP: ' + escapeHtml(g.poDP) : '') + ' &middot; PO Value Outstanding: ' + formatINR(g.poValueOutstanding) + '</div>' +
             '<div><span class="' + stageClass(g.status) + '">' + escapeHtml(g.status) + '</span></div>' +
           '</div>' +
           '<table class="poItemsTable"><thead><tr><th>UCS Code</th><th>Description</th><th>Qty</th><th>Alt DP</th><th>PO Qty</th><th>105 Qty</th><th>105 Date</th></tr></thead><tbody>' +
