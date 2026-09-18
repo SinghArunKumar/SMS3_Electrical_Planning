@@ -94,7 +94,7 @@
     <table>
       <thead><tr>
         <th>PR No.</th><th>PR Text</th><th>Pur Officer</th>
-        <th>PR Value</th><th>Stage</th><th>Progress</th><th>Age (days)</th>
+        <th>PR Value</th><th>PO Value Outstanding</th><th>Stage</th><th>Progress</th><th>Age (days)</th>
       </tr></thead>
       <tbody id="tableBody"></tbody>
     </table>
@@ -322,13 +322,14 @@
           '<td>' + escapeHtml(pr.prText) + '</td>' +
           '<td>' + escapeHtml(pr.purOfficer) + '</td>' +
           '<td>' + formatINR(pr.prTotValue) + '</td>' +
+          '<td>' + (pr.poValueOutstanding === null ? '&ndash;' : formatINR(pr.poValueOutstanding)) + '</td>' +
           '<td><span class="' + stageClass(pr.overallStage) + '">' + escapeHtml(pr.overallStage) + '</span></td>' +
           '<td>' + escapeHtml(pr.progress) + '</td>' +
           '<td>' + daysSince(pr.prCrDt) + '</td>' +
         '</tr>'
       ];
       if (expandedPRNo === pr.prNo) {
-        out.push('<tr class="detailRow"><td colspan="7">' + renderDetail(pr, r.hitItems) + '</td></tr>');
+        out.push('<tr class="detailRow"><td colspan="8">' + renderDetail(pr, r.hitItems) + '</td></tr>');
       }
       return out.join('');
     }).join('');
