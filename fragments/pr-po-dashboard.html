@@ -81,6 +81,11 @@
 
   <div class="toolbar">
     <input type="text" id="searchInput" placeholder="Search UCS Code, short text, long text, or PR text (e.g. ABB Drive)&hellip;" oninput="Page.onSearchInput()">
+    <label style="margin:0; font-weight:normal; font-size:12px; color:#666;">PR Date From</label>
+    <input type="date" id="dateFrom" onchange="Page.renderTable()">
+    <label style="margin:0; font-weight:normal; font-size:12px; color:#666;">To</label>
+    <input type="date" id="dateTo" onchange="Page.renderTable()">
+    <button class="secondary" onclick="Page.clearDateRange()">Clear dates</button>
     <button class="secondary" onclick="Page.loadData()">Refresh now</button>
     <span id="pollNote" style="font-size:12px; color:#888;">Loaded once &mdash; click Refresh after your SAP update</span>
   </div>
@@ -88,7 +93,7 @@
   <div id="tableWrap">
     <table>
       <thead><tr>
-        <th>PR No.</th><th>PR Text</th><th>Section</th><th>Cr Name</th><th>Pur Officer</th>
+        <th>PR No.</th><th>PR Text</th><th>Pur Officer</th>
         <th>PR Value</th><th>Stage</th><th>Progress</th><th>Age (days)</th>
       </tr></thead>
       <tbody id="tableBody"></tbody>
@@ -284,6 +289,11 @@
     let rows = allPRs;
     if (activeStageFilter) rows = rows.filter(function (pr) { return pr.overallStage === activeStageFilter; });
 
+    const dateFrom = document.getElementById('dateFrom').value; // 'YYYY-MM-DD' or ''
+    const dateTo = document.getElementById('dateTo').value;
+    if (dateFrom) rows = rows.filter(function (pr) { return pr.prCrDt && pr.prCrDt >= dateFrom; }); // plain string compare works: both are 'YYYY-MM-DD'
+    if (dateTo) rows = rows.filter(function (pr) { return pr.prCrDt && pr.prCrDt <= dateTo; });
+
     const withHits = rows.map(function (pr) {
       const m = matchesSearch(pr, terms);
       return { pr: pr, hitItems: m.hitItems, matched: m.matched };
@@ -302,8 +312,6 @@
         '<tr class="prRow" onclick="Page.toggleExpand(\'' + pr.prNo + '\')">' +
           '<td>' + escapeHtml(pr.prNo) + '</td>' +
           '<td>' + escapeHtml(pr.prText) + '</td>' +
-          '<td>' + escapeHtml(pr.section) + '</td>' +
-          '<td>' + escapeHtml(pr.crName) + '</td>' +
           '<td>' + escapeHtml(pr.purOfficer) + '</td>' +
           '<td>' + escapeHtml(pr.prTotValue) + '</td>' +
           '<td><span class="' + stageClass(pr.overallStage) + '">' + escapeHtml(pr.overallStage) + '</span></td>' +
@@ -312,7 +320,7 @@
         '</tr>'
       ];
       if (expandedPRNo === pr.prNo) {
-        out.push('<tr class="detailRow"><td colspan="9">' + renderDetail(pr, r.hitItems) + '</td></tr>');
+        out.push('<tr class="detailRow"><td colspan="7">' + renderDetail(pr, r.hitItems) + '</td></tr>');
       }
       return out.join('');
     }).join('');
@@ -357,6 +365,12 @@
     renderTable();
   }
 
+  function clearDateRange() {
+    document.getElementById('dateFrom').value = '';
+    document.getElementById('dateTo').value = '';
+    renderTable();
+  }
+
   function showLongText(ucsCode, longText) {
     document.getElementById('modalUcsCode').textContent = ucsCode;
     document.getElementById('modalLongText').textContent = longText || '(no long text on file)';
@@ -371,6 +385,8 @@
     loadData: { value: loadData, enumerable: true },
     toggleStageFilter: { value: toggleStageFilter, enumerable: true },
     onSearchInput: { value: onSearchInput, enumerable: true },
+    renderTable: { value: renderTable, enumerable: true },
+    clearDateRange: { value: clearDateRange, enumerable: true },
     toggleExpand: { value: toggleExpand, enumerable: true },
     showLongText: { value: showLongText, enumerable: true },
     closeModal: { value: closeModal, enumerable: true }
