@@ -28,9 +28,10 @@
   .totalsCard { flex:1; min-width:180px; padding:12px 16px; border-radius:8px; background:white; border:1px solid #e3e5e8; border-left:4px solid #ccc; }
   .totalsCard .totalsLabel { font-size:11px; color:#888; text-transform:uppercase; letter-spacing:.03em; margin-bottom:4px; }
   .totalsCard .totalsValue { font-size:21px; font-weight:700; color:#1c1c1c; }
-  .totalsCard.count { border-left-color:#5f6368; }
   .totalsCard.prValue { border-left-color:#1a73e8; }
-  .totalsCard.poValue { border-left-color:#e8710a; }
+  .totalsCard.poValue { border-left-color:#0f9d8b; }
+  .totalsCard.poOutstanding { border-left-color:#e8710a; }
+  .totalsCard.poBalance { border-left-color:#8430ce; }
 
   .searchRow { margin-bottom:14px; }
   .searchRow #searchInput { width:100%; }
@@ -46,6 +47,8 @@
   .iconBtn:hover { background:#f0f2f5; }
   .iconBtnPrimary { background:#1a73e8; color:white; border-color:#1a73e8; font-size:18px; }
   .iconBtnPrimary:hover { background:#1560c9; }
+  .iconBtnClear { background:#fce8e6; border-color:#f2b8b5; }
+  .iconBtnClear:hover { background:#fad2ce; }
 
   table { width:100%; border-collapse: collapse; font-size: 13px; }
   th, td { text-align:left; padding:8px; border-bottom:1px solid #eee; vertical-align: top; }
@@ -117,7 +120,7 @@
         <input type="date" id="dateFrom" onchange="Page.renderTable()">
         <span class="filterSep">to</span>
         <input type="date" id="dateTo" onchange="Page.renderTable()">
-        <button class="iconBtn" title="Clear PR date range" onclick="Page.clearDateRange()">&#10005;</button>
+        <button class="iconBtn iconBtnClear" title="Clear PR date range" onclick="Page.clearDateRange()">&#129529;</button>
       </div>
     </div>
 
@@ -127,7 +130,7 @@
         <input type="date" id="dpFrom" onchange="Page.renderTable()">
         <span class="filterSep">to</span>
         <input type="date" id="dpTo" onchange="Page.renderTable()">
-        <button class="iconBtn" title="Clear PO DP range" onclick="Page.clearDPRange()">&#10005;</button>
+        <button class="iconBtn iconBtnClear" title="Clear PO DP range" onclick="Page.clearDPRange()">&#129529;</button>
       </div>
     </div>
 
@@ -379,7 +382,7 @@
   // periods. PR Value itself is never DP-split -- it's the PR's one
   // original budgeted figure, shown for context, not a per-period number.
   function renderTotals(withHits, dpFrom, dpTo, dpFilterActive) {
-    let totalPRValue = 0, totalPOOutstanding = 0;
+    let totalPRValue = 0, totalPOOutstanding = 0, totalPOValue = 0;
     withHits.forEach(function (r) {
       const prv = Number(r.pr.prTotValue);
       if (isFinite(prv)) totalPRValue += prv;
@@ -387,19 +390,31 @@
         getRelevantPODPGroups(r.pr, dpFrom, dpTo).forEach(function (g) {
           const pov = Number(g.poValueOutstanding);
           if (isFinite(pov)) totalPOOutstanding += pov;
+          const ptv = Number(g.poValueTotal);
+          if (isFinite(ptv)) totalPOValue += ptv;
         });
-      } else if (r.pr.poValueOutstanding !== null && r.pr.poValueOutstanding !== undefined) {
-        const pov = Number(r.pr.poValueOutstanding);
-        if (isFinite(pov)) totalPOOutstanding += pov;
+      } else {
+        if (r.pr.poValueOutstanding !== null && r.pr.poValueOutstanding !== undefined) {
+          const pov = Number(r.pr.poValueOutstanding);
+          if (isFinite(pov)) totalPOOutstanding += pov;
+        }
+        if (r.pr.poValueTotal !== null && r.pr.poValueTotal !== undefined) {
+          const ptv = Number(r.pr.poValueTotal);
+          if (isFinite(ptv)) totalPOValue += ptv;
+        }
       }
     });
-    const poLabel = dpFilterActive
+    const balancePct = totalPOValue > 0 ? (totalPOOutstanding / totalPOValue * 100) : 0;
+    const balanceStr = totalPOValue > 0 ? balancePct.toFixed(1) + '%' : '&ndash;';
+    const poValueLabel = dpFilterActive ? 'PO Value &middot; DP window' : 'Total PO Value';
+    const outstandingLabel = dpFilterActive
       ? 'Budget Projection &middot; PO DP ' + (dpFrom || '&hellip;') + ' to ' + (dpTo || '&hellip;')
       : 'Total PO Value Outstanding';
     document.getElementById('totalsBar').innerHTML =
-      '<div class="totalsCard count"><div class="totalsLabel">PRs Shown</div><div class="totalsValue">' + withHits.length + '</div></div>' +
       '<div class="totalsCard prValue"><div class="totalsLabel">Total PR Value</div><div class="totalsValue">' + formatINR(totalPRValue) + '</div></div>' +
-      '<div class="totalsCard poValue"><div class="totalsLabel">' + poLabel + '</div><div class="totalsValue">' + formatINR(totalPOOutstanding) + '</div></div>';
+      '<div class="totalsCard poValue"><div class="totalsLabel">' + poValueLabel + '</div><div class="totalsValue">' + formatINR(totalPOValue) + '</div></div>' +
+      '<div class="totalsCard poOutstanding"><div class="totalsLabel">' + outstandingLabel + '</div><div class="totalsValue">' + formatINR(totalPOOutstanding) + '</div></div>' +
+      '<div class="totalsCard poBalance"><div class="totalsLabel">% PO Value Balance</div><div class="totalsValue">' + balanceStr + '</div></div>';
   }
 
   function toggleStageFilter(stage) {
