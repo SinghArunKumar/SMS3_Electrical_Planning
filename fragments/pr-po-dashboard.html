@@ -38,6 +38,7 @@
   .badgePartial { background:#1a73e8; }
   .badgeRecentlyDelivered { background:#1e8e3e; }
   .poGroupDone { opacity:0.75; }
+  .poGroupDPMatch { outline:2px solid #1a73e8; outline-offset:-2px; }
 
   .poGroup { margin: 10px 0; border:1px solid #e3e5e8; border-radius:6px; overflow:hidden; }
   .poGroupHead { padding:8px 10px; background:#eef0f3; font-size:12px; display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; }
@@ -94,6 +95,19 @@
     <button class="secondary" onclick="Page.saveGraceDays()">Save</button>
     <button class="secondary" onclick="Page.loadData()">Refresh now</button>
     <span id="pollNote" style="font-size:12px; color:#888;">Loaded once &mdash; click Refresh after your SAP update</span>
+  </div>
+
+  <div class="toolbar" style="margin-top:-8px;">
+    <label style="margin:0; font-weight:normal; font-size:12px; color:#666;">Budget projection &mdash; PO DP From</label>
+    <input type="date" id="dpFrom" onchange="Page.renderTable()">
+    <label style="margin:0; font-weight:normal; font-size:12px; color:#666;">To</label>
+    <input type="date" id="dpTo" onchange="Page.renderTable()">
+    <button class="secondary" onclick="Page.clearDPRange()">Clear DP dates</button>
+    <label style="margin:0; font-weight:normal; font-size:12px; color:#666;">Sort by</label>
+    <select id="sortMode" onchange="Page.renderTable()">
+      <option value="prDate">PR Date (newest first)</option>
+      <option value="poDP">PO Delivery Period (earliest first)</option>
+    </select>
   </div>
 
   <div id="tableWrap">
@@ -295,23 +309,48 @@
     }).join('');
   }
 
+  // Which of a PR's PO groups have a PO DP falling inside [dpFrom, dpTo]
+  // (either bound optional). A PO with no PO DP recorded never matches --
+  // it simply can't be placed into a budget window. Both PO DP and the
+  // input values are 'YYYY-MM-DD' strings, so plain comparison works.
+  function getRelevantPODPGroups(pr, dpFrom, dpTo) {
+    return (pr.poGroups || []).filter(function (g) {
+      if (!g.poDP) return false;
+      if (dpFrom && g.poDP < dpFrom) return false;
+      if (dpTo && g.poDP > dpTo) return false;
+      return true;
+    });
+  }
+
   // Sums whatever the table is CURRENTLY showing (date range + search +
-  // stage filter, all applied) -- not the full unfiltered dataset. PO Value
-  // Outstanding is only summed over PRs where it's non-null (i.e. ones that
-  // actually have a live PO); a pre-PO PR contributes 0, not a skipped/NaN.
-  function renderTotals(withHits) {
+  // stage filter + PO DP window, all applied) -- not the full unfiltered
+  // dataset. When a PO DP window is active, PO Value Outstanding is summed
+  // only across the PO groups that actually fall inside that window (the
+  // true "money landing in this quarter/FY" figure) rather than the whole
+  // PR's total, since a PR can have other POs due in entirely different
+  // periods. PR Value itself is never DP-split -- it's the PR's one
+  // original budgeted figure, shown for context, not a per-period number.
+  function renderTotals(withHits, dpFrom, dpTo, dpFilterActive) {
     let totalPRValue = 0, totalPOOutstanding = 0;
     withHits.forEach(function (r) {
       const prv = Number(r.pr.prTotValue);
       if (isFinite(prv)) totalPRValue += prv;
-      if (r.pr.poValueOutstanding !== null && r.pr.poValueOutstanding !== undefined) {
+      if (dpFilterActive) {
+        getRelevantPODPGroups(r.pr, dpFrom, dpTo).forEach(function (g) {
+          const pov = Number(g.poValueOutstanding);
+          if (isFinite(pov)) totalPOOutstanding += pov;
+        });
+      } else if (r.pr.poValueOutstanding !== null && r.pr.poValueOutstanding !== undefined) {
         const pov = Number(r.pr.poValueOutstanding);
         if (isFinite(pov)) totalPOOutstanding += pov;
       }
     });
+    const poLabel = dpFilterActive
+      ? 'Budget Projection for PO DP ' + (dpFrom || '&hellip;') + ' to ' + (dpTo || '&hellip;')
+      : 'Total PO Value Outstanding';
     document.getElementById('totalsBar').innerHTML =
       'Showing <b>' + withHits.length + '</b> PR(s) &middot; Total PR Value: <b>' + formatINR(totalPRValue) +
-      '</b> &middot; Total PO Value Outstanding: <b>' + formatINR(totalPOOutstanding) + '</b>';
+      '</b> &middot; ' + poLabel + ': <b>' + formatINR(totalPOOutstanding) + '</b>';
   }
 
   function toggleStageFilter(stage) {
@@ -366,7 +405,23 @@
     let withHits = getDateAndSearchFilteredPRs();
     if (activeStageFilter) withHits = withHits.filter(function (r) { return r.pr.overallStage === activeStageFilter; });
 
-    renderTotals(withHits);
+    const dpFrom = document.getElementById('dpFrom').value;
+    const dpTo = document.getElementById('dpTo').value;
+    const dpFilterActive = !!(dpFrom || dpTo);
+    if (dpFilterActive) withHits = withHits.filter(function (r) { return getRelevantPODPGroups(r.pr, dpFrom, dpTo).length > 0; });
+
+    const sortMode = document.getElementById('sortMode').value;
+    if (sortMode === 'poDP') {
+      withHits.sort(function (a, b) {
+        const aGroups = dpFilterActive ? getRelevantPODPGroups(a.pr, dpFrom, dpTo) : (a.pr.poGroups || []).filter(function (g) { return g.poDP; });
+        const bGroups = dpFilterActive ? getRelevantPODPGroups(b.pr, dpFrom, dpTo) : (b.pr.poGroups || []).filter(function (g) { return g.poDP; });
+        const aMin = aGroups.length ? aGroups.reduce(function (m, g) { return g.poDP < m ? g.poDP : m; }, aGroups[0].poDP) : '9999-99-99';
+        const bMin = bGroups.length ? bGroups.reduce(function (m, g) { return g.poDP < m ? g.poDP : m; }, bGroups[0].poDP) : '9999-99-99';
+        return aMin.localeCompare(bMin);
+      });
+    } // else: leave as-is -- server already sorts newest-PR-date-first, and filtering preserves that order
+
+    renderTotals(withHits, dpFrom, dpTo, dpFilterActive);
 
     if (withHits.length === 0) {
       body.innerHTML = '';
@@ -390,7 +445,7 @@
         '</tr>'
       ];
       if (expandedPRNo === pr.prNo) {
-        out.push('<tr class="detailRow"><td colspan="8">' + renderDetail(pr, r.hitItems) + '</td></tr>');
+        out.push('<tr class="detailRow"><td colspan="8">' + renderDetail(pr, r.hitItems, dpFilterActive, dpFrom, dpTo) + '</td></tr>');
       }
       return out.join('');
     }).join('');
@@ -406,12 +461,14 @@
     '</tr>';
   }
 
-  function renderDetail(pr, hitItems) {
+  function renderDetail(pr, hitItems, dpFilterActive, dpFrom, dpTo) {
     let html = '';
     if (pr.poGroups && pr.poGroups.length) {
+      const dpMatchSet = dpFilterActive ? new Set(getRelevantPODPGroups(pr, dpFrom, dpTo).map(function (g) { return g.poNo; })) : null;
       pr.poGroups.forEach(function (g, gi) {
         const isDone = g.status === 'Recently Delivered';
-        const groupCls = isDone ? 'poGroup poGroupDone' : 'poGroup';
+        const isDPMatch = dpMatchSet && dpMatchSet.has(g.poNo);
+        const groupCls = 'poGroup' + (isDone ? ' poGroupDone' : '') + (isDPMatch ? ' poGroupDPMatch' : '');
         const deliveredNote = isDone
           ? ' &middot; Delivered ' + escapeHtml(g.deliveredDate) + ' &mdash; falls off in ' + escapeHtml(g.daysUntilFallOff) + ' day(s)'
           : ' &middot; PO Value Outstanding: ' + formatINR(g.poValueOutstanding);
@@ -446,6 +503,12 @@
     renderTable();
   }
 
+  function clearDPRange() {
+    document.getElementById('dpFrom').value = '';
+    document.getElementById('dpTo').value = '';
+    renderTable();
+  }
+
   function showLongText(ucsCode, longText) {
     document.getElementById('modalUcsCode').textContent = ucsCode;
     document.getElementById('modalLongText').textContent = longText || '(no long text on file)';
@@ -462,6 +525,7 @@
     onSearchInput: { value: onSearchInput, enumerable: true },
     renderTable: { value: renderTable, enumerable: true },
     clearDateRange: { value: clearDateRange, enumerable: true },
+    clearDPRange: { value: clearDPRange, enumerable: true },
     saveGraceDays: { value: saveGraceDays, enumerable: true },
     toggleExpand: { value: toggleExpand, enumerable: true },
     showLongText: { value: showLongText, enumerable: true },
