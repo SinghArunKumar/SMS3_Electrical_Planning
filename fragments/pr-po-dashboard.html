@@ -80,6 +80,7 @@
   <div id="loggedInBar"></div>
 
   <div id="funnelBar" class="funnelBar"></div>
+  <div id="totalsBar" style="font-size:13px; color:#444; margin-bottom:14px;"></div>
 
   <div class="toolbar">
     <input type="text" id="searchInput" placeholder="Search UCS Code, short text, long text, or PR text (e.g. ABB Drive)&hellip;" oninput="Page.onSearchInput()">
@@ -256,16 +257,61 @@
     }
   }
 
+  // Every PR matching the current date range + search text, regardless of
+  // the currently selected stage filter -- this is the base set that BOTH
+  // the funnel counts and the table start from. Funnel counts must NOT be
+  // restricted by the active stage filter (that would zero out every
+  // bucket except the selected one, defeating the point of showing a
+  // distribution); the table then narrows this further by stage.
+  function getDateAndSearchFilteredPRs() {
+    const dateFrom = document.getElementById('dateFrom').value; // 'YYYY-MM-DD' or ''
+    const dateTo = document.getElementById('dateTo').value;
+    const searchTerm = document.getElementById('searchInput').value.trim().toLowerCase();
+    const terms = searchTerm ? searchTerm.split(/\s+/) : [];
+
+    let rows = allPRs;
+    if (dateFrom) rows = rows.filter(function (pr) { return pr.prCrDt && pr.prCrDt >= dateFrom; }); // plain string compare works: both are 'YYYY-MM-DD'
+    if (dateTo) rows = rows.filter(function (pr) { return pr.prCrDt && pr.prCrDt <= dateTo; });
+
+    return rows.map(function (pr) {
+      const m = matchesSearch(pr, terms);
+      return { pr: pr, hitItems: m.hitItems, matched: m.matched };
+    }).filter(function (r) { return r.matched; });
+  }
+
   function renderFunnel() {
     const bar = document.getElementById('funnelBar');
+    const filtered = getDateAndSearchFilteredPRs();
+    const counts = {};
+    stageOrder.forEach(function (s) { counts[s] = 0; });
+    filtered.forEach(function (r) { counts[r.pr.overallStage] = (counts[r.pr.overallStage] || 0) + 1; });
     // "Fully Received" never appears (archived before it reaches the client) -- skip it in the bar.
     const shown = stageOrder.filter(function (s) { return s !== 'Fully Received'; });
     bar.innerHTML = shown.map(function (stage) {
-      const n = funnel[stage] || 0;
+      const n = counts[stage] || 0;
       const activeCls = (activeStageFilter === stage) ? ' active' : '';
       return '<div class="funnelCard' + activeCls + '" onclick="Page.toggleStageFilter(\'' + stage.replace(/'/g, "\\'") + '\')">' +
         '<div class="n">' + n + '</div><div class="lbl">' + escapeHtml(stage) + '</div></div>';
     }).join('');
+  }
+
+  // Sums whatever the table is CURRENTLY showing (date range + search +
+  // stage filter, all applied) -- not the full unfiltered dataset. PO Value
+  // Outstanding is only summed over PRs where it's non-null (i.e. ones that
+  // actually have a live PO); a pre-PO PR contributes 0, not a skipped/NaN.
+  function renderTotals(withHits) {
+    let totalPRValue = 0, totalPOOutstanding = 0;
+    withHits.forEach(function (r) {
+      const prv = Number(r.pr.prTotValue);
+      if (isFinite(prv)) totalPRValue += prv;
+      if (r.pr.poValueOutstanding !== null && r.pr.poValueOutstanding !== undefined) {
+        const pov = Number(r.pr.poValueOutstanding);
+        if (isFinite(pov)) totalPOOutstanding += pov;
+      }
+    });
+    document.getElementById('totalsBar').innerHTML =
+      'Showing <b>' + withHits.length + '</b> PR(s) &middot; Total PR Value: <b>' + formatINR(totalPRValue) +
+      '</b> &middot; Total PO Value Outstanding: <b>' + formatINR(totalPOOutstanding) + '</b>';
   }
 
   function toggleStageFilter(stage) {
@@ -312,23 +358,15 @@
   }
 
   function renderTable() {
+    renderFunnel(); // funnel counts depend on date range + search too now, so keep both in sync on every render
+
     const body = document.getElementById('tableBody');
     const emptyState = document.getElementById('emptyState');
-    const searchTerm = document.getElementById('searchInput').value.trim().toLowerCase();
-    const terms = searchTerm ? searchTerm.split(/\s+/) : [];
 
-    let rows = allPRs;
-    if (activeStageFilter) rows = rows.filter(function (pr) { return pr.overallStage === activeStageFilter; });
+    let withHits = getDateAndSearchFilteredPRs();
+    if (activeStageFilter) withHits = withHits.filter(function (r) { return r.pr.overallStage === activeStageFilter; });
 
-    const dateFrom = document.getElementById('dateFrom').value; // 'YYYY-MM-DD' or ''
-    const dateTo = document.getElementById('dateTo').value;
-    if (dateFrom) rows = rows.filter(function (pr) { return pr.prCrDt && pr.prCrDt >= dateFrom; }); // plain string compare works: both are 'YYYY-MM-DD'
-    if (dateTo) rows = rows.filter(function (pr) { return pr.prCrDt && pr.prCrDt <= dateTo; });
-
-    const withHits = rows.map(function (pr) {
-      const m = matchesSearch(pr, terms);
-      return { pr: pr, hitItems: m.hitItems, matched: m.matched };
-    }).filter(function (r) { return r.matched; });
+    renderTotals(withHits);
 
     if (withHits.length === 0) {
       body.innerHTML = '';
