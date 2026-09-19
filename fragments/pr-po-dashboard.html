@@ -32,6 +32,8 @@
   .totalsCard.poValue { border-left-color:#0f9d8b; }
   .totalsCard.poOutstanding { border-left-color:#e8710a; }
   .totalsCard.poBalance { border-left-color:#8430ce; }
+  .totalsCard.capitalUsed { border-left-color:#b8860b; }
+  .capitalBadge { display:inline-block; background:#d2e3fc; color:#1a3f7a; font-size:10px; font-weight:700; padding:1px 6px; border-radius:8px; margin-left:5px; vertical-align:middle; }
 
   .searchRow { margin-bottom:14px; }
   .searchRow #searchInput { width:100%; }
@@ -72,6 +74,8 @@
   .poItemsTable td, .poItemsTable th { padding:5px 8px; }
   .pendingSection { margin-top:8px; }
   .pendingSection .hdr { font-size:12px; color:#888; margin-bottom:4px; }
+  .prDatesLine { font-size:12px; color:#555; margin-bottom:10px; }
+  .analysisNote { font-size:12px; color:#8430ce; font-weight:600; margin-bottom:10px; }
 
   .ucsLink { color:#1a73e8; cursor:pointer; text-decoration: underline dotted; }
   .hit { background: #fff3b0; }
@@ -153,6 +157,15 @@
     </div>
 
     <div class="filterGroup">
+      <div class="filterLabel">FY Analysis &middot; Delivered Since</div>
+      <div class="filterRow">
+        <input type="date" id="analysisSinceInput">
+        <button class="iconBtn iconBtnPrimary" title="Load: show every PO delivered since this date (this view only, not saved)" onclick="Page.applyAnalysisOverride()">&#128269;</button>
+        <button class="iconBtn iconBtnClear" title="Clear override, back to normal look-back" onclick="Page.clearAnalysisOverride()">&#129529;</button>
+      </div>
+    </div>
+
+    <div class="filterGroup">
       <div class="filterLabel">&nbsp;</div>
       <div class="filterRow">
         <button class="iconBtn iconBtnPrimary" title="Refresh now" onclick="Page.loadData()">&#8635;</button>
@@ -161,11 +174,13 @@
     </div>
   </div>
 
+  <div id="analysisBanner" class="analysisNote" style="display:none;"></div>
+
   <div id="tableWrap">
     <table>
       <thead><tr>
         <th>PR No.</th><th>PR Text</th><th>Pur Officer</th>
-        <th>PR Value</th><th>PO Value Outstanding</th><th>Stage</th><th>Progress</th><th>Age (days)</th>
+        <th>PR Value</th><th>PO Value Outstanding</th><th>Stage</th><th>Progress</th><th>Release&rarr;PO (days)</th>
       </tr></thead>
       <tbody id="tableBody"></tbody>
     </table>
@@ -197,6 +212,7 @@
   let activeStageFilter = null;
   let expandedPRNo = null;
   let searchTimer = null;
+  let analysisSinceDate = ''; // per-fetch override, NOT persisted -- see toolbar comment
 
   function showMessage(text, type) {
     const el = document.getElementById('message');
@@ -291,18 +307,38 @@
   async function loadData() {
     clearMessage();
     try {
-      const data = await callApi({ action: 'getPRPODashboardData' });
+      const data = await callApi({ action: 'getPRPODashboardData', analysisSinceDate: analysisSinceDate || '' });
       if (!data.success) { showMessage(data.message || 'Could not load the dashboard.', 'error'); return; }
       allPRs = data.prs || [];
       stageOrder = data.stageOrder || [];
       funnel = data.funnel || {};
       if (data.graceDays !== undefined) document.getElementById('graceDaysInput').value = data.graceDays;
+      const banner = document.getElementById('analysisBanner');
+      if (data.analysisSinceDate) {
+        banner.style.display = 'block';
+        banner.textContent = 'FY Analysis mode: showing every fully-received PO delivered since ' + data.analysisSinceDate + ' (temporary -- not saved, click the broom to return to normal view).';
+      } else {
+        banner.style.display = 'none';
+      }
       expandedPRNo = null;
       renderFunnel();
       renderTable();
     } catch (err) {
       showMessage('Could not reach the server. Check your connection.', 'error');
     }
+  }
+
+  function applyAnalysisOverride() {
+    const val = document.getElementById('analysisSinceInput').value;
+    if (!val) { showMessage('Pick a date first.', 'error'); return; }
+    analysisSinceDate = val;
+    loadData();
+  }
+
+  function clearAnalysisOverride() {
+    analysisSinceDate = '';
+    document.getElementById('analysisSinceInput').value = '';
+    loadData();
   }
 
   async function saveGraceDays() {
@@ -382,7 +418,7 @@
   // periods. PR Value itself is never DP-split -- it's the PR's one
   // original budgeted figure, shown for context, not a per-period number.
   function renderTotals(withHits, dpFrom, dpTo, dpFilterActive) {
-    let totalPRValue = 0, totalPOOutstanding = 0, totalPOValue = 0;
+    let totalPRValue = 0, totalPOOutstanding = 0, totalPOValue = 0, totalCapitalValue = 0;
     withHits.forEach(function (r) {
       const prv = Number(r.pr.prTotValue);
       if (isFinite(prv)) totalPRValue += prv;
@@ -403,6 +439,11 @@
           if (isFinite(ptv)) totalPOValue += ptv;
         }
       }
+      // Not DP-restricted, even in DP-filter mode -- capital budget is
+      // committed at PR-raise time, not tied to any one PO's delivery
+      // window (see server-side comment on capitalValueTotal).
+      const cv = Number(r.pr.capitalValueTotal);
+      if (isFinite(cv)) totalCapitalValue += cv;
     });
     const balancePct = totalPOValue > 0 ? (totalPOOutstanding / totalPOValue * 100) : 0;
     const balanceStr = totalPOValue > 0 ? balancePct.toFixed(1) + '%' : '&ndash;';
@@ -414,7 +455,8 @@
       '<div class="totalsCard prValue"><div class="totalsLabel">Total PR Value</div><div class="totalsValue">' + formatINR(totalPRValue) + '</div></div>' +
       '<div class="totalsCard poValue"><div class="totalsLabel">' + poValueLabel + '</div><div class="totalsValue">' + formatINR(totalPOValue) + '</div></div>' +
       '<div class="totalsCard poOutstanding"><div class="totalsLabel">' + outstandingLabel + '</div><div class="totalsValue">' + formatINR(totalPOOutstanding) + '</div></div>' +
-      '<div class="totalsCard poBalance"><div class="totalsLabel">% PO Value Balance</div><div class="totalsValue">' + balanceStr + '</div></div>';
+      '<div class="totalsCard poBalance"><div class="totalsLabel">% PO Value Balance</div><div class="totalsValue">' + balanceStr + '</div></div>' +
+      '<div class="totalsCard capitalUsed"><div class="totalsLabel">Capital Budget Utilized</div><div class="totalsValue">' + formatINR(totalCapitalValue) + '</div></div>';
   }
 
   function toggleStageFilter(stage) {
@@ -505,7 +547,7 @@
           '<td>' + (pr.poValueOutstanding === null ? '&ndash;' : formatINR(pr.poValueOutstanding)) + '</td>' +
           '<td><span class="' + stageClass(pr.overallStage) + '">' + escapeHtml(pr.overallStage) + '</span></td>' +
           '<td>' + escapeHtml(pr.progress) + '</td>' +
-          '<td>' + daysSince(pr.prCrDt) + '</td>' +
+          '<td>' + (pr.releaseToPODays === null ? '&ndash;' : escapeHtml(pr.releaseToPODays)) + '</td>' +
         '</tr>'
       ];
       if (expandedPRNo === pr.prNo) {
@@ -517,16 +559,19 @@
 
   function itemRow(it, key, hitItems) {
     const cls = hitItems[key] ? ' class="hit"' : '';
+    const capitalBadge = it.isCapital ? ' <span class="capitalBadge" title="Capital good \u2014 PR value above \u20b910,00,000">CS</span>' : '';
     return '<tr' + cls + '>' +
       '<td><span class="ucsLink" data-ucscode="' + escapeHtml(it.ucsCode) + '" data-longtext="' + escapeHtml(it.longText || it.description) + '">' + escapeHtml(it.ucsCode) + '</span></td>' +
-      '<td>' + escapeHtml(it.description) + '</td>' +
+      '<td>' + escapeHtml(it.description) + capitalBadge + '</td>' +
       '<td>' + escapeHtml(it.qty) + '</td>' +
-      (it.poQty !== undefined ? '<td>' + escapeHtml(it.altDP) + '</td><td>' + escapeHtml(it.poQty) + '</td><td>' + escapeHtml(it.qty105) + '</td><td>' + escapeHtml(it.date105) + '</td>' : '') +
+      '<td>' + formatINR(it.prValue) + '</td>' +
+      (it.poQty !== undefined ? '<td>' + formatINR(it.poValue) + '</td><td>' + escapeHtml(it.altDP) + '</td><td>' + escapeHtml(it.poQty) + '</td><td>' + escapeHtml(it.qty105) + '</td><td>' + escapeHtml(it.date105) + '</td>' : '') +
     '</tr>';
   }
 
   function renderDetail(pr, hitItems, dpFilterActive, dpFrom, dpTo) {
-    let html = '';
+    let html = '<div class="prDatesLine">PR Created: <b>' + escapeHtml(pr.prCrDt || '&ndash;') + '</b> &middot; PR Released: <b>' +
+      escapeHtml(pr.finalRelDt || 'Not yet released') + '</b></div>';
     if (pr.poGroups && pr.poGroups.length) {
       const dpMatchSet = dpFilterActive ? new Set(getRelevantPODPGroups(pr, dpFrom, dpTo).map(function (g) { return g.poNo; })) : null;
       pr.poGroups.forEach(function (g, gi) {
@@ -534,25 +579,29 @@
         const isDPMatch = dpMatchSet && dpMatchSet.has(g.poNo);
         const groupCls = 'poGroup' + (isDone ? ' poGroupDone' : '') + (isDPMatch ? ' poGroupDPMatch' : '');
         const deliveredNote = isDone
-          ? ' &middot; Delivered ' + escapeHtml(g.deliveredDate) + ' &mdash; falls off in ' + escapeHtml(g.daysUntilFallOff) + ' day(s)'
+          ? (g.keptByAnalysisOverride
+              ? ' &middot; Delivered ' + escapeHtml(g.deliveredDate)
+              : ' &middot; Delivered ' + escapeHtml(g.deliveredDate) + ' &mdash; falls off in ' + escapeHtml(g.daysUntilFallOff) + ' day(s)')
           : ' &middot; PO Value Outstanding: ' + formatINR(g.poValueOutstanding);
         html += '<div class="' + groupCls + '">' +
           '<div class="poGroupHead">' +
             '<div><b>PO ' + escapeHtml(g.poNo) + '</b> &middot; ' + escapeHtml(g.poDate) + ' &middot; ' + escapeHtml(g.vendorName) + (g.poDP ? ' &middot; PO DP: ' + escapeHtml(g.poDP) : '') + deliveredNote + '</div>' +
             '<div><span class="' + stageClass(g.status) + '">' + escapeHtml(g.status) + '</span></div>' +
           '</div>' +
-          '<table class="poItemsTable"><thead><tr><th>UCS Code</th><th>Description</th><th>Qty</th><th>Alt DP</th><th>PO Qty</th><th>105 Qty</th><th>105 Date</th></tr></thead><tbody>' +
+          '<table class="poItemsTable"><thead><tr><th>UCS Code</th><th>Description</th><th>Qty</th><th>PR Value</th><th>PO Value</th><th>Alt DP</th><th>PO Qty</th><th>105 Qty</th><th>105 Date</th></tr></thead><tbody>' +
           g.items.map(function (it, idx) { return itemRow(it, 'po' + gi + '_' + idx, hitItems); }).join('') +
           '</tbody></table></div>';
       });
     }
     if (pr.itemsPendingPOAward && pr.itemsPendingPOAward.length) {
       html += '<div class="pendingSection"><div class="hdr">Items still pending PO award:</div>' +
-        '<table class="poItemsTable"><thead><tr><th>UCS Code</th><th>Description</th><th>Qty</th></tr></thead><tbody>' +
+        '<table class="poItemsTable"><thead><tr><th>UCS Code</th><th>Description</th><th>Qty</th><th>PR Value</th></tr></thead><tbody>' +
         pr.itemsPendingPOAward.map(function (it, idx) { return itemRow(it, 'pend_' + idx, hitItems); }).join('') +
         '</tbody></table></div>';
     }
-    if (!html) html = '<div class="emptyNote">No Material List entries yet for this PR.</div>';
+    if (!(pr.poGroups && pr.poGroups.length) && !(pr.itemsPendingPOAward && pr.itemsPendingPOAward.length)) {
+      html += '<div class="emptyNote">No Material List entries yet for this PR.</div>';
+    }
     return html;
   }
 
@@ -591,6 +640,8 @@
     clearDateRange: { value: clearDateRange, enumerable: true },
     clearDPRange: { value: clearDPRange, enumerable: true },
     saveGraceDays: { value: saveGraceDays, enumerable: true },
+    applyAnalysisOverride: { value: applyAnalysisOverride, enumerable: true },
+    clearAnalysisOverride: { value: clearAnalysisOverride, enumerable: true },
     toggleExpand: { value: toggleExpand, enumerable: true },
     showLongText: { value: showLongText, enumerable: true },
     closeModal: { value: closeModal, enumerable: true }
