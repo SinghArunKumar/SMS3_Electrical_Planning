@@ -518,7 +518,7 @@
   function itemRow(it, key, hitItems) {
     const cls = hitItems[key] ? ' class="hit"' : '';
     return '<tr' + cls + '>' +
-      '<td><span class="ucsLink" onclick="event.stopPropagation(); Page.showLongText(\'' + it.ucsCode + '\',\'' + escapeHtml(it.longText || it.description).replace(/'/g, "\\'") + '\')">' + escapeHtml(it.ucsCode) + '</span></td>' +
+      '<td><span class="ucsLink" data-ucscode="' + escapeHtml(it.ucsCode) + '" data-longtext="' + escapeHtml(it.longText || it.description) + '">' + escapeHtml(it.ucsCode) + '</span></td>' +
       '<td>' + escapeHtml(it.description) + '</td>' +
       '<td>' + escapeHtml(it.qty) + '</td>' +
       (it.poQty !== undefined ? '<td>' + escapeHtml(it.altDP) + '</td><td>' + escapeHtml(it.poQty) + '</td><td>' + escapeHtml(it.qty105) + '</td><td>' + escapeHtml(it.date105) + '</td>' : '') +
@@ -594,6 +594,21 @@
     toggleExpand: { value: toggleExpand, enumerable: true },
     showLongText: { value: showLongText, enumerable: true },
     closeModal: { value: closeModal, enumerable: true }
+  });
+
+  // Delegated once, on the table body itself (a stable element that never
+  // gets replaced, only its innerHTML/children do on each render) -- rather
+  // than an inline onclick built by splicing the item's long text into a
+  // JS string literal, which broke silently whenever that text contained a
+  // double quote, backslash, or line break (common in engineering
+  // descriptions, e.g. an inch mark). Reading from data-* attributes goes
+  // through normal HTML attribute escaping instead, which handles every
+  // character correctly.
+  document.getElementById('tableBody').addEventListener('click', function (e) {
+    const link = e.target.closest('.ucsLink');
+    if (!link) return;
+    e.stopPropagation();
+    showLongText(link.dataset.ucscode, link.dataset.longtext);
   });
 
   document.getElementById('loginEmail').value = Shell.getUser().email;
