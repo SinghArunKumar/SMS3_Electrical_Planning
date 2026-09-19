@@ -18,11 +18,34 @@
   .toolbar { display:flex; gap:10px; align-items:center; margin-bottom: 14px; flex-wrap: wrap; }
   #searchInput { flex: 1; min-width: 220px; }
 
-  .funnelBar { display:flex; gap:8px; margin-bottom:18px; flex-wrap: wrap; }
+  .funnelBar { display:flex; gap:8px; margin-bottom:12px; flex-wrap: wrap; }
   .funnelCard { flex:1; min-width:120px; padding:10px 12px; border-radius:6px; background:#f5f6f8; border:1px solid #e3e5e8; cursor:pointer; text-align:center; }
   .funnelCard.active { border-color:#1a73e8; background:#eaf1fd; }
   .funnelCard .n { font-size:20px; font-weight:bold; color:#222; }
   .funnelCard .lbl { font-size:11px; color:#666; margin-top:2px; }
+
+  .totalsBar { display:flex; gap:10px; margin-bottom:18px; flex-wrap:wrap; }
+  .totalsCard { flex:1; min-width:180px; padding:12px 16px; border-radius:8px; background:white; border:1px solid #e3e5e8; border-left:4px solid #ccc; }
+  .totalsCard .totalsLabel { font-size:11px; color:#888; text-transform:uppercase; letter-spacing:.03em; margin-bottom:4px; }
+  .totalsCard .totalsValue { font-size:21px; font-weight:700; color:#1c1c1c; }
+  .totalsCard.count { border-left-color:#5f6368; }
+  .totalsCard.prValue { border-left-color:#1a73e8; }
+  .totalsCard.poValue { border-left-color:#e8710a; }
+
+  .searchRow { margin-bottom:14px; }
+  .searchRow #searchInput { width:100%; }
+
+  .filterPanel { display:flex; flex-wrap:wrap; align-items:flex-end; gap:18px; margin-bottom:18px; padding:14px 16px; background:#fafbfc; border:1px solid #e8eaed; border-radius:10px; }
+  .filterGroup { display:flex; flex-direction:column; gap:6px; }
+  .filterLabel { font-size:10.5px; font-weight:700; color:#5f6368; text-transform:uppercase; letter-spacing:.04em; white-space:nowrap; }
+  .filterRow { display:flex; align-items:center; gap:6px; }
+  .filterSep { font-size:12px; color:#999; }
+  .filterCaption { font-size:11px; color:#999; }
+
+  .iconBtn { width:34px; height:34px; min-width:34px; border-radius:6px; border:1px solid #ccc; background:white; cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:16px; line-height:1; padding:0; }
+  .iconBtn:hover { background:#f0f2f5; }
+  .iconBtnPrimary { background:#1a73e8; color:white; border-color:#1a73e8; font-size:18px; }
+  .iconBtnPrimary:hover { background:#1560c9; }
 
   table { width:100%; border-collapse: collapse; font-size: 13px; }
   th, td { text-align:left; padding:8px; border-bottom:1px solid #eee; vertical-align: top; }
@@ -81,33 +104,58 @@
   <div id="loggedInBar"></div>
 
   <div id="funnelBar" class="funnelBar"></div>
-  <div id="totalsBar" style="font-size:13px; color:#444; margin-bottom:14px;"></div>
+  <div id="totalsBar" class="totalsBar"></div>
 
-  <div class="toolbar">
+  <div class="searchRow">
     <input type="text" id="searchInput" placeholder="Search UCS Code, short text, long text, or PR text (e.g. ABB Drive)&hellip;" oninput="Page.onSearchInput()">
-    <label style="margin:0; font-weight:normal; font-size:12px; color:#666;">PR Date From</label>
-    <input type="date" id="dateFrom" onchange="Page.renderTable()">
-    <label style="margin:0; font-weight:normal; font-size:12px; color:#666;">To</label>
-    <input type="date" id="dateTo" onchange="Page.renderTable()">
-    <button class="secondary" onclick="Page.clearDateRange()">Clear dates</button>
-    <label style="margin:0; font-weight:normal; font-size:12px; color:#666;">Look-back for delivered POs (days)</label>
-    <input type="number" id="graceDaysInput" min="1" max="180" step="1" style="width:70px;">
-    <button class="secondary" onclick="Page.saveGraceDays()">Save</button>
-    <button class="secondary" onclick="Page.loadData()">Refresh now</button>
-    <span id="pollNote" style="font-size:12px; color:#888;">Loaded once &mdash; click Refresh after your SAP update</span>
   </div>
 
-  <div class="toolbar" style="margin-top:-8px;">
-    <label style="margin:0; font-weight:normal; font-size:12px; color:#666;">Budget projection &mdash; PO DP From</label>
-    <input type="date" id="dpFrom" onchange="Page.renderTable()">
-    <label style="margin:0; font-weight:normal; font-size:12px; color:#666;">To</label>
-    <input type="date" id="dpTo" onchange="Page.renderTable()">
-    <button class="secondary" onclick="Page.clearDPRange()">Clear DP dates</button>
-    <label style="margin:0; font-weight:normal; font-size:12px; color:#666;">Sort by</label>
-    <select id="sortMode" onchange="Page.renderTable()">
-      <option value="prDate">PR Date (newest first)</option>
-      <option value="poDP">PO Delivery Period (earliest first)</option>
-    </select>
+  <div class="filterPanel">
+    <div class="filterGroup">
+      <div class="filterLabel">PR Date Range</div>
+      <div class="filterRow">
+        <input type="date" id="dateFrom" onchange="Page.renderTable()">
+        <span class="filterSep">to</span>
+        <input type="date" id="dateTo" onchange="Page.renderTable()">
+        <button class="iconBtn" title="Clear PR date range" onclick="Page.clearDateRange()">&#10005;</button>
+      </div>
+    </div>
+
+    <div class="filterGroup">
+      <div class="filterLabel">Budget Projection &middot; PO DP</div>
+      <div class="filterRow">
+        <input type="date" id="dpFrom" onchange="Page.renderTable()">
+        <span class="filterSep">to</span>
+        <input type="date" id="dpTo" onchange="Page.renderTable()">
+        <button class="iconBtn" title="Clear PO DP range" onclick="Page.clearDPRange()">&#10005;</button>
+      </div>
+    </div>
+
+    <div class="filterGroup">
+      <div class="filterLabel">Sort By</div>
+      <div class="filterRow">
+        <select id="sortMode" onchange="Page.renderTable()">
+          <option value="prDate">PR Date (newest first)</option>
+          <option value="poDP">PO Delivery Period (earliest first)</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="filterGroup">
+      <div class="filterLabel">Delivered-PO Look-back (days)</div>
+      <div class="filterRow">
+        <input type="number" id="graceDaysInput" min="1" max="180" step="1" style="width:60px;">
+        <button class="iconBtn" title="Save look-back period" onclick="Page.saveGraceDays()">&#128190;</button>
+      </div>
+    </div>
+
+    <div class="filterGroup">
+      <div class="filterLabel">&nbsp;</div>
+      <div class="filterRow">
+        <button class="iconBtn iconBtnPrimary" title="Refresh now" onclick="Page.loadData()">&#8635;</button>
+        <span class="filterCaption" id="pollNote">Refresh after<br>SAP update</span>
+      </div>
+    </div>
   </div>
 
   <div id="tableWrap">
@@ -346,11 +394,12 @@
       }
     });
     const poLabel = dpFilterActive
-      ? 'Budget Projection for PO DP ' + (dpFrom || '&hellip;') + ' to ' + (dpTo || '&hellip;')
+      ? 'Budget Projection &middot; PO DP ' + (dpFrom || '&hellip;') + ' to ' + (dpTo || '&hellip;')
       : 'Total PO Value Outstanding';
     document.getElementById('totalsBar').innerHTML =
-      'Showing <b>' + withHits.length + '</b> PR(s) &middot; Total PR Value: <b>' + formatINR(totalPRValue) +
-      '</b> &middot; ' + poLabel + ': <b>' + formatINR(totalPOOutstanding) + '</b>';
+      '<div class="totalsCard count"><div class="totalsLabel">PRs Shown</div><div class="totalsValue">' + withHits.length + '</div></div>' +
+      '<div class="totalsCard prValue"><div class="totalsLabel">Total PR Value</div><div class="totalsValue">' + formatINR(totalPRValue) + '</div></div>' +
+      '<div class="totalsCard poValue"><div class="totalsLabel">' + poLabel + '</div><div class="totalsValue">' + formatINR(totalPOOutstanding) + '</div></div>';
   }
 
   function toggleStageFilter(stage) {
