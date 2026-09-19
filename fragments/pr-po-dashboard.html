@@ -36,6 +36,8 @@
   .badgeUnderEnquiry, .badgeTechCommEvaluation { background:#e8710a; }
   .badgePendingPOAward, .badgePendingDelivery { background:#c5221f; }
   .badgePartial { background:#1a73e8; }
+  .badgeRecentlyDelivered { background:#1e8e3e; }
+  .poGroupDone { opacity:0.75; }
 
   .poGroup { margin: 10px 0; border:1px solid #e3e5e8; border-radius:6px; overflow:hidden; }
   .poGroupHead { padding:8px 10px; background:#eef0f3; font-size:12px; display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; }
@@ -86,6 +88,9 @@
     <label style="margin:0; font-weight:normal; font-size:12px; color:#666;">To</label>
     <input type="date" id="dateTo" onchange="Page.renderTable()">
     <button class="secondary" onclick="Page.clearDateRange()">Clear dates</button>
+    <label style="margin:0; font-weight:normal; font-size:12px; color:#666;">Look-back for delivered POs (days)</label>
+    <input type="number" id="graceDaysInput" min="1" max="180" step="1" style="width:70px;">
+    <button class="secondary" onclick="Page.saveGraceDays()">Save</button>
     <button class="secondary" onclick="Page.loadData()">Refresh now</button>
     <span id="pollNote" style="font-size:12px; color:#888;">Loaded once &mdash; click Refresh after your SAP update</span>
   </div>
@@ -225,9 +230,27 @@
       allPRs = data.prs || [];
       stageOrder = data.stageOrder || [];
       funnel = data.funnel || {};
+      if (data.graceDays !== undefined) document.getElementById('graceDaysInput').value = data.graceDays;
       expandedPRNo = null;
       renderFunnel();
       renderTable();
+    } catch (err) {
+      showMessage('Could not reach the server. Check your connection.', 'error');
+    }
+  }
+
+  async function saveGraceDays() {
+    const val = Number(document.getElementById('graceDaysInput').value);
+    if (!Number.isInteger(val) || val < 1 || val > 180) {
+      showMessage('Look-back period must be a whole number of days, between 1 and 180.', 'error');
+      return;
+    }
+    clearMessage();
+    try {
+      const data = await callApi({ action: 'updateProcurementDashboardSettings', graceDays: val });
+      if (!data.success) { showMessage(data.message || 'Could not update the look-back period.', 'error'); return; }
+      showMessage(data.message, 'success');
+      loadData(); // re-apply the new window immediately, without a manual Refresh
     } catch (err) {
       showMessage('Could not reach the server. Check your connection.', 'error');
     }
@@ -349,9 +372,14 @@
     let html = '';
     if (pr.poGroups && pr.poGroups.length) {
       pr.poGroups.forEach(function (g, gi) {
-        html += '<div class="poGroup">' +
+        const isDone = g.status === 'Recently Delivered';
+        const groupCls = isDone ? 'poGroup poGroupDone' : 'poGroup';
+        const deliveredNote = isDone
+          ? ' &middot; Delivered ' + escapeHtml(g.deliveredDate) + ' &mdash; falls off in ' + escapeHtml(g.daysUntilFallOff) + ' day(s)'
+          : ' &middot; PO Value Outstanding: ' + formatINR(g.poValueOutstanding);
+        html += '<div class="' + groupCls + '">' +
           '<div class="poGroupHead">' +
-            '<div><b>PO ' + escapeHtml(g.poNo) + '</b> &middot; ' + escapeHtml(g.poDate) + ' &middot; ' + escapeHtml(g.vendorName) + (g.poDP ? ' &middot; PO DP: ' + escapeHtml(g.poDP) : '') + ' &middot; PO Value Outstanding: ' + formatINR(g.poValueOutstanding) + '</div>' +
+            '<div><b>PO ' + escapeHtml(g.poNo) + '</b> &middot; ' + escapeHtml(g.poDate) + ' &middot; ' + escapeHtml(g.vendorName) + (g.poDP ? ' &middot; PO DP: ' + escapeHtml(g.poDP) : '') + deliveredNote + '</div>' +
             '<div><span class="' + stageClass(g.status) + '">' + escapeHtml(g.status) + '</span></div>' +
           '</div>' +
           '<table class="poItemsTable"><thead><tr><th>UCS Code</th><th>Description</th><th>Qty</th><th>Alt DP</th><th>PO Qty</th><th>105 Qty</th><th>105 Date</th></tr></thead><tbody>' +
@@ -396,6 +424,7 @@
     onSearchInput: { value: onSearchInput, enumerable: true },
     renderTable: { value: renderTable, enumerable: true },
     clearDateRange: { value: clearDateRange, enumerable: true },
+    saveGraceDays: { value: saveGraceDays, enumerable: true },
     toggleExpand: { value: toggleExpand, enumerable: true },
     showLongText: { value: showLongText, enumerable: true },
     closeModal: { value: closeModal, enumerable: true }
