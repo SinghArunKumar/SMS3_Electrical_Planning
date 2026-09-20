@@ -38,6 +38,12 @@
   .totalsCard.carryCF { border-left-color:#e8a90c; }
   .totalsCard.carryBF, .totalsCard.carryCF { cursor:pointer; }
   .totalsCard.carryBF.active, .totalsCard.carryCF.active { outline:2px solid #1a73e8; outline-offset:-2px; background:#eaf1fd; }
+
+  #compositionChart { background:white; border:1px solid #e0e0e0; border-radius:8px; padding:14px 16px; margin-bottom:12px; }
+  .compTitle { font-size:12px; font-weight:700; color:#5f6368; text-transform:uppercase; letter-spacing:0.03em; margin-bottom:8px; }
+  .compLegend { display:flex; flex-wrap:wrap; gap:16px; margin-top:10px; font-size:13px; color:#333; }
+  .compLegendItem { display:flex; align-items:center; gap:6px; }
+  .compSwatch { width:12px; height:12px; border-radius:2px; display:inline-block; flex-shrink:0; }
   .capitalBadge { display:inline-block; background:#d2e3fc; color:#1a3f7a; font-size:10px; font-weight:700; padding:1px 6px; border-radius:8px; margin-left:5px; vertical-align:middle; }
 
   .searchRow { margin-bottom:14px; }
@@ -117,6 +123,8 @@
   <div id="loggedInBar"></div>
 
   <div id="totalsBar" class="totalsBar"></div>
+  <div id="capitalBar" class="totalsBar"></div>
+  <div id="compositionChart" style="display:none;"></div>
   <div id="carryOverBar" class="totalsBar" style="display:none;"></div>
 
   <div class="searchRow">
@@ -505,17 +513,69 @@
     const outstandingLabel = dpFilterActive
       ? 'Budget Projection &middot; Effective DP ' + (dpFrom || '&hellip;') + ' to ' + (dpTo || '&hellip;')
       : 'Total PO Value Outstanding';
-    const capitalReceivedStr = dpFilterActive ? formatINR(totalCapitalReceived) : '&ndash;';
-    const capitalOutstandingStr = dpFilterActive ? formatINR(totalCapitalOutstanding) : '&ndash;';
     document.getElementById('totalsBar').innerHTML =
       '<div class="totalsCard prValue"><div class="totalsLabel">' + prValueLabel + '</div><div class="totalsValue">' + formatINR(totalPRValue) + '</div></div>' +
       '<div class="totalsCard poValue"><div class="totalsLabel">' + poValueLabel + '</div><div class="totalsValue">' + formatINR(totalPOValue) + '</div></div>' +
       '<div class="totalsCard poOutstanding"><div class="totalsLabel">' + outstandingLabel + '</div><div class="totalsValue">' + formatINR(totalPOOutstanding) + '</div></div>' +
       '<div class="totalsCard poReceived"><div class="totalsLabel">Received So Far</div><div class="totalsValue">' + formatINR(totalReceived) + '</div></div>' +
-      '<div class="totalsCard poBalance"><div class="totalsLabel">% PO Value Balance</div><div class="totalsValue">' + balanceStr + '</div></div>' +
+      '<div class="totalsCard poBalance"><div class="totalsLabel">% PO Value Balance</div><div class="totalsValue">' + balanceStr + '</div></div>';
+
+    // Capital's own row, grouped together rather than split across two
+    // rows -- plus the two ratios requested: how much of what's capital has
+    // actually arrived, and how much of the whole committed figure is
+    // capital in nature to begin with.
+    const capitalReceivedStr = dpFilterActive ? formatINR(totalCapitalReceived) : '&ndash;';
+    const capitalOutstandingStr = dpFilterActive ? formatINR(totalCapitalOutstanding) : '&ndash;';
+    const capitalReceivedPct = (dpFilterActive && totalCapitalValue > 0) ? (totalCapitalReceived / totalCapitalValue * 100).toFixed(1) + '%' : '&ndash;';
+    const capitalMixPct = (totalPOValue > 0) ? (totalCapitalValue / totalPOValue * 100).toFixed(1) + '%' : '&ndash;';
+    document.getElementById('capitalBar').innerHTML =
       '<div class="totalsCard capitalUsed"><div class="totalsLabel">Capital Budget Utilized</div><div class="totalsValue">' + formatINR(totalCapitalValue) + '</div></div>' +
       '<div class="totalsCard capitalUsed"><div class="totalsLabel">Capital Received</div><div class="totalsValue">' + capitalReceivedStr + '</div></div>' +
-      '<div class="totalsCard capitalUsed"><div class="totalsLabel">Capital Outstanding</div><div class="totalsValue">' + capitalOutstandingStr + '</div></div>';
+      '<div class="totalsCard capitalUsed"><div class="totalsLabel">Capital Outstanding</div><div class="totalsValue">' + capitalOutstandingStr + '</div></div>' +
+      '<div class="totalsCard capitalUsed"><div class="totalsLabel">% Capital Received</div><div class="totalsValue">' + capitalReceivedPct + '</div></div>' +
+      '<div class="totalsCard capitalUsed"><div class="totalsLabel">% Capital Mix of Committed</div><div class="totalsValue">' + capitalMixPct + '</div></div>';
+
+    renderCompositionChart(dpFilterActive, totalPOValue, totalCapitalReceived, totalCapitalOutstanding, totalReceived, totalPOOutstanding);
+  }
+
+  // One 100%-stacked horizontal bar, four segments that exactly add up to
+  // Committed Value: Capital Received, Capital Outstanding, Non-Capital
+  // Received, Non-Capital Outstanding. Two different ways of slicing the
+  // same total (capital vs non-capital, received vs outstanding) shown at
+  // once, rather than two separate charts the reader has to mentally
+  // combine. Plain inline SVG -- no charting library, consistent with the
+  // rest of this project having zero external JS dependencies.
+  function renderCompositionChart(dpFilterActive, total, capReceived, capOutstanding, totalReceived, totalOutstanding) {
+    const el = document.getElementById('compositionChart');
+    if (!dpFilterActive || total <= 0) { el.style.display = 'none'; el.innerHTML = ''; return; }
+    const nonCapReceived = Math.max(totalReceived - capReceived, 0);
+    const nonCapOutstanding = Math.max(totalOutstanding - capOutstanding, 0);
+    const segments = [
+      { label: 'Capital Received', value: capReceived, color: '#1e8e3e' },
+      { label: 'Capital Outstanding', value: capOutstanding, color: '#b8860b' },
+      { label: 'Non-Capital Received', value: nonCapReceived, color: '#8ecf9e' },
+      { label: 'Non-Capital Outstanding', value: nonCapOutstanding, color: '#e8c46a' }
+    ];
+    const barWidth = 1000, barHeight = 46;
+    let x = 0;
+    const rects = segments.map(function (s) {
+      const w = total > 0 ? (s.value / total) * barWidth : 0;
+      const pct = total > 0 ? (s.value / total * 100).toFixed(1) : '0.0';
+      const rect = '<rect x="' + x.toFixed(2) + '" y="0" width="' + w.toFixed(2) + '" height="' + barHeight + '" fill="' + s.color + '">' +
+        '<title>' + escapeHtml(s.label) + ': ' + formatINR(s.value) + ' (' + pct + '%)</title></rect>';
+      x += w;
+      return rect;
+    }).join('');
+    const legend = segments.map(function (s) {
+      const pct = total > 0 ? (s.value / total * 100).toFixed(1) : '0.0';
+      return '<div class="compLegendItem"><span class="compSwatch" style="background:' + s.color + ';"></span>' +
+        escapeHtml(s.label) + ': <b>' + formatINR(s.value) + '</b> (' + pct + '%)</div>';
+    }).join('');
+    el.style.display = 'block';
+    el.innerHTML =
+      '<div class="compTitle">Budget Composition &middot; Effective DP window</div>' +
+      '<svg viewBox="0 0 ' + barWidth + ' ' + barHeight + '" style="width:100%; height:44px; display:block; border-radius:4px; overflow:hidden;">' + rects + '</svg>' +
+      '<div class="compLegend">' + legend + '</div>';
   }
 
   function daysSince(dateStr) {
