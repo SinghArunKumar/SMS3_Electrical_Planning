@@ -170,7 +170,7 @@
     <table>
       <thead><tr>
         <th>PR No.</th><th>PR Text</th><th>Pur Officer</th>
-        <th>PR Value</th><th>Committed Value</th><th>Outstanding</th><th>Capital</th><th>Stage</th>
+        <th id="prValueColHeader">PR Value</th><th>Committed Value</th><th>Outstanding</th><th>Capital</th><th>Stage</th>
       </tr></thead>
       <tbody id="tableBody"></tbody>
     </table>
@@ -361,6 +361,11 @@
     const full = Number(it.committedValue) || 0;
     const outstanding = Number(it.outstandingValue) || 0;
     const received = Math.max(full - outstanding, 0);
+    // PR Value (the item's original estimate, a single fixed number) isn't
+    // itself split into a received/outstanding pair the way Committed Value
+    // is -- so it's apportioned here by the same fraction the qty actually
+    // received represents, e.g. 3 of 5 units received -> 60% of this item's
+    // PR Value counts as "received," 40% as "still outstanding."
     const fraction = full > 0 ? received / full : 0;
     const prValueNum = Number(it.prValue) || 0;
     return {
@@ -368,8 +373,16 @@
       receivedDate: it.date105 || '',
       outstandingValue: outstanding,
       outstandingDate: it.effectiveDate || '',
-      capitalReceived: it.isCapital ? prValueNum * fraction : 0,
-      capitalOutstanding: it.isCapital ? prValueNum * (1 - fraction) : 0
+      prValueReceived: prValueNum * fraction,
+      prValueOutstanding: prValueNum * (1 - fraction),
+      // Fixed: capital used to be computed from PR Value while everything
+      // else here uses Committed Value (PO Value once a PO exists) -- two
+      // different bases that can't be validly subtracted from each other.
+      // Now capital is simply the received/outstanding split ITSELF,
+      // filtered to capital-classified items, so Committed - Capital always
+      // equals a genuine non-capital committed figure.
+      capitalReceived: it.isCapital ? received : 0,
+      capitalOutstanding: it.isCapital ? outstanding : 0
     };
   }
 
@@ -415,7 +428,7 @@
   // Committed + Received) and its outstanding portion (into Committed +
   // Outstanding) independently, at two different dates.
   function computeWindowTotals(prs, dpFrom, dpTo) {
-    let committed = 0, outstanding = 0, received = 0, capital = 0;
+    let committed = 0, outstanding = 0, received = 0, capital = 0, capitalReceived = 0, capitalOutstanding = 0, prValue = 0;
     prs.forEach(function (pr) {
       getAllItemsFlat(pr).forEach(function (it) {
         const s = splitItemValue(it);
@@ -423,15 +436,19 @@
           committed += s.receivedValue;
           received += s.receivedValue;
           capital += s.capitalReceived;
+          capitalReceived += s.capitalReceived;
+          prValue += s.prValueReceived;
         }
         if (s.outstandingValue > 0 && dateInRange(s.outstandingDate, dpFrom, dpTo)) {
           committed += s.outstandingValue;
           outstanding += s.outstandingValue;
           capital += s.capitalOutstanding;
+          capitalOutstanding += s.capitalOutstanding;
+          prValue += s.prValueOutstanding;
         }
       });
     });
-    return { committed: committed, outstanding: outstanding, received: received, capital: capital };
+    return { committed: committed, outstanding: outstanding, received: received, capital: capital, capitalReceived: capitalReceived, capitalOutstanding: capitalOutstanding, prValue: prValue };
   }
 
   // Sums whatever the table is CURRENTLY showing (date range + search +
@@ -445,18 +462,20 @@
   // context, not a per-period number.
   function renderTotals(withHits, dpFrom, dpTo, dpFilterActive) {
     let totalPRValue = 0, totalPOOutstanding = 0, totalPOValue = 0, totalCapitalValue = 0, totalReceived = 0;
-    withHits.forEach(function (r) {
-      const prv = Number(r.pr.prTotValue);
-      if (isFinite(prv)) totalPRValue += prv;
-    });
+    let totalCapitalReceived = 0, totalCapitalOutstanding = 0;
     if (dpFilterActive) {
       const w = computeWindowTotals(withHits.map(function (r) { return r.pr; }), dpFrom, dpTo);
+      totalPRValue = w.prValue; // item-scoped now, matching Committed Value's own scoping -- see PR-value note below
       totalPOValue = w.committed;
       totalPOOutstanding = w.outstanding;
       totalReceived = w.received;
       totalCapitalValue = w.capital;
+      totalCapitalReceived = w.capitalReceived;
+      totalCapitalOutstanding = w.capitalOutstanding;
     } else {
       withHits.forEach(function (r) {
+        const prv = Number(r.pr.prTotValue);
+        if (isFinite(prv)) totalPRValue += prv; // whole-PR value -- no window to scope items against
         if (r.pr.poValueOutstanding !== null && r.pr.poValueOutstanding !== undefined) {
           const pov = Number(r.pr.poValueOutstanding);
           if (isFinite(pov)) totalPOOutstanding += pov;
@@ -467,22 +486,36 @@
         }
         const cv = Number(r.pr.capitalValueTotal);
         if (isFinite(cv)) totalCapitalValue += cv;
+        // No received/outstanding split for capital available server-side
+        // in the unfiltered default view (capitalValueTotal is a single
+        // all-time PR-level rollup) -- shown as "-" below in that case.
       });
       totalReceived = totalPOValue - totalPOOutstanding; // no windowing involved here, so this subtraction is exact
     }
     const balancePct = totalPOValue > 0 ? (totalPOOutstanding / totalPOValue * 100) : 0;
     const balanceStr = totalPOValue > 0 ? balancePct.toFixed(1) + '%' : '&ndash;';
+    // PR Value used to always be the PR's WHOLE original value, counted in
+    // full for every PR that had ANY item touching the window -- so a
+    // 29-item, Rs 1.9 Cr PR with just one matching item contributed its
+    // entire Rs 1.9 Cr here, not just that item's share. Now, same as
+    // Committed Value, only the value of items actually landing in the
+    // window counts -- everything on this page measures the same thing.
+    const prValueLabel = dpFilterActive ? 'PR Value &middot; Effective DP window' : 'Total PR Value';
     const poValueLabel = dpFilterActive ? 'Committed Value &middot; Effective DP window' : 'Total PO Value';
     const outstandingLabel = dpFilterActive
       ? 'Budget Projection &middot; Effective DP ' + (dpFrom || '&hellip;') + ' to ' + (dpTo || '&hellip;')
       : 'Total PO Value Outstanding';
+    const capitalReceivedStr = dpFilterActive ? formatINR(totalCapitalReceived) : '&ndash;';
+    const capitalOutstandingStr = dpFilterActive ? formatINR(totalCapitalOutstanding) : '&ndash;';
     document.getElementById('totalsBar').innerHTML =
-      '<div class="totalsCard prValue"><div class="totalsLabel">Total PR Value</div><div class="totalsValue">' + formatINR(totalPRValue) + '</div></div>' +
+      '<div class="totalsCard prValue"><div class="totalsLabel">' + prValueLabel + '</div><div class="totalsValue">' + formatINR(totalPRValue) + '</div></div>' +
       '<div class="totalsCard poValue"><div class="totalsLabel">' + poValueLabel + '</div><div class="totalsValue">' + formatINR(totalPOValue) + '</div></div>' +
       '<div class="totalsCard poOutstanding"><div class="totalsLabel">' + outstandingLabel + '</div><div class="totalsValue">' + formatINR(totalPOOutstanding) + '</div></div>' +
       '<div class="totalsCard poReceived"><div class="totalsLabel">Received So Far</div><div class="totalsValue">' + formatINR(totalReceived) + '</div></div>' +
       '<div class="totalsCard poBalance"><div class="totalsLabel">% PO Value Balance</div><div class="totalsValue">' + balanceStr + '</div></div>' +
-      '<div class="totalsCard capitalUsed"><div class="totalsLabel">Capital Budget Utilized</div><div class="totalsValue">' + formatINR(totalCapitalValue) + '</div></div>';
+      '<div class="totalsCard capitalUsed"><div class="totalsLabel">Capital Budget Utilized</div><div class="totalsValue">' + formatINR(totalCapitalValue) + '</div></div>' +
+      '<div class="totalsCard capitalUsed"><div class="totalsLabel">Capital Received</div><div class="totalsValue">' + capitalReceivedStr + '</div></div>' +
+      '<div class="totalsCard capitalUsed"><div class="totalsLabel">Capital Outstanding</div><div class="totalsValue">' + capitalOutstandingStr + '</div></div>';
   }
 
   function daysSince(dateStr) {
@@ -527,27 +560,33 @@
   // Effective DP window is active, else from the PR-level rollups.
   function computeRowValues(pr, dpFrom, dpTo, dpFilterActive, carryMode) {
     if (carryMode) {
-      let committed = 0, outstanding = 0, capital = 0;
+      // BF/CF items are, by definition, entirely the still-OUTSTANDING
+      // portion of an item (a received portion can't be "brought forward"
+      // or "carried forward") -- so PR Value and Capital here use each
+      // item's outstanding-side split via splitItemValue, the same helper
+      // and the same basis (Committed Value, not raw PR Value) used
+      // everywhere else on this page.
+      let committed = 0, outstanding = 0, capital = 0, prValue = 0;
       getCarryOverItems(pr, carryMode, dpFrom, dpTo).forEach(function (it) {
         const cv = Number(it.committedValue);
         if (isFinite(cv)) committed += cv;
         const ov = Number(it.outstandingValue);
         if (isFinite(ov)) outstanding += ov;
-        if (it.isCapital) {
-          const pv = Number(it.prValue);
-          if (isFinite(pv)) capital += pv;
-        }
+        const s = splitItemValue(it);
+        capital += s.capitalOutstanding;
+        prValue += s.prValueOutstanding;
       });
-      return { committed: committed, outstanding: outstanding, capital: capital };
+      return { committed: committed, outstanding: outstanding, capital: capital, prValue: prValue };
     }
     if (dpFilterActive) {
       const w = computeWindowTotals([pr], dpFrom, dpTo);
-      return { committed: w.committed, outstanding: w.outstanding, capital: w.capital };
+      return { committed: w.committed, outstanding: w.outstanding, capital: w.capital, prValue: w.prValue };
     }
     return {
       committed: (pr.poValueTotal === null || pr.poValueTotal === undefined) ? null : Number(pr.poValueTotal),
       outstanding: (pr.poValueOutstanding === null || pr.poValueOutstanding === undefined) ? null : Number(pr.poValueOutstanding),
-      capital: Number(pr.capitalValueTotal) || 0
+      capital: Number(pr.capitalValueTotal) || 0,
+      prValue: Number(pr.prTotValue) || 0
     };
   }
 
@@ -638,6 +677,8 @@
       ? baseHits.filter(function (r) { return getCarryOverItems(r.pr, carryOverFilter, dpFrom, dpTo).length > 0; })
       : windowHits;
 
+    document.getElementById('prValueColHeader').textContent = dpFilterActive ? 'PR Value (window)' : 'PR Value';
+
     const modeBanner = document.getElementById('carryOverModeBanner');
     if (carryOverFilter) {
       modeBanner.style.display = 'block';
@@ -677,7 +718,7 @@
           '<td>' + escapeHtml(pr.prNo) + '</td>' +
           '<td>' + escapeHtml(pr.prText) + '</td>' +
           '<td>' + escapeHtml(pr.purOfficer) + '</td>' +
-          '<td>' + formatINR(pr.prTotValue) + '</td>' +
+          '<td>' + formatINR(rowVals.prValue) + '</td>' +
           '<td>' + (rowVals.committed === null ? '&ndash;' : formatINR(rowVals.committed)) + '</td>' +
           '<td>' + (rowVals.outstanding === null ? '&ndash;' : formatINR(rowVals.outstanding)) + '</td>' +
           '<td>' + formatINR(rowVals.capital) + '</td>' +
@@ -723,8 +764,18 @@
   }
 
   function renderDetail(pr, hitItems, dpFilterActive, dpFrom, dpTo, carryMode) {
+    const totalItemCount = (pr.poGroups || []).reduce(function (sum, g) { return sum + (g.items ? g.items.length : 0); }, 0)
+      + ((pr.itemsPendingPOAward || []).length);
+    const poCount = (pr.poGroups || []).length;
+    const bfCount = dpFilterActive ? getCarryOverItems(pr, 'bf', dpFrom, dpTo).length : 0;
+    const cfCount = dpFilterActive ? getCarryOverItems(pr, 'cf', dpFrom, dpTo).length : 0;
+    const carryNote = (bfCount > 0 || cfCount > 0)
+      ? ' &middot; ' + (bfCount > 0 ? '<span style="color:#c5221f;">' + bfCount + ' item(s) Brought Forward</span>' : '')
+        + (bfCount > 0 && cfCount > 0 ? ' &middot; ' : '')
+        + (cfCount > 0 ? '<span style="color:#e8a90c;">' + cfCount + ' item(s) Carried Forward</span>' : '')
+      : '';
     let html = '<div class="prDatesLine">PR Created: <b>' + escapeHtml(pr.prCrDt || '&ndash;') + '</b> &middot; PR Released: <b>' +
-      escapeHtml(pr.finalRelDt || 'Not yet released') + '</b></div>';
+      escapeHtml(pr.finalRelDt || 'Not yet released') + '</b> &middot; <b>' + totalItemCount + '</b> line item(s) currently tracked across <b>' + poCount + '</b> PO(s)' + carryNote + '</div>';
     const dpMatchKeys = carryMode
       ? new Set(getCarryOverItems(pr, carryMode, dpFrom, dpTo).map(function (it) { return it.key; }))
       : (dpFilterActive ? new Set(getRelevantEffectiveDateItems(pr, dpFrom, dpTo).map(function (it) { return it.key; })) : null);
@@ -739,7 +790,7 @@
           : ' &middot; PO Value Outstanding: ' + formatINR(g.poValueOutstanding);
         html += '<div class="' + groupCls + '">' +
           '<div class="poGroupHead">' +
-            '<div><b>PO ' + escapeHtml(g.poNo) + '</b> &middot; ' + escapeHtml(g.poDate) + ' &middot; ' + escapeHtml(g.vendorName) + deliveredNote + '</div>' +
+            '<div><b>PO ' + escapeHtml(g.poNo) + '</b> &middot; ' + escapeHtml(g.poDate) + ' &middot; ' + escapeHtml(g.vendorName) + ' &middot; ' + g.items.length + ' item(s)' + deliveredNote + '</div>' +
             '<div><span class="' + stageClass(g.status) + '">' + escapeHtml(g.status) + '</span></div>' +
           '</div>' +
           '<table class="poItemsTable"><thead><tr><th>UCS Code</th><th>Description</th><th>Qty</th><th>PR Value</th><th>PO Value</th><th>PO DP</th><th>Alt DP</th><th>Effective Date</th><th>PO Qty</th><th>105 Qty</th><th>105 Date</th></tr></thead><tbody>' +
@@ -748,7 +799,7 @@
       });
     }
     if (pr.itemsPendingPOAward && pr.itemsPendingPOAward.length) {
-      html += '<div class="pendingSection"><div class="hdr">Items still pending PO award:</div>' +
+      html += '<div class="pendingSection"><div class="hdr">Items still pending PO award (' + pr.itemsPendingPOAward.length + '):</div>' +
         '<table class="poItemsTable"><thead><tr><th>UCS Code</th><th>Description</th><th>Qty</th><th>PR Value</th><th>PR Del Dt</th></tr></thead><tbody>' +
         pr.itemsPendingPOAward.map(function (it, idx) { return itemRow(it, 'pend_' + idx, hitItems, dpMatchKeys); }).join('') +
         '</tbody></table></div>';
