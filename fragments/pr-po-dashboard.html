@@ -147,13 +147,24 @@
     </div>
 
     <div class="filterGroup">
+      <div class="filterLabel">Check Delivered Since (one-off)</div>
+      <div class="filterRow">
+        <input type="date" id="analysisSinceInput">
+        <button class="iconBtn iconBtnPrimary" title="Load: show every PO delivered since this date (this view only, not saved)" onclick="Page.applyAnalysisOverride()">&#128269;</button>
+        <button class="iconBtn iconBtnClear" title="Clear override, back to normal look-back" onclick="Page.clearAnalysisOverride()">&#129529;</button>
+      </div>
+    </div>
+
+    <div class="filterGroup">
       <div class="filterLabel">&nbsp;</div>
       <div class="filterRow">
-        <button class="iconBtn iconBtnPrimary" title="Refresh now" onclick="Page.loadData()">&#8635;</button>
+        <button class="iconBtn iconBtnPrimary" title="Refresh now" onclick="Page.loadData(true)">&#8635;</button>
         <span class="filterCaption" id="pollNote">Refresh after<br>SAP update</span>
       </div>
     </div>
   </div>
+
+  <div id="analysisBanner" class="analysisNote" style="display:none;"></div>
 
   <div id="tableWrap">
     <table>
@@ -191,6 +202,7 @@
   let activeStageFilter = null;
   let expandedPRNo = null;
   let searchTimer = null;
+  let analysisSinceDate = ''; // per-fetch override, NOT persisted -- one-off historical check, doesn't touch the shared daily setting
 
   function showMessage(text, type) {
     const el = document.getElementById('message');
@@ -282,21 +294,57 @@
     }
   }
 
-  async function loadData() {
+  // Cached on window (not a local variable) specifically because it must
+  // survive navigating away to another page and back -- Shell.loadPage()
+  // replaces this whole fragment's DOM and re-runs this script from scratch
+  // every time, wiping any local state, but window itself persists for the
+  // whole browser session. Only an explicit Refresh (or an action that
+  // changes what should be fetched, like saving a new look-back period)
+  // bypasses this and hits the server again.
+  function applyLoadedData(data) {
+    allPRs = data.prs || [];
+    stageOrder = data.stageOrder || [];
+    funnel = data.funnel || {};
+    if (data.graceDays !== undefined) document.getElementById('graceDaysInput').value = data.graceDays;
+    const banner = document.getElementById('analysisBanner');
+    if (data.analysisSinceDate) {
+      banner.style.display = 'block';
+      banner.textContent = 'One-off check: showing every PO delivered since ' + data.analysisSinceDate + ' (temporary -- not saved, click the broom to return to your normal look-back).';
+    } else {
+      banner.style.display = 'none';
+    }
+    expandedPRNo = null;
+    renderFunnel();
+    renderTable();
+  }
+
+  async function loadData(forceRefresh) {
     clearMessage();
+    if (!forceRefresh && window.__procurementDashboardCache) {
+      applyLoadedData(window.__procurementDashboardCache);
+      return;
+    }
     try {
-      const data = await callApi({ action: 'getPRPODashboardData' });
+      const data = await callApi({ action: 'getPRPODashboardData', analysisSinceDate: analysisSinceDate || '' });
       if (!data.success) { showMessage(data.message || 'Could not load the dashboard.', 'error'); return; }
-      allPRs = data.prs || [];
-      stageOrder = data.stageOrder || [];
-      funnel = data.funnel || {};
-      if (data.graceDays !== undefined) document.getElementById('graceDaysInput').value = data.graceDays;
-      expandedPRNo = null;
-      renderFunnel();
-      renderTable();
+      window.__procurementDashboardCache = data;
+      applyLoadedData(data);
     } catch (err) {
       showMessage('Could not reach the server. Check your connection.', 'error');
     }
+  }
+
+  function applyAnalysisOverride() {
+    const val = document.getElementById('analysisSinceInput').value;
+    if (!val) { showMessage('Pick a date first.', 'error'); return; }
+    analysisSinceDate = val;
+    loadData(true);
+  }
+
+  function clearAnalysisOverride() {
+    analysisSinceDate = '';
+    document.getElementById('analysisSinceInput').value = '';
+    loadData(true);
   }
 
   async function saveGraceDays() {
@@ -310,7 +358,7 @@
       const data = await callApi({ action: 'updateProcurementDashboardSettings', graceDays: val });
       if (!data.success) { showMessage(data.message || 'Could not update the look-back period.', 'error'); return; }
       showMessage(data.message, 'success');
-      loadData(); // re-apply the new window immediately, without a manual Refresh
+      loadData(true); // re-apply the new window immediately, without a manual Refresh
     } catch (err) {
       showMessage('Could not reach the server. Check your connection.', 'error');
     }
@@ -548,6 +596,8 @@
     renderTable: { value: renderTable, enumerable: true },
     clearDateRange: { value: clearDateRange, enumerable: true },
     saveGraceDays: { value: saveGraceDays, enumerable: true },
+    applyAnalysisOverride: { value: applyAnalysisOverride, enumerable: true },
+    clearAnalysisOverride: { value: clearAnalysisOverride, enumerable: true },
     toggleExpand: { value: toggleExpand, enumerable: true },
     showLongText: { value: showLongText, enumerable: true },
     closeModal: { value: closeModal, enumerable: true }

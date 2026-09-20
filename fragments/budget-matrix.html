@@ -155,24 +155,15 @@
     </div>
 
     <div class="filterGroup">
-      <div class="filterLabel">FY Analysis &middot; Delivered Since</div>
-      <div class="filterRow">
-        <input type="date" id="analysisSinceInput">
-        <button class="iconBtn iconBtnPrimary" title="Load: show every PO delivered since this date (this view only, not saved)" onclick="Page.applyAnalysisOverride()">&#128269;</button>
-        <button class="iconBtn iconBtnClear" title="Clear override, back to normal look-back" onclick="Page.clearAnalysisOverride()">&#129529;</button>
-      </div>
-    </div>
-
-    <div class="filterGroup">
       <div class="filterLabel">&nbsp;</div>
       <div class="filterRow">
-        <button class="iconBtn iconBtnPrimary" title="Refresh now" onclick="Page.loadData()">&#8635;</button>
+        <button class="iconBtn iconBtnPrimary" title="Refresh now" onclick="Page.loadData(true)">&#8635;</button>
         <span class="filterCaption" id="pollNote">Refresh after<br>SAP update</span>
       </div>
     </div>
   </div>
 
-  <div id="analysisBanner" class="analysisNote" style="display:none;"></div>
+  <div class="analysisNote" style="color:#5f6368;">This page reflects complete history &mdash; no record is ever excluded because of its delivery date. Use the date ranges above to scope a snapshot; leave them blank to see everything.</div>
   <div id="carryOverModeBanner" class="analysisNote" style="display:none;"></div>
 
   <div id="tableWrap">
@@ -210,7 +201,6 @@
   let stageOrder = [];
   let expandedPRNo = null;
   let searchTimer = null;
-  let analysisSinceDate = ''; // per-fetch override, NOT persisted -- see toolbar comment
 
   function showMessage(text, type) {
     const el = document.getElementById('message');
@@ -302,38 +292,30 @@
     }
   }
 
-  async function loadData() {
+  // Cached on window (not a local variable) so it survives navigating to
+  // another page and back -- see the identical comment in Procurement
+  // Dashboard's loadData for why. Only an explicit Refresh bypasses it.
+  function applyLoadedData(data) {
+    allPRs = data.prs || [];
+    stageOrder = data.stageOrder || [];
+    expandedPRNo = null;
+    renderTable();
+  }
+
+  async function loadData(forceRefresh) {
     clearMessage();
+    if (!forceRefresh && window.__budgetMatrixCache) {
+      applyLoadedData(window.__budgetMatrixCache);
+      return;
+    }
     try {
-      const data = await callApi({ action: 'getPRPODashboardData', analysisSinceDate: analysisSinceDate || '' });
+      const data = await callApi({ action: 'getPRPODashboardData', fullHistory: true });
       if (!data.success) { showMessage(data.message || 'Could not load the dashboard.', 'error'); return; }
-      allPRs = data.prs || [];
-      stageOrder = data.stageOrder || [];
-      const banner = document.getElementById('analysisBanner');
-      if (data.analysisSinceDate) {
-        banner.style.display = 'block';
-        banner.textContent = 'FY Analysis mode: showing every fully-received PO delivered since ' + data.analysisSinceDate + ' (temporary -- not saved, click the broom to return to normal view).';
-      } else {
-        banner.style.display = 'none';
-      }
-      expandedPRNo = null;
-      renderTable();
+      window.__budgetMatrixCache = data;
+      applyLoadedData(data);
     } catch (err) {
       showMessage('Could not reach the server. Check your connection.', 'error');
     }
-  }
-
-  function applyAnalysisOverride() {
-    const val = document.getElementById('analysisSinceInput').value;
-    if (!val) { showMessage('Pick a date first.', 'error'); return; }
-    analysisSinceDate = val;
-    loadData();
-  }
-
-  function clearAnalysisOverride() {
-    analysisSinceDate = '';
-    document.getElementById('analysisSinceInput').value = '';
-    loadData();
   }
 
   // Every PR matching the current date range + search text, regardless of
@@ -764,8 +746,6 @@
     renderTable: { value: renderTable, enumerable: true },
     clearDateRange: { value: clearDateRange, enumerable: true },
     clearDPRange: { value: clearDPRange, enumerable: true },
-    applyAnalysisOverride: { value: applyAnalysisOverride, enumerable: true },
-    clearAnalysisOverride: { value: clearAnalysisOverride, enumerable: true },
     toggleCarryOverFilter: { value: toggleCarryOverFilter, enumerable: true },
     toggleExpand: { value: toggleExpand, enumerable: true },
     showLongText: { value: showLongText, enumerable: true },
