@@ -340,13 +340,52 @@
     }).filter(function (r) { return r.matched; });
   }
 
-  // Which of a PR's items have an effective date falling inside [dpFrom, dpTo]
+  // Plain 'YYYY-MM-DD' string comparison, either bound optional.
+  function dateInRange(dateStr, dpFrom, dpTo) {
+    if (!dateStr) return false;
+    if (dpFrom && dateStr < dpFrom) return false;
+    if (dpTo && dateStr > dpTo) return false;
+    return true;
+  }
+
+  // Splits an item's value into what's already been received (dated by its
+  // ACTUAL 105 date) and what's still outstanding (dated by its EFFECTIVE
+  // date -- Alt DP/PO DP for a still-open item). These are tracked
+  // separately and deliberately, not glued into one date, because a
+  // partially-received item is genuinely two different things: units
+  // already in hand from one point in time, and units still promised for
+  // another -- and those two can land in completely different fiscal years
+  // once a delivery slips or gets renegotiated. A pending-PO-award item
+  // (no PO yet) is always 100% outstanding, dated by PR Del Dt.
+  function splitItemValue(it) {
+    const full = Number(it.committedValue) || 0;
+    const outstanding = Number(it.outstandingValue) || 0;
+    const received = Math.max(full - outstanding, 0);
+    const fraction = full > 0 ? received / full : 0;
+    const prValueNum = Number(it.prValue) || 0;
+    return {
+      receivedValue: received,
+      receivedDate: it.date105 || '',
+      outstandingValue: outstanding,
+      outstandingDate: it.effectiveDate || '',
+      capitalReceived: it.isCapital ? prValueNum * fraction : 0,
+      capitalOutstanding: it.isCapital ? prValueNum * (1 - fraction) : 0
+    };
+  }
+
+  // True if EITHER portion of this item falls inside [dpFrom, dpTo] --
+  // an item can match through its received portion, its outstanding
+  // portion, both, or neither.
+  function itemMatchesWindow(it, dpFrom, dpTo) {
+    const s = splitItemValue(it);
+    if (s.receivedValue > 0 && dateInRange(s.receivedDate, dpFrom, dpTo)) return true;
+    if (s.outstandingValue > 0 && dateInRange(s.outstandingDate, dpFrom, dpTo)) return true;
+    return false;
+  }
+
   // Every item under a PR, PO-linked and pending-PO-award alike, flattened
   // into one list with a uniform shape -- committedValue is the item's PO
-  // Value once a PO exists, or its PR Value while still pending one (budget
-  // is reserved at PR Del Dt before any PO is placed, per the project
-  // owner); outstandingValue mirrors that same logic (a pending item is by
-  // definition 100% outstanding, having received nothing yet).
+  // Value once a PO exists, or its PR Value while still pending one.
   function getAllItemsFlat(pr) {
     const out = [];
     (pr.poGroups || []).forEach(function (g, gi) {
@@ -360,19 +399,39 @@
     return out;
   }
 
-  // Items whose EFFECTIVE date (Alt DP -> PO DP -> PR Del Dt, already
-  // resolved server-side per item) falls inside [dpFrom, dpTo] (either bound
-  // optional). An item with no effective date at all (fully received, or
-  // genuinely no date on record) never matches -- it simply can't be placed
-  // into a budget window. Both effectiveDate and the input values are
-  // 'YYYY-MM-DD' strings, so plain comparison works.
+  // Items where at least one portion (received or outstanding) falls inside
+  // [dpFrom, dpTo] -- used for PR-level filtering, item highlighting, and
+  // effective-date sorting. NOT used for summing values -- see
+  // computeWindowTotals below, which sums only the matching PORTION of each
+  // item's value, not the item's whole value just because some part of it
+  // touched the window.
   function getRelevantEffectiveDateItems(pr, dpFrom, dpTo) {
-    return getAllItemsFlat(pr).filter(function (it) {
-      if (!it.effectiveDate) return false;
-      if (dpFrom && it.effectiveDate < dpFrom) return false;
-      if (dpTo && it.effectiveDate > dpTo) return false;
-      return true;
+    return getAllItemsFlat(pr).filter(function (it) { return itemMatchesWindow(it, dpFrom, dpTo); });
+  }
+
+  // The real fix: sums only the portion of each item's value that actually
+  // falls inside the window, not the item's whole value. A partially
+  // received item can contribute through BOTH its received portion (into
+  // Committed + Received) and its outstanding portion (into Committed +
+  // Outstanding) independently, at two different dates.
+  function computeWindowTotals(prs, dpFrom, dpTo) {
+    let committed = 0, outstanding = 0, received = 0, capital = 0;
+    prs.forEach(function (pr) {
+      getAllItemsFlat(pr).forEach(function (it) {
+        const s = splitItemValue(it);
+        if (s.receivedValue > 0 && dateInRange(s.receivedDate, dpFrom, dpTo)) {
+          committed += s.receivedValue;
+          received += s.receivedValue;
+          capital += s.capitalReceived;
+        }
+        if (s.outstandingValue > 0 && dateInRange(s.outstandingDate, dpFrom, dpTo)) {
+          committed += s.outstandingValue;
+          outstanding += s.outstandingValue;
+          capital += s.capitalOutstanding;
+        }
+      });
     });
+    return { committed: committed, outstanding: outstanding, received: received, capital: capital };
   }
 
   // Sums whatever the table is CURRENTLY showing (date range + search +
@@ -385,22 +444,19 @@
   // window-split -- it's the PR's one original budgeted figure, shown for
   // context, not a per-period number.
   function renderTotals(withHits, dpFrom, dpTo, dpFilterActive) {
-    let totalPRValue = 0, totalPOOutstanding = 0, totalPOValue = 0, totalCapitalValue = 0;
+    let totalPRValue = 0, totalPOOutstanding = 0, totalPOValue = 0, totalCapitalValue = 0, totalReceived = 0;
     withHits.forEach(function (r) {
       const prv = Number(r.pr.prTotValue);
       if (isFinite(prv)) totalPRValue += prv;
-      if (dpFilterActive) {
-        getRelevantEffectiveDateItems(r.pr, dpFrom, dpTo).forEach(function (it) {
-          const ov = Number(it.outstandingValue);
-          if (isFinite(ov)) totalPOOutstanding += ov;
-          const cv = Number(it.committedValue);
-          if (isFinite(cv)) totalPOValue += cv;
-          if (it.isCapital) {
-            const pv = Number(it.prValue);
-            if (isFinite(pv)) totalCapitalValue += pv;
-          }
-        });
-      } else {
+    });
+    if (dpFilterActive) {
+      const w = computeWindowTotals(withHits.map(function (r) { return r.pr; }), dpFrom, dpTo);
+      totalPOValue = w.committed;
+      totalPOOutstanding = w.outstanding;
+      totalReceived = w.received;
+      totalCapitalValue = w.capital;
+    } else {
+      withHits.forEach(function (r) {
         if (r.pr.poValueOutstanding !== null && r.pr.poValueOutstanding !== undefined) {
           const pov = Number(r.pr.poValueOutstanding);
           if (isFinite(pov)) totalPOOutstanding += pov;
@@ -411,9 +467,9 @@
         }
         const cv = Number(r.pr.capitalValueTotal);
         if (isFinite(cv)) totalCapitalValue += cv;
-      }
-    });
-    const totalReceived = totalPOValue - totalPOOutstanding; // Committed minus still-outstanding = value actually received so far in this view
+      });
+      totalReceived = totalPOValue - totalPOOutstanding; // no windowing involved here, so this subtraction is exact
+    }
     const balancePct = totalPOValue > 0 ? (totalPOOutstanding / totalPOValue * 100) : 0;
     const balanceStr = totalPOValue > 0 ? balancePct.toFixed(1) + '%' : '&ndash;';
     const poValueLabel = dpFilterActive ? 'Committed Value &middot; Effective DP window' : 'Total PO Value';
@@ -485,18 +541,8 @@
       return { committed: committed, outstanding: outstanding, capital: capital };
     }
     if (dpFilterActive) {
-      let committed = 0, outstanding = 0, capital = 0;
-      getRelevantEffectiveDateItems(pr, dpFrom, dpTo).forEach(function (it) {
-        const cv = Number(it.committedValue);
-        if (isFinite(cv)) committed += cv;
-        const ov = Number(it.outstandingValue);
-        if (isFinite(ov)) outstanding += ov;
-        if (it.isCapital) {
-          const pv = Number(it.prValue);
-          if (isFinite(pv)) capital += pv;
-        }
-      });
-      return { committed: committed, outstanding: outstanding, capital: capital };
+      const w = computeWindowTotals([pr], dpFrom, dpTo);
+      return { committed: w.committed, outstanding: w.outstanding, capital: w.capital };
     }
     return {
       committed: (pr.poValueTotal === null || pr.poValueTotal === undefined) ? null : Number(pr.poValueTotal),
