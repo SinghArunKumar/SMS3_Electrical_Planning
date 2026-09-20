@@ -31,8 +31,13 @@
   .totalsCard.prValue { border-left-color:#1a73e8; }
   .totalsCard.poValue { border-left-color:#0f9d8b; }
   .totalsCard.poOutstanding { border-left-color:#e8710a; }
+  .totalsCard.poReceived { border-left-color:#1e8e3e; }
   .totalsCard.poBalance { border-left-color:#8430ce; }
   .totalsCard.capitalUsed { border-left-color:#b8860b; }
+  .totalsCard.carryBF { border-left-color:#c5221f; }
+  .totalsCard.carryCF { border-left-color:#e8a90c; }
+  .totalsCard.carryBF, .totalsCard.carryCF { cursor:pointer; }
+  .totalsCard.carryBF.active, .totalsCard.carryCF.active { outline:2px solid #1a73e8; outline-offset:-2px; background:#eaf1fd; }
   .capitalBadge { display:inline-block; background:#d2e3fc; color:#1a3f7a; font-size:10px; font-weight:700; padding:1px 6px; border-radius:8px; margin-left:5px; vertical-align:middle; }
 
   .searchRow { margin-bottom:14px; }
@@ -90,8 +95,8 @@
 </style>
 
 
-<h2>Procurement Dashboard</h2>
-<div class="subtitle">Planning staff only (excluding Store Incharge). Read-only bird's-eye view of every open PR/PO, raising through receipt. A PR drops off automatically once every PO under it is fully received.</div>
+<h2>Budget Matrix</h2>
+<div class="subtitle">Planning staff only (excluding Store Incharge). Financial-year budget view -- committed value, projected receipts, capital exposure, and stale/overdue budget risk. For live procurement status, see the Procurement Dashboard.</div>
 
 <!-- ====== LOGIN SECTION ====== -->
 <div id="loginSection" style="display:none">
@@ -111,8 +116,8 @@
 <div id="dashSection" style="display:none;">
   <div id="loggedInBar"></div>
 
-  <div id="funnelBar" class="funnelBar"></div>
   <div id="totalsBar" class="totalsBar"></div>
+  <div id="carryOverBar" class="totalsBar" style="display:none;"></div>
 
   <div class="searchRow">
     <input type="text" id="searchInput" placeholder="Search UCS Code, short text, long text, or PR text (e.g. ABB Drive)&hellip;" oninput="Page.onSearchInput()">
@@ -130,19 +135,31 @@
     </div>
 
     <div class="filterGroup">
+      <div class="filterLabel">Budget Projection &middot; Effective DP</div>
+      <div class="filterRow">
+        <input type="date" id="dpFrom" onchange="Page.renderTable()">
+        <span class="filterSep">to</span>
+        <input type="date" id="dpTo" onchange="Page.renderTable()">
+        <button class="iconBtn iconBtnClear" title="Clear PO DP range" onclick="Page.clearDPRange()">&#129529;</button>
+      </div>
+    </div>
+
+    <div class="filterGroup">
       <div class="filterLabel">Sort By</div>
       <div class="filterRow">
         <select id="sortMode" onchange="Page.renderTable()">
           <option value="prDate">PR Date (newest first)</option>
+          <option value="poDP">Effective Delivery Date (earliest first)</option>
         </select>
       </div>
     </div>
 
     <div class="filterGroup">
-      <div class="filterLabel">Delivered-PO Look-back (days)</div>
+      <div class="filterLabel">FY Analysis &middot; Delivered Since</div>
       <div class="filterRow">
-        <input type="number" id="graceDaysInput" min="1" max="180" step="1" style="width:60px;">
-        <button class="iconBtn" title="Save look-back period" onclick="Page.saveGraceDays()">&#128190;</button>
+        <input type="date" id="analysisSinceInput">
+        <button class="iconBtn iconBtnPrimary" title="Load: show every PO delivered since this date (this view only, not saved)" onclick="Page.applyAnalysisOverride()">&#128269;</button>
+        <button class="iconBtn iconBtnClear" title="Clear override, back to normal look-back" onclick="Page.clearAnalysisOverride()">&#129529;</button>
       </div>
     </div>
 
@@ -155,11 +172,14 @@
     </div>
   </div>
 
+  <div id="analysisBanner" class="analysisNote" style="display:none;"></div>
+  <div id="carryOverModeBanner" class="analysisNote" style="display:none;"></div>
+
   <div id="tableWrap">
     <table>
       <thead><tr>
         <th>PR No.</th><th>PR Text</th><th>Pur Officer</th>
-        <th>PR Value</th><th>PO Value Outstanding</th><th>Stage</th><th>Progress</th><th>Release&rarr;PO (days)</th>
+        <th>PR Value</th><th>Committed Value</th><th>Outstanding</th><th>Capital</th><th>Stage</th>
       </tr></thead>
       <tbody id="tableBody"></tbody>
     </table>
@@ -185,12 +205,12 @@
   const APPS_SCRIPT_URL = Shell.APPS_SCRIPT_URL;
 
   let currentUser = { email: '', password: '' };
+  let carryOverFilter = null; // null | 'bf' | 'cf' -- which carry-over card, if any, is currently drilling the table down
   let allPRs = [];
   let stageOrder = [];
-  let funnel = {};
-  let activeStageFilter = null;
   let expandedPRNo = null;
   let searchTimer = null;
+  let analysisSinceDate = ''; // per-fetch override, NOT persisted -- see toolbar comment
 
   function showMessage(text, type) {
     const el = document.getElementById('message');
@@ -285,35 +305,35 @@
   async function loadData() {
     clearMessage();
     try {
-      const data = await callApi({ action: 'getPRPODashboardData' });
+      const data = await callApi({ action: 'getPRPODashboardData', analysisSinceDate: analysisSinceDate || '' });
       if (!data.success) { showMessage(data.message || 'Could not load the dashboard.', 'error'); return; }
       allPRs = data.prs || [];
       stageOrder = data.stageOrder || [];
-      funnel = data.funnel || {};
-      if (data.graceDays !== undefined) document.getElementById('graceDaysInput').value = data.graceDays;
+      const banner = document.getElementById('analysisBanner');
+      if (data.analysisSinceDate) {
+        banner.style.display = 'block';
+        banner.textContent = 'FY Analysis mode: showing every fully-received PO delivered since ' + data.analysisSinceDate + ' (temporary -- not saved, click the broom to return to normal view).';
+      } else {
+        banner.style.display = 'none';
+      }
       expandedPRNo = null;
-      renderFunnel();
       renderTable();
     } catch (err) {
       showMessage('Could not reach the server. Check your connection.', 'error');
     }
   }
 
-  async function saveGraceDays() {
-    const val = Number(document.getElementById('graceDaysInput').value);
-    if (!Number.isInteger(val) || val < 1 || val > 180) {
-      showMessage('Look-back period must be a whole number of days, between 1 and 180.', 'error');
-      return;
-    }
-    clearMessage();
-    try {
-      const data = await callApi({ action: 'updateProcurementDashboardSettings', graceDays: val });
-      if (!data.success) { showMessage(data.message || 'Could not update the look-back period.', 'error'); return; }
-      showMessage(data.message, 'success');
-      loadData(); // re-apply the new window immediately, without a manual Refresh
-    } catch (err) {
-      showMessage('Could not reach the server. Check your connection.', 'error');
-    }
+  function applyAnalysisOverride() {
+    const val = document.getElementById('analysisSinceInput').value;
+    if (!val) { showMessage('Pick a date first.', 'error'); return; }
+    analysisSinceDate = val;
+    loadData();
+  }
+
+  function clearAnalysisOverride() {
+    analysisSinceDate = '';
+    document.getElementById('analysisSinceInput').value = '';
+    loadData();
   }
 
   // Every PR matching the current date range + search text, regardless of
@@ -338,46 +358,93 @@
     }).filter(function (r) { return r.matched; });
   }
 
-  function renderFunnel() {
-    const bar = document.getElementById('funnelBar');
-    const filtered = getDateAndSearchFilteredPRs();
-    const counts = {};
-    stageOrder.forEach(function (s) { counts[s] = 0; });
-    filtered.forEach(function (r) { counts[r.pr.overallStage] = (counts[r.pr.overallStage] || 0) + 1; });
-    // "Fully Received" never appears (archived before it reaches the client) -- skip it in the bar.
-    const shown = stageOrder.filter(function (s) { return s !== 'Fully Received'; });
-    bar.innerHTML = shown.map(function (stage) {
-      const n = counts[stage] || 0;
-      const activeCls = (activeStageFilter === stage) ? ' active' : '';
-      return '<div class="funnelCard' + activeCls + '" onclick="Page.toggleStageFilter(\'' + stage.replace(/'/g, "\\'") + '\')">' +
-        '<div class="n">' + n + '</div><div class="lbl">' + escapeHtml(stage) + '</div></div>';
-    }).join('');
+  // Which of a PR's items have an effective date falling inside [dpFrom, dpTo]
+  // Every item under a PR, PO-linked and pending-PO-award alike, flattened
+  // into one list with a uniform shape -- committedValue is the item's PO
+  // Value once a PO exists, or its PR Value while still pending one (budget
+  // is reserved at PR Del Dt before any PO is placed, per the project
+  // owner); outstandingValue mirrors that same logic (a pending item is by
+  // definition 100% outstanding, having received nothing yet).
+  function getAllItemsFlat(pr) {
+    const out = [];
+    (pr.poGroups || []).forEach(function (g, gi) {
+      (g.items || []).forEach(function (it, idx) {
+        out.push(Object.assign({}, it, { key: 'po' + gi + '_' + idx, poNo: g.poNo, committedValue: it.poValue, outstandingValue: it.outstandingValue }));
+      });
+    });
+    (pr.itemsPendingPOAward || []).forEach(function (it, idx) {
+      out.push(Object.assign({}, it, { key: 'pend_' + idx, poNo: null, committedValue: it.prValue, outstandingValue: it.prValue }));
+    });
+    return out;
+  }
+
+  // Items whose EFFECTIVE date (Alt DP -> PO DP -> PR Del Dt, already
+  // resolved server-side per item) falls inside [dpFrom, dpTo] (either bound
+  // optional). An item with no effective date at all (fully received, or
+  // genuinely no date on record) never matches -- it simply can't be placed
+  // into a budget window. Both effectiveDate and the input values are
+  // 'YYYY-MM-DD' strings, so plain comparison works.
+  function getRelevantEffectiveDateItems(pr, dpFrom, dpTo) {
+    return getAllItemsFlat(pr).filter(function (it) {
+      if (!it.effectiveDate) return false;
+      if (dpFrom && it.effectiveDate < dpFrom) return false;
+      if (dpTo && it.effectiveDate > dpTo) return false;
+      return true;
+    });
   }
 
   // Sums whatever the table is CURRENTLY showing (date range + search +
-  // stage filter, all applied) -- this page is purely "what's live right
-  // now," with no FY/budget-window framing. For Effective-DP-scoped budget
-  // analysis (Committed Value, Budget Projection, % Balance, Capital
-  // Budget), see the separate Budget Matrix page.
-  function renderTotals(withHits) {
-    let totalPRValue = 0, totalPOOutstanding = 0;
+  // stage filter + Effective Date window, all applied) -- not the full
+  // unfiltered dataset. When an Effective Date window is active, every PO
+  // value AND the capital-budget figure are summed only across the items
+  // that actually fall inside that window (the true "money landing in this
+  // quarter/FY" figure) rather than the whole PR's total, since a PR can
+  // have items due in entirely different periods. PR Value itself is never
+  // window-split -- it's the PR's one original budgeted figure, shown for
+  // context, not a per-period number.
+  function renderTotals(withHits, dpFrom, dpTo, dpFilterActive) {
+    let totalPRValue = 0, totalPOOutstanding = 0, totalPOValue = 0, totalCapitalValue = 0;
     withHits.forEach(function (r) {
       const prv = Number(r.pr.prTotValue);
       if (isFinite(prv)) totalPRValue += prv;
-      if (r.pr.poValueOutstanding !== null && r.pr.poValueOutstanding !== undefined) {
-        const pov = Number(r.pr.poValueOutstanding);
-        if (isFinite(pov)) totalPOOutstanding += pov;
+      if (dpFilterActive) {
+        getRelevantEffectiveDateItems(r.pr, dpFrom, dpTo).forEach(function (it) {
+          const ov = Number(it.outstandingValue);
+          if (isFinite(ov)) totalPOOutstanding += ov;
+          const cv = Number(it.committedValue);
+          if (isFinite(cv)) totalPOValue += cv;
+          if (it.isCapital) {
+            const pv = Number(it.prValue);
+            if (isFinite(pv)) totalCapitalValue += pv;
+          }
+        });
+      } else {
+        if (r.pr.poValueOutstanding !== null && r.pr.poValueOutstanding !== undefined) {
+          const pov = Number(r.pr.poValueOutstanding);
+          if (isFinite(pov)) totalPOOutstanding += pov;
+        }
+        if (r.pr.poValueTotal !== null && r.pr.poValueTotal !== undefined) {
+          const ptv = Number(r.pr.poValueTotal);
+          if (isFinite(ptv)) totalPOValue += ptv;
+        }
+        const cv = Number(r.pr.capitalValueTotal);
+        if (isFinite(cv)) totalCapitalValue += cv;
       }
     });
+    const totalReceived = totalPOValue - totalPOOutstanding; // Committed minus still-outstanding = value actually received so far in this view
+    const balancePct = totalPOValue > 0 ? (totalPOOutstanding / totalPOValue * 100) : 0;
+    const balanceStr = totalPOValue > 0 ? balancePct.toFixed(1) + '%' : '&ndash;';
+    const poValueLabel = dpFilterActive ? 'Committed Value &middot; Effective DP window' : 'Total PO Value';
+    const outstandingLabel = dpFilterActive
+      ? 'Budget Projection &middot; Effective DP ' + (dpFrom || '&hellip;') + ' to ' + (dpTo || '&hellip;')
+      : 'Total PO Value Outstanding';
     document.getElementById('totalsBar').innerHTML =
       '<div class="totalsCard prValue"><div class="totalsLabel">Total PR Value</div><div class="totalsValue">' + formatINR(totalPRValue) + '</div></div>' +
-      '<div class="totalsCard poOutstanding"><div class="totalsLabel">Total PO Value Outstanding</div><div class="totalsValue">' + formatINR(totalPOOutstanding) + '</div></div>';
-  }
-
-  function toggleStageFilter(stage) {
-    activeStageFilter = (activeStageFilter === stage) ? null : stage;
-    renderFunnel();
-    renderTable();
+      '<div class="totalsCard poValue"><div class="totalsLabel">' + poValueLabel + '</div><div class="totalsValue">' + formatINR(totalPOValue) + '</div></div>' +
+      '<div class="totalsCard poOutstanding"><div class="totalsLabel">' + outstandingLabel + '</div><div class="totalsValue">' + formatINR(totalPOOutstanding) + '</div></div>' +
+      '<div class="totalsCard poReceived"><div class="totalsLabel">Received So Far</div><div class="totalsValue">' + formatINR(totalReceived) + '</div></div>' +
+      '<div class="totalsCard poBalance"><div class="totalsLabel">% PO Value Balance</div><div class="totalsValue">' + balanceStr + '</div></div>' +
+      '<div class="totalsCard capitalUsed"><div class="totalsLabel">Capital Budget Utilized</div><div class="totalsValue">' + formatINR(totalCapitalValue) + '</div></div>';
   }
 
   function daysSince(dateStr) {
@@ -417,16 +484,155 @@
     searchTimer = setTimeout(renderTable, 150); // all in-memory -- this is just to avoid re-rendering every keystroke
   }
 
-  function renderTable() {
-    renderFunnel(); // funnel counts depend on date range + search too now, so keep both in sync on every render
+  // Per-PR figures for the Committed/Outstanding/Capital columns, computed
+  // exactly like the totals cards above: from matching items only when the
+  // Effective DP window is active, else from the PR-level rollups.
+  function computeRowValues(pr, dpFrom, dpTo, dpFilterActive, carryMode) {
+    if (carryMode) {
+      let committed = 0, outstanding = 0, capital = 0;
+      getCarryOverItems(pr, carryMode, dpFrom, dpTo).forEach(function (it) {
+        const cv = Number(it.committedValue);
+        if (isFinite(cv)) committed += cv;
+        const ov = Number(it.outstandingValue);
+        if (isFinite(ov)) outstanding += ov;
+        if (it.isCapital) {
+          const pv = Number(it.prValue);
+          if (isFinite(pv)) capital += pv;
+        }
+      });
+      return { committed: committed, outstanding: outstanding, capital: capital };
+    }
+    if (dpFilterActive) {
+      let committed = 0, outstanding = 0, capital = 0;
+      getRelevantEffectiveDateItems(pr, dpFrom, dpTo).forEach(function (it) {
+        const cv = Number(it.committedValue);
+        if (isFinite(cv)) committed += cv;
+        const ov = Number(it.outstandingValue);
+        if (isFinite(ov)) outstanding += ov;
+        if (it.isCapital) {
+          const pv = Number(it.prValue);
+          if (isFinite(pv)) capital += pv;
+        }
+      });
+      return { committed: committed, outstanding: outstanding, capital: capital };
+    }
+    return {
+      committed: (pr.poValueTotal === null || pr.poValueTotal === undefined) ? null : Number(pr.poValueTotal),
+      outstanding: (pr.poValueOutstanding === null || pr.poValueOutstanding === undefined) ? null : Number(pr.poValueOutstanding),
+      capital: Number(pr.capitalValueTotal) || 0
+    };
+  }
 
+  // Brought Forward = still-open items whose effective date is BEFORE the
+  // window start -- old commitments that haven't gone away and are still
+  // occupying budget space right now (the exact "SAP keeps blocking funds
+  // for a stale DP" scenario described by the project owner). Carried
+  // Forward = still-open items whose effective date is AFTER the window
+  // end -- things that were on the table but have slipped to next period.
+  // Both use OUTSTANDING value, not full committed value: a portion already
+  // received isn't "draining" or "carrying" anything anymore. Computed from
+  // every PR matching Search + PR Date Range (baseHits) -- NOT narrowed to
+  // just the PRs currently shown in the table -- so a PR whose only open
+  // items are old and overdue, with nothing landing in the selected window
+  // at all, still surfaces here instead of silently disappearing.
+  function computeCarryOver(baseHits, dpFrom, dpTo) {
+    let bfTotal = 0, bfCapital = 0, cfTotal = 0, cfCapital = 0;
+    baseHits.forEach(function (r) {
+      getAllItemsFlat(r.pr).forEach(function (it) {
+        if (!it.effectiveDate) return;
+        const outstanding = Number(it.outstandingValue) || 0;
+        if (outstanding <= 0) return; // fully received -- nothing left to bring/carry forward
+        if (dpFrom && it.effectiveDate < dpFrom) {
+          bfTotal += outstanding;
+          if (it.isCapital) bfCapital += Number(it.prValue) || 0;
+        } else if (dpTo && it.effectiveDate > dpTo) {
+          cfTotal += outstanding;
+          if (it.isCapital) cfCapital += Number(it.prValue) || 0;
+        }
+      });
+    });
+    return { bfTotal: bfTotal, bfCapital: bfCapital, cfTotal: cfTotal, cfCapital: cfCapital };
+  }
+
+  // The specific items behind a PR's Brought Forward or Carried Forward
+  // contribution -- same conditions as computeCarryOver, just scoped to one
+  // PR and returning the items themselves (for the drill-down table and its
+  // row-level totals) instead of an aggregate.
+  function getCarryOverItems(pr, mode, dpFrom, dpTo) {
+    return getAllItemsFlat(pr).filter(function (it) {
+      if (!it.effectiveDate) return false;
+      const outstanding = Number(it.outstandingValue) || 0;
+      if (outstanding <= 0) return false;
+      if (mode === 'bf') return !!(dpFrom && it.effectiveDate < dpFrom);
+      if (mode === 'cf') return !!(dpTo && it.effectiveDate > dpTo);
+      return false;
+    });
+  }
+
+  function renderCarryOver(baseHits, dpFrom, dpTo, dpFilterActive) {
+    const el = document.getElementById('carryOverBar');
+    if (!dpFilterActive) { el.style.display = 'none'; el.innerHTML = ''; return; }
+    const c = computeCarryOver(baseHits, dpFrom, dpTo);
+    const bfActive = carryOverFilter === 'bf' ? ' active' : '';
+    const cfActive = carryOverFilter === 'cf' ? ' active' : '';
+    el.style.display = 'flex';
+    el.innerHTML =
+      '<div class="totalsCard carryBF' + bfActive + '" onclick="Page.toggleCarryOverFilter(\'bf\')"><div class="totalsLabel">Brought Forward &middot; Total</div><div class="totalsValue">' + formatINR(c.bfTotal) + '</div></div>' +
+      '<div class="totalsCard carryBF' + bfActive + '" onclick="Page.toggleCarryOverFilter(\'bf\')"><div class="totalsLabel">Brought Forward &middot; Capital</div><div class="totalsValue">' + formatINR(c.bfCapital) + '</div></div>' +
+      '<div class="totalsCard carryCF' + cfActive + '" onclick="Page.toggleCarryOverFilter(\'cf\')"><div class="totalsLabel">Carried Forward &middot; Total</div><div class="totalsValue">' + formatINR(c.cfTotal) + '</div></div>' +
+      '<div class="totalsCard carryCF' + cfActive + '" onclick="Page.toggleCarryOverFilter(\'cf\')"><div class="totalsLabel">Carried Forward &middot; Capital</div><div class="totalsValue">' + formatINR(c.cfCapital) + '</div></div>';
+  }
+
+  function toggleCarryOverFilter(mode) {
+    carryOverFilter = (carryOverFilter === mode) ? null : mode;
+    renderTable();
+  }
+
+  function renderTable() {
     const body = document.getElementById('tableBody');
     const emptyState = document.getElementById('emptyState');
 
-    let withHits = getDateAndSearchFilteredPRs();
-    if (activeStageFilter) withHits = withHits.filter(function (r) { return r.pr.overallStage === activeStageFilter; });
+    const baseHits = getDateAndSearchFilteredPRs();
 
-    renderTotals(withHits);
+    const dpFrom = document.getElementById('dpFrom').value;
+    const dpTo = document.getElementById('dpTo').value;
+    const dpFilterActive = !!(dpFrom || dpTo);
+    if (!dpFilterActive) carryOverFilter = null; // meaningless without a window -- reset if the range gets cleared
+
+    const windowHits = dpFilterActive
+      ? baseHits.filter(function (r) { return getRelevantEffectiveDateItems(r.pr, dpFrom, dpTo).length > 0; })
+      : baseHits;
+
+    renderCarryOver(baseHits, dpFrom, dpTo, dpFilterActive);
+    renderTotals(windowHits, dpFrom, dpTo, dpFilterActive); // Always the selected window's own totals -- unaffected by which carry-over card (if any) is drilled into below
+
+    let withHits = carryOverFilter
+      ? baseHits.filter(function (r) { return getCarryOverItems(r.pr, carryOverFilter, dpFrom, dpTo).length > 0; })
+      : windowHits;
+
+    const modeBanner = document.getElementById('carryOverModeBanner');
+    if (carryOverFilter) {
+      modeBanner.style.display = 'block';
+      modeBanner.textContent = (carryOverFilter === 'bf'
+        ? 'Showing PRs with Brought Forward items \u2014 still-open commitments dated before your window, still draining this budget.'
+        : 'Showing PRs with Carried Forward items \u2014 still-open commitments now dated after your window, deferred to later.')
+        + ' Click the card again to return to your Effective DP window.';
+    } else {
+      modeBanner.style.display = 'none';
+    }
+
+    const sortMode = document.getElementById('sortMode').value;
+    if (sortMode === 'poDP') {
+      withHits.sort(function (a, b) {
+        const aItems = carryOverFilter ? getCarryOverItems(a.pr, carryOverFilter, dpFrom, dpTo)
+          : (dpFilterActive ? getRelevantEffectiveDateItems(a.pr, dpFrom, dpTo) : getAllItemsFlat(a.pr).filter(function (it) { return it.effectiveDate; }));
+        const bItems = carryOverFilter ? getCarryOverItems(b.pr, carryOverFilter, dpFrom, dpTo)
+          : (dpFilterActive ? getRelevantEffectiveDateItems(b.pr, dpFrom, dpTo) : getAllItemsFlat(b.pr).filter(function (it) { return it.effectiveDate; }));
+        const aMin = aItems.length ? aItems.reduce(function (m, it) { return it.effectiveDate < m ? it.effectiveDate : m; }, aItems[0].effectiveDate) : '9999-99-99';
+        const bMin = bItems.length ? bItems.reduce(function (m, it) { return it.effectiveDate < m ? it.effectiveDate : m; }, bItems[0].effectiveDate) : '9999-99-99';
+        return aMin.localeCompare(bMin);
+      });
+    } // else: leave as-is -- server already sorts newest-PR-date-first, and filtering preserves that order
 
     if (withHits.length === 0) {
       body.innerHTML = '';
@@ -437,28 +643,30 @@
 
     body.innerHTML = withHits.map(function (r) {
       const pr = r.pr;
+      const rowVals = computeRowValues(pr, dpFrom, dpTo, dpFilterActive, carryOverFilter);
       const out = [
         '<tr class="prRow" onclick="Page.toggleExpand(\'' + pr.prNo + '\')">' +
           '<td>' + escapeHtml(pr.prNo) + '</td>' +
           '<td>' + escapeHtml(pr.prText) + '</td>' +
           '<td>' + escapeHtml(pr.purOfficer) + '</td>' +
           '<td>' + formatINR(pr.prTotValue) + '</td>' +
-          '<td>' + (pr.poValueOutstanding === null ? '&ndash;' : formatINR(pr.poValueOutstanding)) + '</td>' +
+          '<td>' + (rowVals.committed === null ? '&ndash;' : formatINR(rowVals.committed)) + '</td>' +
+          '<td>' + (rowVals.outstanding === null ? '&ndash;' : formatINR(rowVals.outstanding)) + '</td>' +
+          '<td>' + formatINR(rowVals.capital) + '</td>' +
           '<td><span class="' + stageClass(pr.overallStage) + '">' + escapeHtml(pr.overallStage) + '</span>' + (pr.hasOverdueItem ? ' <span class="overdueBadge" title="This PR has at least one item past its operative date with no confirmed update \u2014 expand for details">&#9888;</span>' : '') + '</td>' +
-          '<td>' + escapeHtml(pr.progress) + '</td>' +
-          '<td>' + (pr.releaseToPODays === null ? '&ndash;' : escapeHtml(pr.releaseToPODays)) + '</td>' +
         '</tr>'
       ];
       if (expandedPRNo === pr.prNo) {
-        out.push('<tr class="detailRow"><td colspan="8">' + renderDetail(pr, r.hitItems) + '</td></tr>');
+        out.push('<tr class="detailRow"><td colspan="8">' + renderDetail(pr, r.hitItems, dpFilterActive, dpFrom, dpTo, carryOverFilter) + '</td></tr>');
       }
       return out.join('');
     }).join('');
   }
 
-  function itemRow(it, key, hitItems) {
+  function itemRow(it, key, hitItems, dpMatchKeys) {
     const classes = [];
     if (hitItems[key]) classes.push('hit');
+    if (dpMatchKeys && dpMatchKeys.has(key)) classes.push('dpMatch');
     const cls = classes.length ? ' class="' + classes.join(' ') + '"' : '';
     const capitalBadge = it.isCapital ? ' <span class="capitalBadge" title="Capital good \u2014 PR value above \u20b910,00,000">CS</span>' : '';
     const overdueBadge = it.isOverdue ? ' <span class="overdueBadge" title="Overdue \u2014 past its operative date with no confirmed update since; may still be silently blocking budget">&#9888;</span>' : '';
@@ -486,9 +694,12 @@
     '</tr>';
   }
 
-  function renderDetail(pr, hitItems) {
+  function renderDetail(pr, hitItems, dpFilterActive, dpFrom, dpTo, carryMode) {
     let html = '<div class="prDatesLine">PR Created: <b>' + escapeHtml(pr.prCrDt || '&ndash;') + '</b> &middot; PR Released: <b>' +
       escapeHtml(pr.finalRelDt || 'Not yet released') + '</b></div>';
+    const dpMatchKeys = carryMode
+      ? new Set(getCarryOverItems(pr, carryMode, dpFrom, dpTo).map(function (it) { return it.key; }))
+      : (dpFilterActive ? new Set(getRelevantEffectiveDateItems(pr, dpFrom, dpTo).map(function (it) { return it.key; })) : null);
     if (pr.poGroups && pr.poGroups.length) {
       pr.poGroups.forEach(function (g, gi) {
         const isDone = g.status === 'Recently Delivered';
@@ -504,14 +715,14 @@
             '<div><span class="' + stageClass(g.status) + '">' + escapeHtml(g.status) + '</span></div>' +
           '</div>' +
           '<table class="poItemsTable"><thead><tr><th>UCS Code</th><th>Description</th><th>Qty</th><th>PR Value</th><th>PO Value</th><th>PO DP</th><th>Alt DP</th><th>Effective Date</th><th>PO Qty</th><th>105 Qty</th><th>105 Date</th></tr></thead><tbody>' +
-          g.items.map(function (it, idx) { return itemRow(it, 'po' + gi + '_' + idx, hitItems); }).join('') +
+          g.items.map(function (it, idx) { return itemRow(it, 'po' + gi + '_' + idx, hitItems, dpMatchKeys); }).join('') +
           '</tbody></table></div>';
       });
     }
     if (pr.itemsPendingPOAward && pr.itemsPendingPOAward.length) {
       html += '<div class="pendingSection"><div class="hdr">Items still pending PO award:</div>' +
         '<table class="poItemsTable"><thead><tr><th>UCS Code</th><th>Description</th><th>Qty</th><th>PR Value</th><th>PR Del Dt</th></tr></thead><tbody>' +
-        pr.itemsPendingPOAward.map(function (it, idx) { return itemRow(it, 'pend_' + idx, hitItems); }).join('') +
+        pr.itemsPendingPOAward.map(function (it, idx) { return itemRow(it, 'pend_' + idx, hitItems, dpMatchKeys); }).join('') +
         '</tbody></table></div>';
     }
     if (!(pr.poGroups && pr.poGroups.length) && !(pr.itemsPendingPOAward && pr.itemsPendingPOAward.length)) {
@@ -531,6 +742,12 @@
     renderTable();
   }
 
+  function clearDPRange() {
+    document.getElementById('dpFrom').value = '';
+    document.getElementById('dpTo').value = '';
+    renderTable();
+  }
+
   function showLongText(ucsCode, longText) {
     document.getElementById('modalUcsCode').textContent = ucsCode;
     document.getElementById('modalLongText').textContent = longText || '(no long text on file)';
@@ -543,11 +760,13 @@
   Object.defineProperties(window.Page = {}, {
     login: { value: login, enumerable: true },
     loadData: { value: loadData, enumerable: true },
-    toggleStageFilter: { value: toggleStageFilter, enumerable: true },
     onSearchInput: { value: onSearchInput, enumerable: true },
     renderTable: { value: renderTable, enumerable: true },
     clearDateRange: { value: clearDateRange, enumerable: true },
-    saveGraceDays: { value: saveGraceDays, enumerable: true },
+    clearDPRange: { value: clearDPRange, enumerable: true },
+    applyAnalysisOverride: { value: applyAnalysisOverride, enumerable: true },
+    clearAnalysisOverride: { value: clearAnalysisOverride, enumerable: true },
+    toggleCarryOverFilter: { value: toggleCarryOverFilter, enumerable: true },
     toggleExpand: { value: toggleExpand, enumerable: true },
     showLongText: { value: showLongText, enumerable: true },
     closeModal: { value: closeModal, enumerable: true }
