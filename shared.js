@@ -148,21 +148,6 @@ const Access = {
   isAreaSupervisorOrIncharge: (u) => hasCommaValue(u.role, 'Area Store Supervisor') || hasCommaValue(u.role, 'Area Incharge'),
   isAreaIncharge: (u) => hasCommaValue(u.role, 'Area Incharge'),
   isStoreIncharge: (u) => hasCommaValue(u.role, 'Store Incharge'),
-  // Same role check as isAreaSupervisorOrIncharge, PLUS at least one real
-  // (non-PLANNING) area on the login -- add-local-issue.html itself now
-  // excludes PLANNING from its area picker (recordLocalIssue() rejects it
-  // outright: Planning material is issued via the Requisition module, never
-  // as a "local issue"), so a Supervisor/Incharge whose Authorized_Area is
-  // PLANNING-only would click through to a page with nothing to do but show
-  // a "you're not authorized" notice. Hiding the nav link for that case is
-  // a convenience only -- add-local-issue.html's own login() still shows
-  // that same notice as the real fallback for anyone who reaches it via a
-  // direct link or an old bookmark.
-  hasLocalIssueArea: (u) => {
-    if (!hasCommaValue(u.role, 'Area Store Supervisor') && !hasCommaValue(u.role, 'Area Incharge')) return false;
-    return String(u.authorizedArea || '').split(',').map(s => s.trim())
-      .some(a => a && a.toUpperCase() !== 'PLANNING');
-  },
 };
 
 // ====== PAGE REGISTRY ======
@@ -172,6 +157,7 @@ const PAGES = [
   // --- Procurement (flagship dashboard -- deliberately placed first, above
   // every other group, and bold-styled in the sidebar) ---
   { key: 'pr-po-dashboard', file: 'pr-po-dashboard.html', label: 'Procurement Dashboard', icon: 'clipboardList', group: 'Procurement', access: Access.canManageSTO, bold: true },
+  { key: 'budget-matrix', file: 'budget-matrix.html', label: 'Budget Matrix', icon: 'trend', group: 'Procurement', access: Access.canManageSTO },
 
   // --- UCS Codes ---
   { key: 'search-ucs', file: 'search-ucs.html', label: 'Search UCS Codes', icon: 'search', group: 'UCS Codes', access: Access.anyLoggedIn },
@@ -193,7 +179,7 @@ const PAGES = [
   { key: 'issue-dashboard', file: 'issue-dashboard.html', label: 'Issue Dashboard', icon: 'checkCircle', group: 'Requisitions', access: Access.isStoreIncharge },
 
   // --- Area / local stock ---
-  { key: 'add-local-issue', file: 'add-local-issue.html', label: 'Record Local Issue', icon: 'handReceive', group: 'Area Stock', access: Access.hasLocalIssueArea },
+  { key: 'add-local-issue', file: 'add-local-issue.html', label: 'Record Local Issue', icon: 'handReceive', group: 'Area Stock', access: Access.isAreaSupervisorOrIncharge },
   { key: 'area-stock-dashboard', file: 'area-stock-dashboard.html', label: 'Area Stock Dashboard', icon: 'warehouse', group: 'Area Stock', access: Access.anyLoggedIn },
   { key: 'raise-demand-alert', file: 'raise-demand-alert.html', label: 'Raise Demand Alert', icon: 'alert', group: 'Area Stock', access: Access.isAreaIncharge },
 
@@ -318,7 +304,6 @@ async function loadPage(key) {
 function closeSidebarOnMobile() {
   if (window.innerWidth <= 860) {
     document.getElementById('sidebar').classList.remove('open');
-    document.getElementById('sidebarBackdrop').classList.remove('open');
   }
 }
 
@@ -424,26 +409,10 @@ function toggleSidebar() {
   const sidebar = document.getElementById('sidebar');
   if (window.innerWidth <= 860) {
     sidebar.classList.toggle('open');
-    document.getElementById('sidebarBackdrop').classList.toggle('open');
   } else {
     sidebar.classList.toggle('collapsed');
   }
 }
-
-// Tapping the dimmed backdrop behind an open mobile/tablet sidebar should
-// close it -- this listener was never actually attached anywhere. The
-// backdrop's 'open' class was being toggled correctly (so it visually shows
-// and hides), but nothing was listening for a click ON it, so tapping it
-// did nothing. Attached once, here, rather than via an inline onclick in
-// index.html, so this keeps working regardless of what markup surrounds it.
-(function () {
-  const backdrop = document.getElementById('sidebarBackdrop');
-  if (!backdrop) return;
-  backdrop.addEventListener('click', function () {
-    document.getElementById('sidebar').classList.remove('open');
-    backdrop.classList.remove('open');
-  });
-})();
 
 // Install the addEventListener tracking wrapper and the login-caching
 // fetch wrapper immediately, before any fragment ever gets a chance to run.
