@@ -66,7 +66,8 @@
   .badgePartial { background:#1a73e8; }
   .badgeRecentlyDelivered { background:#1e8e3e; }
   .poGroupDone { opacity:0.75; }
-  .poGroupDPMatch { outline:2px solid #1a73e8; outline-offset:-2px; }
+  .dpMatch { background:#eaf1fd; }
+  .overdueBadge { color:#c5221f; font-weight:700; margin-left:4px; cursor:help; }
 
   .poGroup { margin: 10px 0; border:1px solid #e3e5e8; border-radius:6px; overflow:hidden; }
   .poGroupHead { padding:8px 10px; background:#eef0f3; font-size:12px; display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; }
@@ -129,7 +130,7 @@
     </div>
 
     <div class="filterGroup">
-      <div class="filterLabel">Budget Projection &middot; PO DP</div>
+      <div class="filterLabel">Budget Projection &middot; Effective DP</div>
       <div class="filterRow">
         <input type="date" id="dpFrom" onchange="Page.renderTable()">
         <span class="filterSep">to</span>
@@ -143,7 +144,7 @@
       <div class="filterRow">
         <select id="sortMode" onchange="Page.renderTable()">
           <option value="prDate">PR Date (newest first)</option>
-          <option value="poDP">PO Delivery Period (earliest first)</option>
+          <option value="poDP">Effective Delivery Date (earliest first)</option>
         </select>
       </div>
     </div>
@@ -396,38 +397,65 @@
     }).join('');
   }
 
-  // Which of a PR's PO groups have a PO DP falling inside [dpFrom, dpTo]
-  // (either bound optional). A PO with no PO DP recorded never matches --
-  // it simply can't be placed into a budget window. Both PO DP and the
-  // input values are 'YYYY-MM-DD' strings, so plain comparison works.
-  function getRelevantPODPGroups(pr, dpFrom, dpTo) {
-    return (pr.poGroups || []).filter(function (g) {
-      if (!g.poDP) return false;
-      if (dpFrom && g.poDP < dpFrom) return false;
-      if (dpTo && g.poDP > dpTo) return false;
+  // Which of a PR's items have an effective date falling inside [dpFrom, dpTo]
+  // Every item under a PR, PO-linked and pending-PO-award alike, flattened
+  // into one list with a uniform shape -- committedValue is the item's PO
+  // Value once a PO exists, or its PR Value while still pending one (budget
+  // is reserved at PR Del Dt before any PO is placed, per the project
+  // owner); outstandingValue mirrors that same logic (a pending item is by
+  // definition 100% outstanding, having received nothing yet).
+  function getAllItemsFlat(pr) {
+    const out = [];
+    (pr.poGroups || []).forEach(function (g, gi) {
+      (g.items || []).forEach(function (it, idx) {
+        out.push(Object.assign({}, it, { key: 'po' + gi + '_' + idx, poNo: g.poNo, committedValue: it.poValue, outstandingValue: it.outstandingValue }));
+      });
+    });
+    (pr.itemsPendingPOAward || []).forEach(function (it, idx) {
+      out.push(Object.assign({}, it, { key: 'pend_' + idx, poNo: null, committedValue: it.prValue, outstandingValue: it.prValue }));
+    });
+    return out;
+  }
+
+  // Items whose EFFECTIVE date (Alt DP -> PO DP -> PR Del Dt, already
+  // resolved server-side per item) falls inside [dpFrom, dpTo] (either bound
+  // optional). An item with no effective date at all (fully received, or
+  // genuinely no date on record) never matches -- it simply can't be placed
+  // into a budget window. Both effectiveDate and the input values are
+  // 'YYYY-MM-DD' strings, so plain comparison works.
+  function getRelevantEffectiveDateItems(pr, dpFrom, dpTo) {
+    return getAllItemsFlat(pr).filter(function (it) {
+      if (!it.effectiveDate) return false;
+      if (dpFrom && it.effectiveDate < dpFrom) return false;
+      if (dpTo && it.effectiveDate > dpTo) return false;
       return true;
     });
   }
 
   // Sums whatever the table is CURRENTLY showing (date range + search +
-  // stage filter + PO DP window, all applied) -- not the full unfiltered
-  // dataset. When a PO DP window is active, PO Value Outstanding is summed
-  // only across the PO groups that actually fall inside that window (the
-  // true "money landing in this quarter/FY" figure) rather than the whole
-  // PR's total, since a PR can have other POs due in entirely different
-  // periods. PR Value itself is never DP-split -- it's the PR's one
-  // original budgeted figure, shown for context, not a per-period number.
+  // stage filter + Effective Date window, all applied) -- not the full
+  // unfiltered dataset. When an Effective Date window is active, every PO
+  // value AND the capital-budget figure are summed only across the items
+  // that actually fall inside that window (the true "money landing in this
+  // quarter/FY" figure) rather than the whole PR's total, since a PR can
+  // have items due in entirely different periods. PR Value itself is never
+  // window-split -- it's the PR's one original budgeted figure, shown for
+  // context, not a per-period number.
   function renderTotals(withHits, dpFrom, dpTo, dpFilterActive) {
     let totalPRValue = 0, totalPOOutstanding = 0, totalPOValue = 0, totalCapitalValue = 0;
     withHits.forEach(function (r) {
       const prv = Number(r.pr.prTotValue);
       if (isFinite(prv)) totalPRValue += prv;
       if (dpFilterActive) {
-        getRelevantPODPGroups(r.pr, dpFrom, dpTo).forEach(function (g) {
-          const pov = Number(g.poValueOutstanding);
-          if (isFinite(pov)) totalPOOutstanding += pov;
-          const ptv = Number(g.poValueTotal);
-          if (isFinite(ptv)) totalPOValue += ptv;
+        getRelevantEffectiveDateItems(r.pr, dpFrom, dpTo).forEach(function (it) {
+          const ov = Number(it.outstandingValue);
+          if (isFinite(ov)) totalPOOutstanding += ov;
+          const cv = Number(it.committedValue);
+          if (isFinite(cv)) totalPOValue += cv;
+          if (it.isCapital) {
+            const pv = Number(it.prValue);
+            if (isFinite(pv)) totalCapitalValue += pv;
+          }
         });
       } else {
         if (r.pr.poValueOutstanding !== null && r.pr.poValueOutstanding !== undefined) {
@@ -438,18 +466,15 @@
           const ptv = Number(r.pr.poValueTotal);
           if (isFinite(ptv)) totalPOValue += ptv;
         }
+        const cv = Number(r.pr.capitalValueTotal);
+        if (isFinite(cv)) totalCapitalValue += cv;
       }
-      // Not DP-restricted, even in DP-filter mode -- capital budget is
-      // committed at PR-raise time, not tied to any one PO's delivery
-      // window (see server-side comment on capitalValueTotal).
-      const cv = Number(r.pr.capitalValueTotal);
-      if (isFinite(cv)) totalCapitalValue += cv;
     });
     const balancePct = totalPOValue > 0 ? (totalPOOutstanding / totalPOValue * 100) : 0;
     const balanceStr = totalPOValue > 0 ? balancePct.toFixed(1) + '%' : '&ndash;';
-    const poValueLabel = dpFilterActive ? 'PO Value &middot; DP window' : 'Total PO Value';
+    const poValueLabel = dpFilterActive ? 'Committed Value &middot; Effective DP window' : 'Total PO Value';
     const outstandingLabel = dpFilterActive
-      ? 'Budget Projection &middot; PO DP ' + (dpFrom || '&hellip;') + ' to ' + (dpTo || '&hellip;')
+      ? 'Budget Projection &middot; Effective DP ' + (dpFrom || '&hellip;') + ' to ' + (dpTo || '&hellip;')
       : 'Total PO Value Outstanding';
     document.getElementById('totalsBar').innerHTML =
       '<div class="totalsCard prValue"><div class="totalsLabel">Total PR Value</div><div class="totalsValue">' + formatINR(totalPRValue) + '</div></div>' +
@@ -514,15 +539,15 @@
     const dpFrom = document.getElementById('dpFrom').value;
     const dpTo = document.getElementById('dpTo').value;
     const dpFilterActive = !!(dpFrom || dpTo);
-    if (dpFilterActive) withHits = withHits.filter(function (r) { return getRelevantPODPGroups(r.pr, dpFrom, dpTo).length > 0; });
+    if (dpFilterActive) withHits = withHits.filter(function (r) { return getRelevantEffectiveDateItems(r.pr, dpFrom, dpTo).length > 0; });
 
     const sortMode = document.getElementById('sortMode').value;
     if (sortMode === 'poDP') {
       withHits.sort(function (a, b) {
-        const aGroups = dpFilterActive ? getRelevantPODPGroups(a.pr, dpFrom, dpTo) : (a.pr.poGroups || []).filter(function (g) { return g.poDP; });
-        const bGroups = dpFilterActive ? getRelevantPODPGroups(b.pr, dpFrom, dpTo) : (b.pr.poGroups || []).filter(function (g) { return g.poDP; });
-        const aMin = aGroups.length ? aGroups.reduce(function (m, g) { return g.poDP < m ? g.poDP : m; }, aGroups[0].poDP) : '9999-99-99';
-        const bMin = bGroups.length ? bGroups.reduce(function (m, g) { return g.poDP < m ? g.poDP : m; }, bGroups[0].poDP) : '9999-99-99';
+        const aItems = dpFilterActive ? getRelevantEffectiveDateItems(a.pr, dpFrom, dpTo) : getAllItemsFlat(a.pr).filter(function (it) { return it.effectiveDate; });
+        const bItems = dpFilterActive ? getRelevantEffectiveDateItems(b.pr, dpFrom, dpTo) : getAllItemsFlat(b.pr).filter(function (it) { return it.effectiveDate; });
+        const aMin = aItems.length ? aItems.reduce(function (m, it) { return it.effectiveDate < m ? it.effectiveDate : m; }, aItems[0].effectiveDate) : '9999-99-99';
+        const bMin = bItems.length ? bItems.reduce(function (m, it) { return it.effectiveDate < m ? it.effectiveDate : m; }, bItems[0].effectiveDate) : '9999-99-99';
         return aMin.localeCompare(bMin);
       });
     } // else: leave as-is -- server already sorts newest-PR-date-first, and filtering preserves that order
@@ -545,7 +570,7 @@
           '<td>' + escapeHtml(pr.purOfficer) + '</td>' +
           '<td>' + formatINR(pr.prTotValue) + '</td>' +
           '<td>' + (pr.poValueOutstanding === null ? '&ndash;' : formatINR(pr.poValueOutstanding)) + '</td>' +
-          '<td><span class="' + stageClass(pr.overallStage) + '">' + escapeHtml(pr.overallStage) + '</span></td>' +
+          '<td><span class="' + stageClass(pr.overallStage) + '">' + escapeHtml(pr.overallStage) + '</span>' + (pr.hasOverdueItem ? ' <span class="overdueBadge" title="This PR has at least one item past its operative date with no confirmed update \u2014 expand for details">&#9888;</span>' : '') + '</td>' +
           '<td>' + escapeHtml(pr.progress) + '</td>' +
           '<td>' + (pr.releaseToPODays === null ? '&ndash;' : escapeHtml(pr.releaseToPODays)) + '</td>' +
         '</tr>'
@@ -557,27 +582,45 @@
     }).join('');
   }
 
-  function itemRow(it, key, hitItems) {
-    const cls = hitItems[key] ? ' class="hit"' : '';
+  function itemRow(it, key, hitItems, dpMatchKeys) {
+    const classes = [];
+    if (hitItems[key]) classes.push('hit');
+    if (dpMatchKeys && dpMatchKeys.has(key)) classes.push('dpMatch');
+    const cls = classes.length ? ' class="' + classes.join(' ') + '"' : '';
     const capitalBadge = it.isCapital ? ' <span class="capitalBadge" title="Capital good \u2014 PR value above \u20b910,00,000">CS</span>' : '';
+    const overdueBadge = it.isOverdue ? ' <span class="overdueBadge" title="Overdue \u2014 past its operative date with no confirmed update since; may still be silently blocking budget">&#9888;</span>' : '';
+    if (it.poQty !== undefined) {
+      return '<tr' + cls + '>' +
+        '<td><span class="ucsLink" data-ucscode="' + escapeHtml(it.ucsCode) + '" data-longtext="' + escapeHtml(it.longText || it.description) + '">' + escapeHtml(it.ucsCode) + '</span></td>' +
+        '<td>' + escapeHtml(it.description) + capitalBadge + '</td>' +
+        '<td>' + escapeHtml(it.qty) + '</td>' +
+        '<td>' + formatINR(it.prValue) + '</td>' +
+        '<td>' + formatINR(it.poValue) + '</td>' +
+        '<td>' + escapeHtml(it.poDP) + '</td>' +
+        '<td>' + escapeHtml(it.altDP) + '</td>' +
+        '<td>' + escapeHtml(it.effectiveDate) + overdueBadge + '</td>' +
+        '<td>' + escapeHtml(it.poQty) + '</td>' +
+        '<td>' + escapeHtml(it.qty105) + '</td>' +
+        '<td>' + escapeHtml(it.date105) + '</td>' +
+      '</tr>';
+    }
     return '<tr' + cls + '>' +
       '<td><span class="ucsLink" data-ucscode="' + escapeHtml(it.ucsCode) + '" data-longtext="' + escapeHtml(it.longText || it.description) + '">' + escapeHtml(it.ucsCode) + '</span></td>' +
       '<td>' + escapeHtml(it.description) + capitalBadge + '</td>' +
       '<td>' + escapeHtml(it.qty) + '</td>' +
       '<td>' + formatINR(it.prValue) + '</td>' +
-      (it.poQty !== undefined ? '<td>' + formatINR(it.poValue) + '</td><td>' + escapeHtml(it.altDP) + '</td><td>' + escapeHtml(it.poQty) + '</td><td>' + escapeHtml(it.qty105) + '</td><td>' + escapeHtml(it.date105) + '</td>' : '') +
+      '<td>' + escapeHtml(it.prDelDt) + overdueBadge + '</td>' +
     '</tr>';
   }
 
   function renderDetail(pr, hitItems, dpFilterActive, dpFrom, dpTo) {
     let html = '<div class="prDatesLine">PR Created: <b>' + escapeHtml(pr.prCrDt || '&ndash;') + '</b> &middot; PR Released: <b>' +
       escapeHtml(pr.finalRelDt || 'Not yet released') + '</b></div>';
+    const dpMatchKeys = dpFilterActive ? new Set(getRelevantEffectiveDateItems(pr, dpFrom, dpTo).map(function (it) { return it.key; })) : null;
     if (pr.poGroups && pr.poGroups.length) {
-      const dpMatchSet = dpFilterActive ? new Set(getRelevantPODPGroups(pr, dpFrom, dpTo).map(function (g) { return g.poNo; })) : null;
       pr.poGroups.forEach(function (g, gi) {
         const isDone = g.status === 'Recently Delivered';
-        const isDPMatch = dpMatchSet && dpMatchSet.has(g.poNo);
-        const groupCls = 'poGroup' + (isDone ? ' poGroupDone' : '') + (isDPMatch ? ' poGroupDPMatch' : '');
+        const groupCls = 'poGroup' + (isDone ? ' poGroupDone' : '');
         const deliveredNote = isDone
           ? (g.keptByAnalysisOverride
               ? ' &middot; Delivered ' + escapeHtml(g.deliveredDate)
@@ -585,18 +628,18 @@
           : ' &middot; PO Value Outstanding: ' + formatINR(g.poValueOutstanding);
         html += '<div class="' + groupCls + '">' +
           '<div class="poGroupHead">' +
-            '<div><b>PO ' + escapeHtml(g.poNo) + '</b> &middot; ' + escapeHtml(g.poDate) + ' &middot; ' + escapeHtml(g.vendorName) + (g.poDP ? ' &middot; PO DP: ' + escapeHtml(g.poDP) : '') + deliveredNote + '</div>' +
+            '<div><b>PO ' + escapeHtml(g.poNo) + '</b> &middot; ' + escapeHtml(g.poDate) + ' &middot; ' + escapeHtml(g.vendorName) + deliveredNote + '</div>' +
             '<div><span class="' + stageClass(g.status) + '">' + escapeHtml(g.status) + '</span></div>' +
           '</div>' +
-          '<table class="poItemsTable"><thead><tr><th>UCS Code</th><th>Description</th><th>Qty</th><th>PR Value</th><th>PO Value</th><th>Alt DP</th><th>PO Qty</th><th>105 Qty</th><th>105 Date</th></tr></thead><tbody>' +
-          g.items.map(function (it, idx) { return itemRow(it, 'po' + gi + '_' + idx, hitItems); }).join('') +
+          '<table class="poItemsTable"><thead><tr><th>UCS Code</th><th>Description</th><th>Qty</th><th>PR Value</th><th>PO Value</th><th>PO DP</th><th>Alt DP</th><th>Effective Date</th><th>PO Qty</th><th>105 Qty</th><th>105 Date</th></tr></thead><tbody>' +
+          g.items.map(function (it, idx) { return itemRow(it, 'po' + gi + '_' + idx, hitItems, dpMatchKeys); }).join('') +
           '</tbody></table></div>';
       });
     }
     if (pr.itemsPendingPOAward && pr.itemsPendingPOAward.length) {
       html += '<div class="pendingSection"><div class="hdr">Items still pending PO award:</div>' +
-        '<table class="poItemsTable"><thead><tr><th>UCS Code</th><th>Description</th><th>Qty</th><th>PR Value</th></tr></thead><tbody>' +
-        pr.itemsPendingPOAward.map(function (it, idx) { return itemRow(it, 'pend_' + idx, hitItems); }).join('') +
+        '<table class="poItemsTable"><thead><tr><th>UCS Code</th><th>Description</th><th>Qty</th><th>PR Value</th><th>PR Del Dt</th></tr></thead><tbody>' +
+        pr.itemsPendingPOAward.map(function (it, idx) { return itemRow(it, 'pend_' + idx, hitItems, dpMatchKeys); }).join('') +
         '</tbody></table></div>';
     }
     if (!(pr.poGroups && pr.poGroups.length) && !(pr.itemsPendingPOAward && pr.itemsPendingPOAward.length)) {
