@@ -172,6 +172,7 @@ const PAGES = [
   // --- Procurement (flagship dashboard -- deliberately placed first, above
   // every other group, and bold-styled in the sidebar) ---
   { key: 'pr-po-dashboard', file: 'pr-po-dashboard.html', label: 'Procurement Dashboard', icon: 'clipboardList', group: 'Procurement', access: Access.canManageSTO, bold: true },
+  { key: 'budget-matrix', file: 'budget-matrix.html', label: 'Budget Matrix', icon: 'trend', group: 'Procurement', access: Access.canManageSTO },
 
   // --- UCS Codes ---
   { key: 'search-ucs', file: 'search-ucs.html', label: 'Search UCS Codes', icon: 'search', group: 'UCS Codes', access: Access.anyLoggedIn },
