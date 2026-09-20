@@ -44,6 +44,7 @@
   .compLegend { display:flex; flex-wrap:wrap; gap:16px; margin-top:10px; font-size:13px; color:#333; }
   .compLegendItem { display:flex; align-items:center; gap:6px; }
   .compSwatch { width:12px; height:12px; border-radius:2px; display:inline-block; flex-shrink:0; }
+  .compLegendItem.compLegendActive { font-weight:700; background:#eaf1fd; padding:2px 8px; border-radius:4px; margin:-2px -8px; }
   .capitalBadge { display:inline-block; background:#d2e3fc; color:#1a3f7a; font-size:10px; font-weight:700; padding:1px 6px; border-radius:8px; margin-left:5px; vertical-align:middle; }
 
   .searchRow { margin-bottom:14px; }
@@ -205,6 +206,7 @@
 
   let currentUser = { email: '', password: '' };
   let carryOverFilter = null; // null | 'bf' | 'cf' -- which carry-over card, if any, is currently drilling the table down
+  let compositionFilter = null; // null | 'capReceived' | 'capOutstanding' | 'nonCapReceived' | 'nonCapOutstanding' -- mutually exclusive with carryOverFilter, only one drill-down active at a time
   let allPRs = [];
   let stageOrder = [];
   let expandedPRNo = null;
@@ -551,29 +553,36 @@
     const nonCapReceived = Math.max(totalReceived - capReceived, 0);
     const nonCapOutstanding = Math.max(totalOutstanding - capOutstanding, 0);
     const segments = [
-      { label: 'Capital Received', value: capReceived, color: '#1e8e3e' },
-      { label: 'Capital Outstanding', value: capOutstanding, color: '#b8860b' },
-      { label: 'Non-Capital Received', value: nonCapReceived, color: '#8ecf9e' },
-      { label: 'Non-Capital Outstanding', value: nonCapOutstanding, color: '#e8c46a' }
+      { bucket: 'capReceived', label: 'Capital Received', value: capReceived, color: '#1e8e3e' },
+      { bucket: 'capOutstanding', label: 'Capital Outstanding', value: capOutstanding, color: '#b8860b' },
+      { bucket: 'nonCapReceived', label: 'Non-Capital Received', value: nonCapReceived, color: '#8ecf9e' },
+      { bucket: 'nonCapOutstanding', label: 'Non-Capital Outstanding', value: nonCapOutstanding, color: '#e8c46a' }
     ];
+    const anyActive = !!compositionFilter;
     const barWidth = 1000, barHeight = 46;
     let x = 0;
     const rects = segments.map(function (s) {
       const w = total > 0 ? (s.value / total) * barWidth : 0;
       const pct = total > 0 ? (s.value / total * 100).toFixed(1) : '0.0';
-      const rect = '<rect x="' + x.toFixed(2) + '" y="0" width="' + w.toFixed(2) + '" height="' + barHeight + '" fill="' + s.color + '">' +
-        '<title>' + escapeHtml(s.label) + ': ' + formatINR(s.value) + ' (' + pct + '%)</title></rect>';
+      const isActive = compositionFilter === s.bucket;
+      const opacity = anyActive && !isActive ? '0.35' : '1';
+      const stroke = isActive ? ' stroke="#1a73e8" stroke-width="3"' : '';
+      const rect = '<rect x="' + x.toFixed(2) + '" y="0" width="' + w.toFixed(2) + '" height="' + barHeight + '" fill="' + s.color + '" opacity="' + opacity + '"' + stroke +
+        ' style="cursor:pointer;" onclick="Page.toggleCompositionFilter(\'' + s.bucket + '\')">' +
+        '<title>' + escapeHtml(s.label) + ': ' + formatINR(s.value) + ' (' + pct + '%) -- click to see the PRs behind this</title></rect>';
       x += w;
       return rect;
     }).join('');
     const legend = segments.map(function (s) {
       const pct = total > 0 ? (s.value / total * 100).toFixed(1) : '0.0';
-      return '<div class="compLegendItem"><span class="compSwatch" style="background:' + s.color + ';"></span>' +
+      const isActive = compositionFilter === s.bucket;
+      const activeCls = isActive ? ' compLegendActive' : '';
+      return '<div class="compLegendItem' + activeCls + '" style="cursor:pointer;" onclick="Page.toggleCompositionFilter(\'' + s.bucket + '\')"><span class="compSwatch" style="background:' + s.color + ';"></span>' +
         escapeHtml(s.label) + ': <b>' + formatINR(s.value) + '</b> (' + pct + '%)</div>';
     }).join('');
     el.style.display = 'block';
     el.innerHTML =
-      '<div class="compTitle">Budget Composition &middot; Effective DP window</div>' +
+      '<div class="compTitle">Budget Composition &middot; Effective DP window &middot; <span style="font-weight:400; text-transform:none;">click a segment to see what\'s behind it</span></div>' +
       '<svg viewBox="0 0 ' + barWidth + ' ' + barHeight + '" style="width:100%; height:44px; display:block; border-radius:4px; overflow:hidden;">' + rects + '</svg>' +
       '<div class="compLegend">' + legend + '</div>';
   }
@@ -618,7 +627,24 @@
   // Per-PR figures for the Committed/Outstanding/Capital columns, computed
   // exactly like the totals cards above: from matching items only when the
   // Effective DP window is active, else from the PR-level rollups.
-  function computeRowValues(pr, dpFrom, dpTo, dpFilterActive, carryMode) {
+  function computeRowValues(pr, dpFrom, dpTo, dpFilterActive, carryMode, compositionMode) {
+    if (compositionMode) {
+      // Each bucket is inherently one-sided (a "*Received" bucket only
+      // concerns the received portion, a "*Outstanding" bucket only the
+      // outstanding portion) -- so only that one side is summed here,
+      // exactly matching what the clicked segment represents.
+      const isOutstandingBucket = compositionMode === 'capOutstanding' || compositionMode === 'nonCapOutstanding';
+      let committed = 0, outstanding = 0, capital = 0, prValue = 0;
+      getCompositionItems(pr, compositionMode, dpFrom, dpTo).forEach(function (it) {
+        const s = splitItemValue(it);
+        const val = isOutstandingBucket ? s.outstandingValue : s.receivedValue;
+        committed += val;
+        if (isOutstandingBucket) outstanding += val;
+        if (it.isCapital) capital += val;
+        prValue += isOutstandingBucket ? s.prValueOutstanding : s.prValueReceived;
+      });
+      return { committed: committed, outstanding: outstanding, capital: capital, prValue: prValue };
+    }
     if (carryMode) {
       // BF/CF items are, by definition, entirely the still-OUTSTANDING
       // portion of an item (a received portion can't be "brought forward"
@@ -696,6 +722,24 @@
     });
   }
 
+  // Items belonging to one of the four Budget Composition bar segments.
+  // 'capReceived'/'nonCapReceived' check the RECEIVED portion (isCapital
+  // true/false) against the window by its 105 date; 'capOutstanding'/
+  // 'nonCapOutstanding' check the OUTSTANDING portion by its effective
+  // date. A partially-received item can appear under two different
+  // buckets at once (its received half under one, its still-open half
+  // under another) since the two portions are tracked independently.
+  function getCompositionItems(pr, bucket, dpFrom, dpTo) {
+    return getAllItemsFlat(pr).filter(function (it) {
+      const s = splitItemValue(it);
+      if (bucket === 'capReceived') return it.isCapital && s.receivedValue > 0 && dateInRange(s.receivedDate, dpFrom, dpTo);
+      if (bucket === 'capOutstanding') return it.isCapital && s.outstandingValue > 0 && dateInRange(s.outstandingDate, dpFrom, dpTo);
+      if (bucket === 'nonCapReceived') return !it.isCapital && s.receivedValue > 0 && dateInRange(s.receivedDate, dpFrom, dpTo);
+      if (bucket === 'nonCapOutstanding') return !it.isCapital && s.outstandingValue > 0 && dateInRange(s.outstandingDate, dpFrom, dpTo);
+      return false;
+    });
+  }
+
   function renderCarryOver(baseHits, dpFrom, dpTo, dpFilterActive) {
     const el = document.getElementById('carryOverBar');
     if (!dpFilterActive) { el.style.display = 'none'; el.innerHTML = ''; return; }
@@ -712,6 +756,13 @@
 
   function toggleCarryOverFilter(mode) {
     carryOverFilter = (carryOverFilter === mode) ? null : mode;
+    if (carryOverFilter) compositionFilter = null; // only one drill-down active at a time
+    renderTable();
+  }
+
+  function toggleCompositionFilter(bucket) {
+    compositionFilter = (compositionFilter === bucket) ? null : bucket;
+    if (compositionFilter) carryOverFilter = null; // only one drill-down active at a time
     renderTable();
   }
 
@@ -724,23 +775,37 @@
     const dpFrom = document.getElementById('dpFrom').value;
     const dpTo = document.getElementById('dpTo').value;
     const dpFilterActive = !!(dpFrom || dpTo);
-    if (!dpFilterActive) carryOverFilter = null; // meaningless without a window -- reset if the range gets cleared
+    if (!dpFilterActive) { carryOverFilter = null; compositionFilter = null; } // meaningless without a window -- reset if the range gets cleared
 
     const windowHits = dpFilterActive
       ? baseHits.filter(function (r) { return getRelevantEffectiveDateItems(r.pr, dpFrom, dpTo).length > 0; })
       : baseHits;
 
     renderCarryOver(baseHits, dpFrom, dpTo, dpFilterActive);
-    renderTotals(windowHits, dpFrom, dpTo, dpFilterActive); // Always the selected window's own totals -- unaffected by which carry-over card (if any) is drilled into below
+    renderTotals(windowHits, dpFrom, dpTo, dpFilterActive); // Always the selected window's own totals -- unaffected by which drill-down (if any) is active below
 
-    let withHits = carryOverFilter
-      ? baseHits.filter(function (r) { return getCarryOverItems(r.pr, carryOverFilter, dpFrom, dpTo).length > 0; })
-      : windowHits;
+    let withHits;
+    if (compositionFilter) {
+      withHits = baseHits.filter(function (r) { return getCompositionItems(r.pr, compositionFilter, dpFrom, dpTo).length > 0; });
+    } else if (carryOverFilter) {
+      withHits = baseHits.filter(function (r) { return getCarryOverItems(r.pr, carryOverFilter, dpFrom, dpTo).length > 0; });
+    } else {
+      withHits = windowHits;
+    }
 
     document.getElementById('prValueColHeader').textContent = dpFilterActive ? 'PR Value (window)' : 'PR Value';
 
+    const compositionLabels = {
+      capReceived: 'Capital Received \u2014 capital items whose value has already come in.',
+      capOutstanding: 'Capital Outstanding \u2014 capital items still awaited in this window.',
+      nonCapReceived: 'Non-Capital Received \u2014 ordinary items whose value has already come in.',
+      nonCapOutstanding: 'Non-Capital Outstanding \u2014 ordinary items still awaited in this window.'
+    };
     const modeBanner = document.getElementById('carryOverModeBanner');
-    if (carryOverFilter) {
+    if (compositionFilter) {
+      modeBanner.style.display = 'block';
+      modeBanner.textContent = 'Showing PRs with ' + compositionLabels[compositionFilter] + ' Other lines on these PRs may not belong to this segment -- the matching item(s) are highlighted below. Click the segment again to return to your Effective DP window.';
+    } else if (carryOverFilter) {
       modeBanner.style.display = 'block';
       modeBanner.textContent = (carryOverFilter === 'bf'
         ? 'Showing PRs with Brought Forward items \u2014 still-open commitments dated before your window, still draining this budget.'
@@ -753,9 +818,11 @@
     const sortMode = document.getElementById('sortMode').value;
     if (sortMode === 'poDP') {
       withHits.sort(function (a, b) {
-        const aItems = carryOverFilter ? getCarryOverItems(a.pr, carryOverFilter, dpFrom, dpTo)
+        const aItems = compositionFilter ? getCompositionItems(a.pr, compositionFilter, dpFrom, dpTo)
+          : carryOverFilter ? getCarryOverItems(a.pr, carryOverFilter, dpFrom, dpTo)
           : (dpFilterActive ? getRelevantEffectiveDateItems(a.pr, dpFrom, dpTo) : getAllItemsFlat(a.pr).filter(function (it) { return it.effectiveDate; }));
-        const bItems = carryOverFilter ? getCarryOverItems(b.pr, carryOverFilter, dpFrom, dpTo)
+        const bItems = compositionFilter ? getCompositionItems(b.pr, compositionFilter, dpFrom, dpTo)
+          : carryOverFilter ? getCarryOverItems(b.pr, carryOverFilter, dpFrom, dpTo)
           : (dpFilterActive ? getRelevantEffectiveDateItems(b.pr, dpFrom, dpTo) : getAllItemsFlat(b.pr).filter(function (it) { return it.effectiveDate; }));
         const aMin = aItems.length ? aItems.reduce(function (m, it) { return it.effectiveDate < m ? it.effectiveDate : m; }, aItems[0].effectiveDate) : '9999-99-99';
         const bMin = bItems.length ? bItems.reduce(function (m, it) { return it.effectiveDate < m ? it.effectiveDate : m; }, bItems[0].effectiveDate) : '9999-99-99';
@@ -772,7 +839,7 @@
 
     body.innerHTML = withHits.map(function (r) {
       const pr = r.pr;
-      const rowVals = computeRowValues(pr, dpFrom, dpTo, dpFilterActive, carryOverFilter);
+      const rowVals = computeRowValues(pr, dpFrom, dpTo, dpFilterActive, carryOverFilter, compositionFilter);
       const out = [
         '<tr class="prRow" onclick="Page.toggleExpand(\'' + pr.prNo + '\')">' +
           '<td>' + escapeHtml(pr.prNo) + '</td>' +
@@ -786,7 +853,7 @@
         '</tr>'
       ];
       if (expandedPRNo === pr.prNo) {
-        out.push('<tr class="detailRow"><td colspan="8">' + renderDetail(pr, r.hitItems, dpFilterActive, dpFrom, dpTo, carryOverFilter) + '</td></tr>');
+        out.push('<tr class="detailRow"><td colspan="8">' + renderDetail(pr, r.hitItems, dpFilterActive, dpFrom, dpTo, carryOverFilter, compositionFilter) + '</td></tr>');
       }
       return out.join('');
     }).join('');
@@ -823,7 +890,7 @@
     '</tr>';
   }
 
-  function renderDetail(pr, hitItems, dpFilterActive, dpFrom, dpTo, carryMode) {
+  function renderDetail(pr, hitItems, dpFilterActive, dpFrom, dpTo, carryMode, compositionMode) {
     const totalItemCount = (pr.poGroups || []).reduce(function (sum, g) { return sum + (g.items ? g.items.length : 0); }, 0)
       + ((pr.itemsPendingPOAward || []).length);
     const poCount = (pr.poGroups || []).length;
@@ -836,7 +903,9 @@
       : '';
     let html = '<div class="prDatesLine">PR Created: <b>' + escapeHtml(pr.prCrDt || '&ndash;') + '</b> &middot; PR Released: <b>' +
       escapeHtml(pr.finalRelDt || 'Not yet released') + '</b> &middot; <b>' + totalItemCount + '</b> line item(s) currently tracked across <b>' + poCount + '</b> PO(s)' + carryNote + '</div>';
-    const dpMatchKeys = carryMode
+    const dpMatchKeys = compositionMode
+      ? new Set(getCompositionItems(pr, compositionMode, dpFrom, dpTo).map(function (it) { return it.key; }))
+      : carryMode
       ? new Set(getCarryOverItems(pr, carryMode, dpFrom, dpTo).map(function (it) { return it.key; }))
       : (dpFilterActive ? new Set(getRelevantEffectiveDateItems(pr, dpFrom, dpTo).map(function (it) { return it.key; })) : null);
     if (pr.poGroups && pr.poGroups.length) {
@@ -904,6 +973,7 @@
     clearDateRange: { value: clearDateRange, enumerable: true },
     clearDPRange: { value: clearDPRange, enumerable: true },
     toggleCarryOverFilter: { value: toggleCarryOverFilter, enumerable: true },
+    toggleCompositionFilter: { value: toggleCompositionFilter, enumerable: true },
     toggleExpand: { value: toggleExpand, enumerable: true },
     showLongText: { value: showLongText, enumerable: true },
     closeModal: { value: closeModal, enumerable: true }
