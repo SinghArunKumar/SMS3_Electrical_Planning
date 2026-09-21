@@ -93,7 +93,10 @@ const ML_COL = {
   PO_DP: 24,          // PO-level delivery period -- same value across every item on one PO
   ALT_DP: 25,         // per-item alternate delivery period
   PO_RATE: 20,        // per-unit PO rate -- used with outstanding qty (PO Qty - 105 Qty) to compute PO Value Outstanding
-  PO_VALUE: 21        // per-item full PO value -- no longer used for the outstanding calc, kept in case it's needed elsewhere
+  PO_VALUE: 21,       // per-item full PO value
+  PR_LINE_RATE: 10,   // per-UNIT PR-side rate ("Rate Value") -- the correct basis for capital-goods classification
+  PR_DEL_DT: 14,      // item's requested delivery date at PR-raise time -- the budget-reservation date BEFORE any PO exists
+  PR_LINE_VALUE: 11   // per-item PR-side TOTAL value ("Tot Value" = Rate x Qty) -- used for display/summation, not classification
 };
 
 // ====== ENTRY POINTS ======
@@ -144,6 +147,8 @@ function doPost(e) {
     if (action === 'getPRItems') { return getPRItems(data); }
     if (action === 'getPOItems') { return getPOItems(data); }
     if (action === 'getPRPODashboardData') { return getPRPODashboardData(data); }
+    if (action === 'getProcurementDashboardSettings') { return getProcurementDashboardSettings(data); }
+    if (action === 'updateProcurementDashboardSettings') { return updateProcurementDashboardSettings(data); }
     if (action === 'recordLocalIssue') { return recordLocalIssue(data); }
     if (action === 'getMyLocalIssues') { return getMyLocalIssues(data); }
     if (action === 'getAreaStockList') { return getAreaStockList(data); }
@@ -2052,7 +2057,49 @@ function getPOItems(data) {
 // "Fully Received" never actually appears in that endpoint's output (those
 // items are archived before this array is ever consulted) -- kept here only
 // so stageRank_() has a defined, consistent position for it.
-const STAGE_ORDER_ = ['Pending Release', 'Released - Pending Enquiry', 'Under Enquiry', 'Pending PO Award', 'Pending Delivery', 'Partial', 'Fully Received'];
+// How long a fully-received PO stays visible after its last item's 105
+// date, before archiving out for good. Exists because STO stock is pooled
+// by UCS Code (not tied to a specific PO -- see design discussion), so a
+// PO with no STO raised against it yet would otherwise become completely
+// untraceable the instant it archives: gone from this dashboard, and not
+// yet findable in the STO Dashboard either. Worst for single/few-item POs.
+//
+// Stored in PropertiesService (shared across everyone, survives redeploys)
+// rather than hardcoded, so Planning staff can tune it themselves from the
+// dashboard's own UI instead of asking for a code change every time.
+const PROCUREMENT_DASHBOARD_GRACE_DAYS_DEFAULT = 15;
+const PROCUREMENT_DASHBOARD_GRACE_DAYS_PROP_KEY = 'PROCUREMENT_DASHBOARD_DELIVERED_GRACE_DAYS';
+
+function getDeliveredGraceDays_() {
+  const stored = PropertiesService.getScriptProperties().getProperty(PROCUREMENT_DASHBOARD_GRACE_DAYS_PROP_KEY);
+  const n = Number(stored);
+  return (Number.isInteger(n) && n > 0) ? n : PROCUREMENT_DASHBOARD_GRACE_DAYS_DEFAULT;
+}
+
+function getProcurementDashboardSettings(data) {
+  const check = requireSTOAccess(data);
+  if (!check.ok) return check.response;
+  return jsonResponse({ success: true, graceDays: getDeliveredGraceDays_() });
+}
+
+function updateProcurementDashboardSettings(data) {
+  const check = requireSTOAccess(data); // same access tier as viewing the dashboard itself
+  if (!check.ok) return check.response;
+  const login = check.login;
+  const graceDays = Number(data.graceDays);
+  if (!Number.isInteger(graceDays) || graceDays < 1 || graceDays > 180) {
+    return jsonResponse({ success: false, message: 'Look-back period must be a whole number of days, between 1 and 180.' });
+  }
+  PropertiesService.getScriptProperties().setProperty(PROCUREMENT_DASHBOARD_GRACE_DAYS_PROP_KEY, String(graceDays));
+  logAudit(login.name, data.email, 'UPDATE_PROCUREMENT_DASHBOARD_SETTINGS', 'Delivered-PO look-back period set to ' + graceDays + ' day(s).');
+  return jsonResponse({ success: true, message: 'Look-back period updated to ' + graceDays + ' day(s).', graceDays: graceDays });
+}
+
+// A material whose own PR-line value exceeds this is classified as a
+// capital good. ₹10,00,000 (10 lakh), confirmed by the project owner.
+const CAPITAL_GOOD_PR_VALUE_THRESHOLD = 1000000;
+
+const STAGE_ORDER_ = ['Pending Release', 'Released - Pending Enquiry', 'Under Enquiry', 'Pending PO Award', 'Pending Delivery', 'Partial', 'Recently Delivered', 'Fully Received'];
 function stageRank_(s) { const idx = STAGE_ORDER_.indexOf(s); return idx === -1 ? STAGE_ORDER_.length : idx; }
 
 /**
@@ -2151,6 +2198,20 @@ function getPRPODashboardData(data) {
     const longTextMap = getUCSLongTextMap_();
 
     const today = startOfToday();
+    const deliveredGraceDays = getDeliveredGraceDays_();
+    // One-off analysis override -- NOT persisted, NOT the shared daily
+    // setting. When provided, a fully-received PO stays visible as long as
+    // its last item's 105 date is on/after this fixed calendar date,
+    // instead of the rolling N-day window. Exists so a single user can pull
+    // "every PO delivered since 01 April" for a financial-year reconciliation
+    // without changing what anyone else sees day to day.
+    const analysisOverride = data.analysisSinceDate ? parseDateOnly(String(data.analysisSinceDate).trim()) : null;
+    // Complete-history mode -- used by the Budget Matrix page, which needs
+    // every fully-received PO visible unconditionally (its whole purpose is
+    // retrospective completeness, unlike Procurement Dashboard's deliberate
+    // "old delivered stuff disappears" operational rule). No manual date to
+    // remember: when this is set, archiving simply never happens.
+    const fullHistoryMode = !!data.fullHistory;
 
     // A PR is only "released" once Final rel. holds an actual DATE -- your
     // team sometimes writes the name of whoever it's currently pending with
@@ -2193,6 +2254,47 @@ function getPRPODashboardData(data) {
       const lineItems = itemsByPR[prNo] || [];
       const preMLStage = prLevelStage_(row); // used whenever an item has no PO yet
 
+      // Captured here (not just inside prLevelStage_) so both the raw
+      // Final Release date and the release-to-first-PO gap can be exposed
+      // to the client -- computed from lineItems (every raw Material List
+      // row ever seen for this PR, including already-archived ones), not
+      // from poGroupsOut, so this figure survives even once a PO has fully
+      // delivered and dropped out of the active drill-down.
+      const finalRelRaw = row[prCol['Final rel.']];
+      const finalRelMidnight = isRealDate_(finalRelRaw) ? toMidnight(finalRelRaw) : null;
+      let earliestPODtMidnight = null;
+      lineItems.forEach(function (r) {
+        if (String(r[ML_COL.PO_NO]).trim() === '') return;
+        const d = toMidnight(r[ML_COL.PO_DT]);
+        if (d && (!earliestPODtMidnight || d < earliestPODtMidnight)) earliestPODtMidnight = d;
+      });
+      const releaseToPODays = (finalRelMidnight && earliestPODtMidnight)
+        ? Math.floor((earliestPODtMidnight - finalRelMidnight) / 86400000)
+        : null;
+
+      // Capital-goods budget, computed from ALL of this PR's raw Material
+      // List rows -- including ones whose PO has since fully delivered and
+      // dropped out of poGroupsOut/pendingPOAwardOut. Budget commitment for
+      // a capital item happens at PR-raise time (per project owner), so this
+      // stays a true cumulative figure regardless of later archiving.
+      // Classification uses the PER-UNIT rate, not the line's total value --
+      // a 2-qty line worth 16 lakh total is 8 lakh per piece, below the
+      // threshold, even though its total value alone would clear it.
+      // VALUE SUMMED: PO Value once a PO exists, PR Value only for items
+      // still pending one -- the same basis poValueTotal itself uses.
+      // Originally this always summed PR Value, which made "Capital Budget
+      // Utilized" incomparable to "Total PO Value" (different bases can't
+      // be validly subtracted from one another) -- fixed after the project
+      // owner's own cross-check surfaced the mismatch.
+      let capitalValueTotal = 0;
+      lineItems.forEach(function (r) {
+        const rate = Number(r[ML_COL.PR_LINE_RATE]) || 0;
+        if (rate <= CAPITAL_GOOD_PR_VALUE_THRESHOLD) return;
+        const hasPO = String(r[ML_COL.PO_NO]).trim() !== '';
+        const value = hasPO ? (Number(r[ML_COL.PO_VALUE]) || 0) : (Number(r[ML_COL.PR_LINE_VALUE]) || 0);
+        capitalValueTotal += value;
+      });
+
       const itemStates = [];      // one stage-name entry per PO-group/pending-item, for the worst-case STAGE rollup only
       const poGroupsOut = [];     // non-archived POs, for the drill-down panel
       let pendingPOAwardOut = []; // items still with no PO No. at all
@@ -2207,7 +2309,17 @@ function getPRPODashboardData(data) {
         withoutPO.forEach(function () { itemStates.push(withPO.length > 0 ? 'Pending PO Award' : preMLStage); });
         pendingPOAwardOut = withoutPO.map(function (r) {
           const code = String(r[ML_COL.MAT_CODE]).trim();
-          return { ucsCode: code, description: r[ML_COL.DESCRIPTION], longText: longTextMap[code] || '', qty: r[ML_COL.LINE_QTY] };
+          const prValue = Number(r[ML_COL.PR_LINE_VALUE]) || 0;
+          const prRate = Number(r[ML_COL.PR_LINE_RATE]) || 0;
+          const prDelDtMidnight = toMidnight(r[ML_COL.PR_DEL_DT]);
+          const isOverdue = !!(prDelDtMidnight && prDelDtMidnight < today);
+          return {
+            ucsCode: code, description: r[ML_COL.DESCRIPTION], longText: longTextMap[code] || '', qty: r[ML_COL.LINE_QTY],
+            prValue: prValue, isCapital: prRate > CAPITAL_GOOD_PR_VALUE_THRESHOLD,
+            prDelDt: formatDateOut(r[ML_COL.PR_DEL_DT]),
+            effectiveDate: prDelDtMidnight ? formatDateOut(prDelDtMidnight) : '',
+            isOverdue: isOverdue
+          };
         });
 
         const byPO = {};
@@ -2232,13 +2344,47 @@ function getPRPODashboardData(data) {
           else if (fullyReceivedCount > 0) status = 'Partial';
           else status = 'Pending Delivery';
 
-          if (status === 'Fully Received') return; // ARCHIVE RULE: dropped entirely, no trace kept here
+          let deliveredDate = null;      // set only when this PO is in its post-delivery grace window
+          let daysUntilFallOff = null;
+          let keptByAnalysisOverride = false;
+
+          if (status === 'Fully Received') {
+            let lastReceiptMidnight = null;
+            items.forEach(function (r) {
+              const d = toMidnight(r[ML_COL.DT_105]);
+              if (d && (!lastReceiptMidnight || d > lastReceiptMidnight)) lastReceiptMidnight = d;
+            });
+
+            if (fullHistoryMode) {
+              status = 'Recently Delivered'; // never archived in this mode -- see fullHistoryMode comment above
+              deliveredDate = lastReceiptMidnight ? formatDateOut(lastReceiptMidnight) : '';
+              keptByAnalysisOverride = true; // reuses the "no countdown" display path -- there's nothing to count down to
+            } else if (analysisOverride) {
+              if (lastReceiptMidnight && lastReceiptMidnight >= analysisOverride) {
+                status = 'Recently Delivered';
+                deliveredDate = formatDateOut(lastReceiptMidnight);
+                keptByAnalysisOverride = true; // fixed cutoff, not a rolling countdown -- daysUntilFallOff stays null
+              } else {
+                return; // before the analysis cutoff -- archived, same as the normal rule
+              }
+            } else {
+              const ageDays = lastReceiptMidnight ? Math.floor((today - lastReceiptMidnight) / 86400000) : Infinity;
+              if (ageDays <= deliveredGraceDays) {
+                status = 'Recently Delivered'; // still shown -- see grace-period comment on the constant above
+                deliveredDate = formatDateOut(lastReceiptMidnight);
+                daysUntilFallOff = deliveredGraceDays - ageDays;
+              } else {
+                return; // grace period elapsed -- archived for good, same as the original rule
+              }
+            }
+          }
 
           // PO Value Outstanding = the actual money still tied up in this PO:
           // for each item, (PO Qty - 105 Qty) x PO Rate -- NOT the item's
           // full original value. A partially-received item (e.g. 20 of 30
           // delivered) should only count the remaining 10 units' worth, not
           // its whole line value, since 20 units' worth has already arrived.
+          // Naturally comes out to 0 for a Recently Delivered PO.
           let poValueOutstanding = 0;
           items.forEach(function (r) {
             const poQty = Number(r[ML_COL.PO_QTY]) || 0;
@@ -2248,26 +2394,82 @@ function getPRPODashboardData(data) {
             poValueOutstanding += outstandingQty * rate;
           });
 
+          // Total PO Value = the full committed value of this PO, straight
+          // from Material List's own "PO Value" column -- used alongside
+          // poValueOutstanding to derive "% PO Value Balance" (how much of
+          // what was committed is still un-delivered).
+          let poValueTotal = 0;
+          items.forEach(function (r) {
+            poValueTotal += Number(r[ML_COL.PO_VALUE]) || 0;
+          });
+
           itemStates.push(status);
           poGroupsOut.push({
             poNo: poNo,
             poDate: formatDateOut(items[0][ML_COL.PO_DT]),
             vendorCode: items[0][ML_COL.V_CODE],
             vendorName: items[0][ML_COL.V_NAME],
-            poDP: formatDateOut(items[0][ML_COL.PO_DP]),
             poValueOutstanding: poValueOutstanding,
+            poValueTotal: poValueTotal,
             status: status,
+            deliveredDate: deliveredDate,
+            keptByAnalysisOverride: keptByAnalysisOverride,
+            daysUntilFallOff: daysUntilFallOff,
             items: items.map(function (r) {
               const code = String(r[ML_COL.MAT_CODE]).trim();
+              const prValue = Number(r[ML_COL.PR_LINE_VALUE]) || 0;
+              const prRate = Number(r[ML_COL.PR_LINE_RATE]) || 0;
+              const poQtyItem = Number(r[ML_COL.PO_QTY]) || 0;
+              const qty105Item = Number(r[ML_COL.QTY_105]) || 0;
+              const rateItem = Number(r[ML_COL.PO_RATE]) || 0;
+              const itemFullyReceived = poQtyItem > 0 && qty105Item >= poQtyItem;
+              const outstandingValueItem = Math.max(poQtyItem - qty105Item, 0) * rateItem;
+
+              // Effective date -- the operative date driving THIS item's
+              // budget FY, per the confirmed priority: Alt DP (if the vendor
+              // renegotiated) -> PO DP (the item's own, not the PO's) ->
+              // never PR Del Dt here, since a PO already exists. ONE
+              // EXCEPTION, fixed after a real discrepancy was found: once an
+              // item is fully received, its effective date becomes its
+              // ACTUAL 105 receipt date, not blank. Setting it blank made the
+              // item invisible to every window-scoped total (getRelevantEffectiveDateItems
+              // filters out anything with no effective date at all) -- so a
+              // delivered item's value vanished from BOTH Committed and
+              // Outstanding instead of moving from Outstanding to Received,
+              // silently undercounting Committed Value and Received So Far
+              // by exactly the value of everything already delivered.
+              const altDPMidnight = toMidnight(r[ML_COL.ALT_DP]);
+              const poDPMidnight = toMidnight(r[ML_COL.PO_DP]);
+              const item105Midnight = toMidnight(r[ML_COL.DT_105]);
+              const effectiveMidnight = itemFullyReceived ? item105Midnight : (altDPMidnight || poDPMidnight);
+              // Overdue = the operative date has already passed and the item
+              // is STILL not received -- whether because no Alt DP was ever
+              // requested (a stale PO DP silently carried forward) or
+              // because even the Alt DP itself has now also lapsed. This is
+              // exactly the "phantom budget block" the project owner
+              // described: SAP keeps this date on record and continues to
+              // reserve funds against it, however old it gets. Explicitly
+              // excludes fully-received items -- their effective date is now
+              // their (necessarily past) receipt date, which must never be
+              // mistaken for an overdue commitment.
+              const isOverdue = !!(!itemFullyReceived && effectiveMidnight && effectiveMidnight < today);
+
               return {
                 ucsCode: code,
                 description: r[ML_COL.DESCRIPTION],
                 longText: longTextMap[code] || '',
                 qty: r[ML_COL.PO_LINE_QTY],
                 poQty: r[ML_COL.PO_QTY],
+                poDP: formatDateOut(r[ML_COL.PO_DP]),
                 altDP: formatDateOut(r[ML_COL.ALT_DP]),
                 qty105: r[ML_COL.QTY_105],
-                date105: formatDateOut(r[ML_COL.DT_105])
+                date105: formatDateOut(r[ML_COL.DT_105]),
+                prValue: prValue,
+                poValue: Number(r[ML_COL.PO_VALUE]) || 0,
+                outstandingValue: outstandingValueItem,
+                isCapital: prRate > CAPITAL_GOOD_PR_VALUE_THRESHOLD,
+                effectiveDate: effectiveMidnight ? formatDateOut(effectiveMidnight) : '',
+                isOverdue: isOverdue
               };
             })
           });
@@ -2289,6 +2491,12 @@ function getPRPODashboardData(data) {
       const poValueOutstandingTotal = poGroupsOut.length > 0
         ? poGroupsOut.reduce(function (sum, g) { return sum + g.poValueOutstanding; }, 0)
         : null;
+      const poValueTotalRollup = poGroupsOut.length > 0
+        ? poGroupsOut.reduce(function (sum, g) { return sum + g.poValueTotal; }, 0)
+        : null;
+
+      const hasOverdueItem = poGroupsOut.some(function (g) { return g.items.some(function (it) { return it.isOverdue; }); })
+        || pendingPOAwardOut.some(function (it) { return it.isOverdue; });
 
       funnelCounts[overallStage] = (funnelCounts[overallStage] || 0) + 1;
 
@@ -2301,6 +2509,11 @@ function getPRPODashboardData(data) {
         crName: row[prCol['Cr name']],
         prTotValue: row[prCol['PR Tot Value']],
         poValueOutstanding: poValueOutstandingTotal,
+        poValueTotal: poValueTotalRollup,
+        hasOverdueItem: hasOverdueItem,
+        finalRelDt: finalRelMidnight ? formatDateOut(finalRelMidnight) : '',
+        releaseToPODays: releaseToPODays,
+        capitalValueTotal: capitalValueTotal,
         purOfficer: row[prCol['Pur Officer']],
         qoDt: formatDateOut(row[prCol['QO Dt']]),
         techSuitDt: formatDateOut(row[prCol['TechSuit Dt']]),
@@ -2313,7 +2526,7 @@ function getPRPODashboardData(data) {
 
     outPRs.sort(function (a, b) { return (b.prCrDt || '').localeCompare(a.prCrDt || ''); }); // newest first, oldest last
 
-    return jsonResponse({ success: true, prs: outPRs, funnel: funnelCounts, stageOrder: STAGE_ORDER_ });
+    return jsonResponse({ success: true, prs: outPRs, funnel: funnelCounts, stageOrder: STAGE_ORDER_, graceDays: deliveredGraceDays, analysisSinceDate: analysisOverride ? formatDateOut(analysisOverride) : null });
   } catch (e) {
     return jsonResponse({ success: false, message: 'Could not load PR/PO dashboard: ' + e.message });
   }
