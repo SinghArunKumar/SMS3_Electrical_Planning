@@ -20,6 +20,7 @@
   .lockedNotice { background:#fce8e6; color:#c5221f; padding:14px; border-radius:4px; font-size:14px; }
   .modeNotice { background:#e8f0fe; color:#1a4fa0; padding:10px 12px; border-radius:6px; font-size:13px; margin-top:10px; }
   .modeNotice.fastTrack { background:#fff8e1; color:#8a6d00; }
+  .qtyZeroNeg { color:#c5221f; font-weight:bold; }
 
   /* ---- Item search combo ---- */
   #itemSearchWrap { position: relative; }
@@ -207,6 +208,18 @@
     return String(str == null ? '' : str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
+  // Renders an "Available at Planning" quantity as HTML, highlighting zero or
+  // negative balances in red/bold so they can't be misread (e.g. "-1956" being
+  // mistaken for "1956"). Use wherever this figure is shown to the user.
+  function formatAvailableQty(val) {
+    const n = Number(val);
+    const text = escapeHtml(val);
+    if (!isNaN(n) && n <= 0) {
+      return '<span class="qtyZeroNeg">' + text + (n < 0 ? ' (shortage)' : ' (out of stock)') + '</span>';
+    }
+    return text;
+  }
+
   function hasCommaValueClient(str, target) {
     if (!str) return false;
     return String(str).split(',').map(function (s) { return s.trim(); }).indexOf(target) !== -1;
@@ -327,7 +340,7 @@
     box.innerHTML = currentSuggestions.map(function (m, idx) {
       return '<div class="suggestionItem" onclick="Page.pickSuggestion(' + idx + ')">' +
         '<div class="code">' + escapeHtml(m.ucsCode) + ' &middot; ' + escapeHtml(m.unit) +
-          ' &middot; Available: ' + m.availableAtPlanning + '</div>' +
+          ' &middot; Available: ' + formatAvailableQty(m.availableAtPlanning) + '</div>' +
         '<div class="short">' + escapeHtml(m.shortText) + '</div></div>';
     }).join('');
     box.style.display = 'block';
@@ -341,7 +354,7 @@
     document.getElementById('itemSearchBox').value = '';
     document.getElementById('pendingItemDisplay').value = m.ucsCode + ' \u2014 ' + m.shortText;
     document.getElementById('pendingItemUnit').textContent = m.unit;
-    document.getElementById('pendingItemAvailable').textContent = m.availableAtPlanning;
+    document.getElementById('pendingItemAvailable').innerHTML = formatAvailableQty(m.availableAtPlanning);
     document.getElementById('pendingItemQty').value = '';
     document.getElementById('pendingItemError').style.display = 'none';
     document.getElementById('pendingItemBox').style.display = 'block';
@@ -375,8 +388,15 @@
     // Client-side check only, for immediate feedback -- raiseRequisition() re-checks
     // the live balance server-side on Submit, since this page's number could be a
     // few minutes stale by then.
-    if (qty > Number(pendingItem.availableAtPlanning)) {
-      errEl.textContent = 'Only ' + pendingItem.availableAtPlanning + ' available at Planning for this UCS Code -- reduce the quantity.';
+    const avail = Number(pendingItem.availableAtPlanning);
+    if (qty > avail) {
+      if (avail <= 0) {
+        errEl.textContent = avail < 0
+          ? 'Planning is short by ' + Math.abs(avail) + ' of this UCS Code (balance: ' + avail + ') -- nothing can be raised against it right now.'
+          : 'Planning has 0 available of this UCS Code -- nothing can be raised against it right now.';
+      } else {
+        errEl.textContent = 'Only ' + avail + ' available at Planning for this UCS Code -- reduce the quantity.';
+      }
       errEl.style.display = 'block';
       return;
     }
@@ -404,7 +424,7 @@
       wrap.style.display = 'block';
       body.innerHTML = slipItems.map(function (it, idx) {
         return '<tr><td>' + escapeHtml(it.ucsCode) + '</td><td>' + escapeHtml(it.itemDescription) + '</td>' +
-          '<td>' + escapeHtml(it.unit) + '</td><td>' + it.availableAtPlanning + '</td><td>' + it.qty + '</td>' +
+          '<td>' + escapeHtml(it.unit) + '</td><td>' + formatAvailableQty(it.availableAtPlanning) + '</td><td>' + it.qty + '</td>' +
           '<td><button type="button" class="small danger" onclick="Page.removeItem(' + idx + ')">Remove</button></td></tr>';
       }).join('');
     }
