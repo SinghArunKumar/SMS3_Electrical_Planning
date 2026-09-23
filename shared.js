@@ -364,6 +364,43 @@ function renderMenu() {
 
 // ====== LOGIN ======
 
+// Push notifications only exist inside the wrapped Android app -- Capacitor's
+// bridge script injects `window.Capacitor` automatically whenever this page is
+// loaded inside that app (even though it's the same live site as the browser
+// version), and that object is simply absent in a normal desktop/mobile
+// browser. So this quietly does nothing there -- no error, no behavior change.
+async function registerPushNotifications() {
+  if (!window.Capacitor || !window.Capacitor.isNativePlatform || !window.Capacitor.isNativePlatform()) return;
+  const PushNotifications = window.Capacitor.Plugins && window.Capacitor.Plugins.PushNotifications;
+  if (!PushNotifications) return;
+
+  try {
+    const perm = await PushNotifications.requestPermissions();
+    if (perm.receive !== 'granted') return; // user declined -- nothing more to do
+
+    PushNotifications.addListener('registration', function (token) {
+      fetch(Shell.APPS_SCRIPT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          action: 'registerPushToken',
+          email: Shell.currentUser.email,
+          password: Shell.currentUser.password,
+          token: token.value
+        })
+      }).catch(function () { /* silent -- notifications are a nice-to-have, never block the app */ });
+    });
+
+    PushNotifications.addListener('registrationError', function (err) {
+      console.error('Push registration failed:', err);
+    });
+
+    await PushNotifications.register();
+  } catch (e) {
+    console.error('Push notification setup failed:', e);
+  }
+}
+
 async function shellLogin() {
   const email = document.getElementById('loginEmailShell').value.trim();
   const password = document.getElementById('loginPasswordShell').value;
@@ -399,6 +436,8 @@ async function shellLogin() {
       name: data.name, role: data.role,
       authorizedArea: data.authorizedArea, isAdmin: data.isAdmin
     };
+
+    registerPushNotifications(); // fire-and-forget -- never blocks or fails the login itself
 
     document.getElementById('loginScreen').style.display = 'none';
     document.getElementById('appShell').style.display = 'flex';
