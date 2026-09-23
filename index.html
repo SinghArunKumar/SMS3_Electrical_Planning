@@ -83,6 +83,41 @@
     background: #fce8e6; color: #c5221f; display: none;
   }
 
+  /* ---------- ACCOUNT SETUP / PASSWORD RESET SCREEN ---------- */
+  /* Shares #loginCard's look; ids are distinct so nothing collides. */
+  #resetScreen {
+    height: 100vh; width: 100%;
+    display: none; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, #17233b, #1a73e8);
+  }
+  #resetCard {
+    background: var(--card-bg); border-radius: 12px; padding: 36px 32px;
+    width: 100%; max-width: 380px; box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+  }
+  #resetCard h1 { font-size: 20px; margin: 0 0 4px; }
+  #resetCard .sub { color: var(--text-muted); font-size: 13px; margin-bottom: 20px; }
+  #resetCard label { display: block; font-weight: 600; font-size: 13px; margin: 14px 0 6px; }
+  #resetCard input {
+    width: 100%; padding: 10px 12px; font-size: 14px;
+    border: 1px solid var(--border); border-radius: 8px;
+  }
+  #resetCard input:focus { outline: none; border-color: var(--blue); }
+  #resetCard .primaryBtn {
+    margin-top: 18px; width: 100%; padding: 11px; font-size: 15px; font-weight: 600;
+    border: none; border-radius: 8px; background: var(--blue); color: #fff; cursor: pointer;
+  }
+  #resetCard .primaryBtn:hover { background: var(--blue-dark); }
+  #resetCard .primaryBtn:disabled { background: #99a3b0; cursor: not-allowed; }
+  .authLink {
+    display: block; margin-top: 16px; font-size: 13px; color: var(--blue);
+    font-weight: 600; text-align: center; cursor: pointer; text-decoration: none;
+    background: none; border: none; padding: 0; width: auto;
+  }
+  .authLink:hover { text-decoration: underline; }
+  #resetMsg { margin-top: 14px; padding: 10px 12px; border-radius: 8px; font-size: 13px; display: none; }
+  #resetMsg.error { background: #fce8e6; color: #c5221f; }
+  #resetMsg.success { background: #e6f4ea; color: #137333; }
+
   /* ---------- APP SHELL ---------- */
   #appShell { display: none; height: 100vh; width: 100%; overflow: hidden; }
 
@@ -272,6 +307,35 @@
 
     <button id="loginBtnShell" onclick="shellLogin()">Log In</button>
     <div id="loginErrorShell"></div>
+    <a class="authLink" onclick="openResetScreen()">Forgot password? / First time here?</a>
+  </div>
+</div>
+
+<!-- ====== ACCOUNT SETUP / PASSWORD RESET ====== -->
+<div id="resetScreen">
+  <div id="resetCard">
+    <h1>Set up / reset password</h1>
+    <div class="sub" id="resetSub">Enter your registered email &mdash; we'll send you a 6-digit verification code.</div>
+
+    <div id="resetStep1">
+      <label for="resetEmail">Email</label>
+      <input type="email" id="resetEmail" placeholder="you@example.com" autocomplete="email" onkeydown="if(event.key==='Enter')requestResetCode(false)">
+      <button class="primaryBtn" id="resetRequestBtn" onclick="requestResetCode(false)">Send code</button>
+    </div>
+
+    <div id="resetStep2" style="display:none;">
+      <label for="resetCode">Verification code</label>
+      <input type="text" id="resetCode" inputmode="numeric" maxlength="6" placeholder="6-digit code" autocomplete="one-time-code">
+      <label for="resetNewPassword">New password</label>
+      <input type="password" id="resetNewPassword" placeholder="At least 8 characters" autocomplete="new-password">
+      <label for="resetConfirmPassword">Confirm new password</label>
+      <input type="password" id="resetConfirmPassword" placeholder="Re-enter password" autocomplete="new-password" onkeydown="if(event.key==='Enter')submitNewPassword()">
+      <button class="primaryBtn" id="resetSubmitBtn" onclick="submitNewPassword()">Set password</button>
+      <a class="authLink" id="resetResendLink" onclick="requestResetCode(true)">Didn't get it? Resend code</a>
+    </div>
+
+    <div id="resetMsg"></div>
+    <a class="authLink" onclick="backToLogin()">&larr; Back to log in</a>
   </div>
 </div>
 

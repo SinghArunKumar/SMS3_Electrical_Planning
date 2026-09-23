@@ -21,6 +21,10 @@
  *                     increase on an existing UCS Code, or a brand-new material not yet in
  *                     UCS_MasterList, for Planning to triage. Purely advisory -- never touches
  *                     stock balances or triggers a Requisition on its own.
+ * Phase 3, Feature 2: Self-service account setup / forgot password -- emailed 6-digit OTP
+ *                     (CacheService, 10-min expiry, 5 attempts), salted SHA-256 password
+ *                     hashes in Users!Password. See AUTH section at the bottom of this file,
+ *                     incl. ALLOW_LEGACY_PLAINTEXT_PASSWORDS (turn OFF on cutover day).
  * Phase 3, Feature 1: Edit STO (Qty + UCS Code) -- pre-lock correction of an already-raised STO,
  *                     locked automatically once Received info is filled OR a Z04 already exists.
  *
@@ -111,6 +115,8 @@ function doPost(e) {
     const action = data.action;
 
     if (action === 'login') { return jsonResponse(checkLogin(data.email, data.password)); }
+    if (action === 'requestAccountCode') { return requestAccountCode(data); }
+    if (action === 'verifyCodeAndSetPassword') { return verifyCodeAndSetPassword(data); }
     if (action === 'addUCSCode') { return addUCSCode(data); }
     if (action === 'getUCSByCode') { return getUCSByCode(data); }
     if (action === 'checkUCSCodeExists') { return checkUCSCodeExists(data); }
@@ -234,7 +240,11 @@ function checkLogin(email, password) {
   for (let i = 1; i < values.length; i++) {
     const row = values[i];
     if (String(row[emailCol]).trim().toLowerCase() === normalizedInput) {
-      if (String(row[passCol]) === String(password)) {
+      const stored = row[passCol];
+      if (isBlankCell(stored)) {
+        return { success: false, needsSetup: true, message: 'This account has not been set up yet. Click "Forgot password? / First time here?" below to create your password.' };
+      }
+      if (verifyPassword_(String(password), stored)) {
         return {
           success: true, name: row[nameCol], role: row[roleCol],
           authorizedArea: areaCol !== -1 ? row[areaCol] : '', isAdmin: isApprover(row[roleCol])
@@ -3642,4 +3652,221 @@ function setupPlanningStockTrigger() {
 function setupAreaStockTrigger() {
   ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'refreshAreaStock') ScriptApp.deleteTrigger(t); });
   ScriptApp.newTrigger('refreshAreaStock').timeBased().everyMinutes(30).create();
+}
+
+
+// =====================================================================
+// ====== AUTH: hashed passwords + self-service setup / reset (OTP) ======
+// =====================================================================
+//
+// Users!Password cell states:
+//   blank                  -> account not set up yet; user must use
+//                             "Forgot password? / First time here?"
+//   "<16hex>$<64hex>"      -> salted SHA-256 hash (written by this code)
+//   anything else          -> LEGACY plaintext (e.g. "rajat@123"). Accepted
+//                             only while ALLOW_LEGACY_PLAINTEXT_PASSWORDS is
+//                             true, so the team keeps working during testing.
+//
+// CUTOVER DAY: blank every Password cell, set the constant below to false,
+// save, redeploy (New version). From then on only hashes are ever accepted.
+//
+// Admin escape hatch for a locked-out user: clear their Password cell.
+// They then use the same self-service flow to set a new one.
+// Users can NEVER change their own email/role/area through this flow --
+// only their Password cell is ever written.
+
+const ALLOW_LEGACY_PLAINTEXT_PASSWORDS = true;
+
+const OTP_CACHE_PREFIX = 'pwdotp_';
+const OTP_COOLDOWN_PREFIX = 'pwdcooldown_';
+const OTP_EXPIRY_SECONDS = 600;    // 10 minutes
+const OTP_COOLDOWN_SECONDS = 45;   // min gap between code requests per email
+const OTP_MAX_ATTEMPTS = 5;
+const MIN_PASSWORD_LENGTH = 8;
+
+function sha256Hex_(text) {
+  const bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, text, Utilities.Charset.UTF_8);
+  return bytes.map(function (b) {
+    const v = (b < 0 ? b + 256 : b).toString(16);
+    return v.length === 1 ? '0' + v : v;
+  }).join('');
+}
+
+function generateSalt_() {
+  return Utilities.getUuid().replace(/-/g, '').substring(0, 16);
+}
+
+function isHashedPassword_(stored) {
+  return /^[0-9a-f]{16}\$[0-9a-f]{64}$/.test(String(stored));
+}
+
+function makeStoredPassword_(password) {
+  const salt = generateSalt_();
+  return salt + '$' + sha256Hex_(salt + ':' + password);
+}
+
+function verifyPassword_(password, stored) {
+  const s = String(stored);
+  if (isHashedPassword_(s)) {
+    const parts = s.split('$');
+    return sha256Hex_(parts[0] + ':' + password) === parts[1];
+  }
+  // Legacy plaintext -- exact same comparison the old checkLogin() did.
+  return ALLOW_LEGACY_PLAINTEXT_PASSWORDS && s === String(password);
+}
+
+/** 6-digit code from Utilities.getUuid() (secure random), not Math.random(). */
+function generateOtp_() {
+  const n = parseInt(Utilities.getUuid().replace(/-/g, '').substring(0, 12), 16);
+  return String(100000 + (n % 900000));
+}
+
+function normalizeEmail_(email) {
+  return String(email || '').trim().toLowerCase();
+}
+
+function escapeHtml_(str) {
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function findUserRow_(email) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(USERS_SHEET);
+  const values = sheet.getDataRange().getValues();
+  const headers = values[0];
+  const emailCol = getColIndexOrThrow_(headers, 'User_email', USERS_SHEET);
+  const target = normalizeEmail_(email);
+  for (let i = 1; i < values.length; i++) {
+    if (String(values[i][emailCol]).trim().toLowerCase() === target) {
+      return { rowIndex: i, row: values[i], headers: headers, sheet: sheet };
+    }
+  }
+  return null;
+}
+
+/**
+ * data: { email }
+ * Always returns the SAME generic message whether or not the email is
+ * registered, so this endpoint can't be used to discover valid emails.
+ */
+function requestAccountCode(data) {
+  const email = normalizeEmail_(data.email);
+  if (!email) return jsonResponse({ success: false, message: 'Email is required.' });
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return jsonResponse({ success: false, message: 'Enter a valid email address.' });
+
+  const cache = CacheService.getScriptCache();
+  const cooldownKey = OTP_COOLDOWN_PREFIX + email;
+  if (cache.get(cooldownKey)) {
+    return jsonResponse({ success: false, message: 'Please wait a minute before requesting another code.' });
+  }
+  cache.put(cooldownKey, '1', OTP_COOLDOWN_SECONDS);
+
+  const generic = { success: true, message: 'If that email is registered, a verification code has been sent to it.' };
+  const found = findUserRow_(email);
+  if (!found) return jsonResponse(generic);
+
+  const code = generateOtp_();
+  cache.put(OTP_CACHE_PREFIX + email, JSON.stringify({ code: code, attempts: 0 }), OTP_EXPIRY_SECONDS);
+  const nameCol = found.headers.indexOf('Name');
+  const name = nameCol !== -1 ? found.row[nameCol] : '';
+  try {
+    sendAccountCodeEmail_(email, name, code);
+  } catch (e) {
+    cache.remove(OTP_CACHE_PREFIX + email);
+    cache.remove(cooldownKey);
+    return jsonResponse({ success: false, message: 'Could not send the email right now. Please try again later or contact the project owner.' });
+  }
+  return jsonResponse(generic);
+}
+
+function sendAccountCodeEmail_(email, name, code) {
+  const html =
+    '<div style="font-family:Arial,sans-serif;max-width:420px;margin:0 auto;">' +
+      '<div style="background:#17233b;background:linear-gradient(135deg,#17233b,#1a73e8);padding:20px 24px;border-radius:8px 8px 0 0;">' +
+        '<span style="color:#fff;font-size:18px;font-weight:600;">Stores Dashboard</span>' +
+      '</div>' +
+      '<div style="border:1px solid #e0e0e0;border-top:none;padding:24px;border-radius:0 0 8px 8px;">' +
+        '<p style="margin:0 0 12px;color:#1f2430;">Hi' + (name ? ' ' + escapeHtml_(name) : '') + ',</p>' +
+        '<p style="margin:0 0 20px;color:#1f2430;">Use this code to set your Stores Dashboard password:</p>' +
+        '<div style="font-size:30px;font-weight:700;letter-spacing:6px;color:#1557b0;text-align:center;padding:14px 0;background:#f1f3f4;border-radius:8px;">' + code + '</div>' +
+        '<p style="margin:20px 0 0;color:#666;font-size:13px;">This code expires in 10 minutes. If you did not request it, ignore this email &mdash; your password will not change.</p>' +
+      '</div>' +
+    '</div>';
+  MailApp.sendEmail({
+    to: email,
+    subject: 'Your Stores Dashboard verification code',
+    body: 'Your Stores Dashboard verification code is ' + code + '. It expires in 10 minutes. If you did not request it, ignore this email.',
+    htmlBody: html,
+    name: 'Stores Dashboard'
+  });
+}
+
+/**
+ * data: { email, code, newPassword }
+ * Same mechanics for first-time setup (blank cell) and forgot-password.
+ */
+function verifyCodeAndSetPassword(data) {
+  const email = normalizeEmail_(data.email);
+  const code = String(data.code || '').trim();
+  const newPassword = String(data.newPassword || '');
+  if (!email) return jsonResponse({ success: false, message: 'Email is required.' });
+  if (!/^\d{6}$/.test(code)) return jsonResponse({ success: false, message: 'Enter the 6-digit code from your email.' });
+  if (newPassword.length < MIN_PASSWORD_LENGTH) return jsonResponse({ success: false, message: 'Password must be at least ' + MIN_PASSWORD_LENGTH + ' characters.' });
+  if (newPassword.length > 100) return jsonResponse({ success: false, message: 'Password is too long (max 100 characters).' });
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const cache = CacheService.getScriptCache();
+    const cacheKey = OTP_CACHE_PREFIX + email;
+    const raw = cache.get(cacheKey);
+    if (!raw) return jsonResponse({ success: false, message: 'Code expired or not requested. Please request a new one.' });
+
+    const entry = JSON.parse(raw);
+    if (entry.attempts >= OTP_MAX_ATTEMPTS) {
+      cache.remove(cacheKey);
+      return jsonResponse({ success: false, message: 'Too many incorrect attempts. Please request a new code.' });
+    }
+    if (String(entry.code) !== code) {
+      entry.attempts += 1;
+      if (entry.attempts >= OTP_MAX_ATTEMPTS) {
+        cache.remove(cacheKey);
+        return jsonResponse({ success: false, message: 'Too many incorrect attempts. Please request a new code.' });
+      }
+      cache.put(cacheKey, JSON.stringify(entry), OTP_EXPIRY_SECONDS);
+      return jsonResponse({ success: false, message: 'Incorrect code. ' + (OTP_MAX_ATTEMPTS - entry.attempts) + ' attempt(s) left.' });
+    }
+
+    const found = findUserRow_(email);
+    if (!found) { cache.remove(cacheKey); return jsonResponse({ success: false, message: 'Account not found.' }); }
+
+    const passCol = getColIndexOrThrow_(found.headers, 'Password', USERS_SHEET);
+    const wasBlank = isBlankCell(found.row[passCol]);
+    const cell = found.sheet.getRange(found.rowIndex + 1, passCol + 1);
+    cell.setNumberFormat('@STRING@');
+    cell.setValue(makeStoredPassword_(newPassword));
+    cache.remove(cacheKey); // one-time use
+
+    const nameCol = found.headers.indexOf('Name');
+    const name = nameCol !== -1 ? found.row[nameCol] : '';
+    // Never log the password or its hash -- only the event itself.
+    logAudit(name, email, wasBlank ? 'ACCOUNT_PASSWORD_SET' : 'ACCOUNT_PASSWORD_RESET',
+      'Password ' + (wasBlank ? 'set for the first time' : 'reset') + ' via emailed verification code.');
+
+    return jsonResponse({
+      success: true,
+      message: wasBlank ? 'Password set successfully. You can now log in.' : 'Password reset successfully. Log in with your new password.'
+    });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * RUN ONCE FROM THE EDITOR (select it in the function dropdown -> Run)
+ * after pasting this version. MailApp is a new permission for this
+ * script; running this triggers Google's "Authorize access" prompt so the
+ * live Web App is allowed to send email. Safe to re-run; sends nothing.
+ */
+function authorizeMailOnce() {
+  Logger.log('Mail authorized. Remaining daily email quota: ' + MailApp.getRemainingDailyQuota());
 }

@@ -421,6 +421,101 @@ async function shellLogin() {
   }
 }
 
+// ====== ACCOUNT SETUP / PASSWORD RESET ======
+// Talks to Code.gs's requestAccountCode / verifyCodeAndSetPassword. Neither
+// action needs a logged-in user (that's the point), and neither can change
+// anything except the Password cell of an email already in the Users sheet.
+
+function openResetScreen() {
+  document.getElementById('loginScreen').style.display = 'none';
+  document.getElementById('resetScreen').style.display = 'flex';
+  document.getElementById('resetStep1').style.display = 'block';
+  document.getElementById('resetStep2').style.display = 'none';
+  document.getElementById('resetMsg').style.display = 'none';
+  document.getElementById('resetSub').textContent = "Enter your registered email \u2014 we'll send you a 6-digit verification code.";
+  ['resetCode', 'resetNewPassword', 'resetConfirmPassword'].forEach(id => { document.getElementById(id).value = ''; });
+  const loginEmail = document.getElementById('loginEmailShell').value.trim();
+  if (loginEmail) document.getElementById('resetEmail').value = loginEmail;
+}
+
+function backToLogin() {
+  document.getElementById('resetScreen').style.display = 'none';
+  document.getElementById('loginScreen').style.display = 'flex';
+}
+
+function showResetMsg(text, type) {
+  const el = document.getElementById('resetMsg');
+  el.textContent = text;
+  el.className = type; // 'error' | 'success'
+  el.style.display = 'block';
+}
+
+async function requestResetCode(isResend) {
+  const email = document.getElementById('resetEmail').value.trim();
+  if (!email) { showResetMsg('Please enter your email.', 'error'); return; }
+
+  const btn = document.getElementById('resetRequestBtn');
+  const resend = document.getElementById('resetResendLink');
+  btn.disabled = true; btn.textContent = 'Sending\u2026';
+  resend.style.pointerEvents = 'none';
+  try {
+    const res = await fetch(Shell.APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'requestAccountCode', email })
+    });
+    const data = await res.json();
+    if (!data.success) { showResetMsg(data.message || 'Could not send code.', 'error'); return; }
+
+    document.getElementById('resetStep1').style.display = 'none';
+    document.getElementById('resetStep2').style.display = 'block';
+    document.getElementById('resetSub').textContent = 'If ' + email + ' is registered, a 6-digit code is on its way (check spam too).';
+    showResetMsg(isResend ? 'A new code has been sent. Only the latest code works.' : data.message, 'success');
+    document.getElementById('resetCode').focus();
+  } catch (err) {
+    showResetMsg('Could not reach the server. Check your connection.', 'error');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Send code';
+    resend.style.pointerEvents = '';
+  }
+}
+
+async function submitNewPassword() {
+  const email = document.getElementById('resetEmail').value.trim();
+  const code = document.getElementById('resetCode').value.trim();
+  const newPassword = document.getElementById('resetNewPassword').value;
+  const confirmPassword = document.getElementById('resetConfirmPassword').value;
+
+  if (!/^\d{6}$/.test(code)) { showResetMsg('Enter the 6-digit code from your email.', 'error'); return; }
+  if (newPassword.length < 8) { showResetMsg('Password must be at least 8 characters.', 'error'); return; }
+  if (newPassword !== confirmPassword) { showResetMsg('Passwords do not match.', 'error'); return; }
+
+  const btn = document.getElementById('resetSubmitBtn');
+  btn.disabled = true; btn.textContent = 'Setting password\u2026';
+  try {
+    const res = await fetch(Shell.APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'verifyCodeAndSetPassword', email, code, newPassword })
+    });
+    const data = await res.json();
+    if (!data.success) { showResetMsg(data.message || 'Could not set password.', 'error'); return; }
+
+    showResetMsg(data.message, 'success');
+    setTimeout(() => {
+      document.getElementById('loginEmailShell').value = email;
+      document.getElementById('loginPasswordShell').value = '';
+      document.getElementById('loginErrorShell').style.display = 'none';
+      backToLogin();
+      document.getElementById('loginPasswordShell').focus();
+    }, 1500);
+  } catch (err) {
+    showResetMsg('Could not reach the server. Check your connection.', 'error');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Set password';
+  }
+}
+
 function toggleSidebar() {
   const sidebar = document.getElementById('sidebar');
   if (window.innerWidth <= 860) {
