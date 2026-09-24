@@ -432,7 +432,7 @@ function sendPushNotification(toEmail, title, body) {
  * the Run button, click Run, then check your phone.
  */
 function testSendPushNotification() {
-  sendPushNotification('anuragika0713@gmail.com', 'Test Notification', 'If you see this, push notifications are working end-to-end!');
+  sendPushNotification('YOUR-EMAIL-HERE@example.com', 'Test Notification', 'If you see this, push notifications are working end-to-end!');
 }
 function canManageSTO(authorizedAreaString, roleString) {
   return hasCommaValue(authorizedAreaString, 'Planning') && !hasCommaValue(roleString, 'Store Incharge');
@@ -1527,6 +1527,48 @@ function isAreaInchargeForArea(area, authorizedAreaString, roleString) {
 function canSanctionRequisition(roleString) { return hasCommaValue(roleString, 'Approver'); }
 function canIssueRequisition(roleString) { return hasCommaValue(roleString, 'Store Incharge'); }
 
+/**
+ * Every Area Incharge's email for a given area (there can be more than
+ * one, e.g. BOF has two in the Users sheet) -- used to route notifications
+ * to the right person(s) without hardcoding anyone's email anywhere.
+ */
+function getAreaInchargeEmails_(area) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(USERS_SHEET);
+  const values = sheet.getDataRange().getValues();
+  const headers = values[0];
+  const emailCol = headers.indexOf('User_email');
+  const areaCol = headers.indexOf('Authorized_Area');
+  const roleCol = headers.indexOf('Role');
+  const emails = [];
+  for (let i = 1; i < values.length; i++) {
+    const row = values[i];
+    if (isAreaInchargeForArea(area, row[areaCol], row[roleCol])) emails.push(row[emailCol]);
+  }
+  return emails;
+}
+
+/**
+ * Mirror image of getAreaInchargeEmails_ -- every Area Store Supervisor's
+ * email for a given area. Used when the Area Incharge themselves raises a
+ * requisition (fast-track): the Supervisor(s) for that area still need to
+ * know a request has gone in, since they may be the one physically sent to
+ * collect the material once it's issued.
+ */
+function getAreaStoreSupervisorEmails_(area) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(USERS_SHEET);
+  const values = sheet.getDataRange().getValues();
+  const headers = values[0];
+  const emailCol = headers.indexOf('User_email');
+  const areaCol = headers.indexOf('Authorized_Area');
+  const roleCol = headers.indexOf('Role');
+  const emails = [];
+  for (let i = 1; i < values.length; i++) {
+    const row = values[i];
+    if (hasCommaValue(row[areaCol], area) && hasCommaValue(row[roleCol], 'Area Store Supervisor')) emails.push(row[emailCol]);
+  }
+  return emails;
+}
+
 function formatDateYYYYMMDD_(date) {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, '0');
@@ -1670,7 +1712,22 @@ function raiseRequisition(data) {
       detailsSheet.getRange(newRow, getColIndexOrThrow_(detailsHeaders, 'UCS_Code', REQ_DETAILS_SHEET) + 1).setNumberFormat('@STRING@');
     });
     logAudit(login.name, data.email, 'RAISE_REQUISITION', 'Slip ' + slipId + ' | Area ' + area + ' | ' + resolvedItems.length + ' item(s): ' + resolvedItems.map(function (it) { return it.ucsCode + ' x' + it.qty; }).join(', '));
-    if (isFastTrack) logAudit(login.name, data.email, 'AREA_APPROVE_REQUISITION', 'Slip ' + slipId + ' | Fast-tracked by Area Incharge (Supervisor absent) -- approved at requested quantities in the same action.');
+    const raiserEmailLower = String(data.email).trim().toLowerCase();
+    if (isFastTrack) {
+      logAudit(login.name, data.email, 'AREA_APPROVE_REQUISITION', 'Slip ' + slipId + ' | Fast-tracked by Area Incharge (Supervisor absent) -- approved at requested quantities in the same action.');
+      // The Incharge raised it themselves, so the Supervisor(s) for this
+      // area are the ones who still need to know -- they may be the one
+      // physically sent to collect the material once it's issued.
+      getAreaStoreSupervisorEmails_(area).forEach(function (email) {
+        if (String(email).trim().toLowerCase() === raiserEmailLower) return;
+        sendPushNotification(email, 'Requisition raised', 'Slip ' + slipId + ' — ' + area);
+      });
+    } else {
+      getAreaInchargeEmails_(area).forEach(function (email) {
+        if (String(email).trim().toLowerCase() === raiserEmailLower) return;
+        sendPushNotification(email, 'Requisition pending approval', 'Slip ' + slipId + ' — ' + area);
+      });
+    }
     return jsonResponse({ success: true, message: 'Requisition slip ' + slipId + ' raised successfully.' + (isFastTrack ? ' Auto-approved and forwarded to Sanction.' : ''), slipId: slipId });
   } finally {
     lock.releaseLock();
