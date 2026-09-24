@@ -369,6 +369,40 @@ function renderMenu() {
 // loaded inside that app (even though it's the same live site as the browser
 // version), and that object is simply absent in a normal desktop/mobile
 // browser. So this quietly does nothing there -- no error, no behavior change.
+/**
+ * Shows a brief in-app banner for a push notification that arrived while
+ * the app is open -- the one case Android's own system tray never handles
+ * automatically. Auto-dismisses after 5s; tapping it dismisses early.
+ * No dependency on any page's own CSS -- fully self-contained inline
+ * styles, since shared.js runs identically across every page.
+ */
+function showInAppNotificationToast_(title, body) {
+  try {
+    let container = document.getElementById('pushToastContainer');
+    if (!container) {
+      container = document.createElement('div');
+      container.id = 'pushToastContainer';
+      container.style.cssText = 'position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:99999;display:flex;flex-direction:column;gap:8px;width:calc(100% - 24px);max-width:420px;pointer-events:none;';
+      document.body.appendChild(container);
+    }
+    const esc = function (s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); };
+    const toast = document.createElement('div');
+    toast.style.cssText = 'background:#17233b;color:#fff;border-radius:10px;padding:12px 16px;box-shadow:0 4px 16px rgba(0,0,0,0.3);pointer-events:auto;cursor:pointer;opacity:0;transition:opacity 0.25s;';
+    toast.innerHTML =
+      '<div style="font-weight:700;font-size:14px;margin-bottom:2px;">' + esc(title || 'Notification') + '</div>' +
+      '<div style="font-size:13px;color:#cfd8e6;">' + esc(body || '') + '</div>';
+    toast.onclick = function () { toast.remove(); };
+    container.appendChild(toast);
+    requestAnimationFrame(function () { toast.style.opacity = '1'; });
+    setTimeout(function () {
+      toast.style.opacity = '0';
+      setTimeout(function () { toast.remove(); }, 300);
+    }, 5000);
+  } catch (e) {
+    console.error('showInAppNotificationToast_ failed:', e);
+  }
+}
+
 async function registerPushNotifications() {
   if (!window.Capacitor || !window.Capacitor.isNativePlatform || !window.Capacitor.isNativePlatform()) return;
   const PushNotifications = window.Capacitor.Plugins && window.Capacitor.Plugins.PushNotifications;
@@ -393,6 +427,17 @@ async function registerPushNotifications() {
 
     PushNotifications.addListener('registrationError', function (err) {
       console.error('Push registration failed:', err);
+    });
+
+    // Android does NOT show the system notification banner/sound when the
+    // app is already open in the foreground -- that case is left entirely
+    // to the app to handle. Without this, a notification firing while
+    // someone is actively looking at, say, the STO Dashboard would arrive
+    // completely silently and invisibly. This shows a simple in-app banner
+    // instead, so foreground and background/closed give an equivalent
+    // experience.
+    PushNotifications.addListener('pushNotificationReceived', function (notification) {
+      showInAppNotificationToast_(notification.title, notification.body);
     });
 
     await PushNotifications.register();
