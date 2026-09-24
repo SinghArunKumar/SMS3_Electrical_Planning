@@ -21,10 +21,6 @@
  *                     increase on an existing UCS Code, or a brand-new material not yet in
  *                     UCS_MasterList, for Planning to triage. Purely advisory -- never touches
  *                     stock balances or triggers a Requisition on its own.
- * Phase 3, Feature 2: Self-service account setup / forgot password -- emailed 6-digit OTP
- *                     (CacheService, 10-min expiry, 5 attempts), salted SHA-256 password
- *                     hashes in Users!Password. See AUTH section at the bottom of this file,
- *                     incl. ALLOW_LEGACY_PLAINTEXT_PASSWORDS (turn OFF on cutover day).
  * Phase 3, Feature 1: Edit STO (Qty + UCS Code) -- pre-lock correction of an already-raised STO,
  *                     locked automatically once Received info is filled OR a Z04 already exists.
  *
@@ -59,6 +55,7 @@ const AREA_STOCK_SHEET = 'AREA_STOCK';
 const DEMAND_SHEET = 'Demand_Alerts';
 const RETURN_HEADER_SHEET = 'Return_Header';
 const RETURN_DETAILS_SHEET = 'Return_Details';
+const DEVICETOKENS_SHEET = 'DeviceTokens';
 
 // External spreadsheet (NOT this project's own Sheet) -- shared with this
 // script's owner account for read-only access. Holds PR/PO/vendor detail
@@ -169,6 +166,8 @@ function doPost(e) {
     if (action === 'approveReturn') { return approveReturn(data); }
     if (action === 'getAreaReturns') { return getAreaReturns(data); }
 
+    if (action === 'registerPushToken') { return registerPushToken(data); }
+
     return jsonResponse({ success: false, message: 'Unknown action: ' + action });
   } catch (err) {
     return jsonResponse({ success: false, message: 'Server error: ' + err.message });
@@ -257,6 +256,184 @@ function checkLogin(email, password) {
 }
 
 function isApprover(roleString) { return hasCommaValue(roleString, 'Approver'); }
+
+// Saves (or updates) the FCM device token for the logged-in user, keyed by
+// email. Called once from shared.js right after a successful login. This is
+// the ONLY place that writes to DeviceTokens -- sendPushNotification_() only
+// ever reads from it.
+function registerPushToken(data) {
+  const login = checkLogin(data.email, data.password);
+  if (!login.success) return jsonResponse(login);
+
+  const token = String(data.token || '').trim();
+  if (!token) return jsonResponse({ success: false, message: 'No token provided.' });
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(DEVICETOKENS_SHEET);
+    const values = sheet.getDataRange().getValues();
+    const headers = values[0];
+    const emailCol = headers.indexOf('Email');
+    const tokenCol = headers.indexOf('Token');
+    const normalizedEmail = String(data.email).trim().toLowerCase();
+
+    for (let i = 1; i < values.length; i++) {
+      if (String(values[i][emailCol]).trim().toLowerCase() === normalizedEmail) {
+        sheet.getRange(i + 1, tokenCol + 1).setValue(token); // overwrite -- one token per email, latest device wins
+        return jsonResponse({ success: true });
+      }
+    }
+    const newRow = new Array(headers.length).fill('');
+    newRow[emailCol] = data.email;
+    newRow[tokenCol] = token;
+    sheet.appendRow(newRow);
+    return jsonResponse({ success: true });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// ---- Sending push notifications via Firebase Cloud Messaging (FCM) ----
+// FIREBASE_SERVICE_ACCOUNT_JSON is a Script Property (Project Settings ->
+// Script Properties), never a file or Sheet cell -- the private key inside
+// it must never appear in GitHub or anywhere else public.
+
+/**
+ * Exchanges the service account's private key for a short-lived FCM access
+ * token via a signed JWT, per Google's OAuth2 service-account flow. Cached
+ * for just under its real 1-hour lifetime so a burst of notifications
+ * (e.g. several requisition approvals in a row) doesn't re-sign a fresh
+ * JWT and round-trip to Google on every single call.
+ */
+function getFcmAccessToken_() {
+  const cache = CacheService.getScriptCache();
+  const cached = cache.get('fcm_access_token');
+  if (cached) return cached;
+
+  const svcJson = PropertiesService.getScriptProperties().getProperty('FIREBASE_SERVICE_ACCOUNT_JSON');
+  if (!svcJson) throw new Error('FIREBASE_SERVICE_ACCOUNT_JSON script property is not set.');
+  const svc = JSON.parse(svcJson);
+
+  const now = Math.floor(Date.now() / 1000);
+  const header = { alg: 'RS256', typ: 'JWT' };
+  const claimSet = {
+    iss: svc.client_email,
+    scope: 'https://www.googleapis.com/auth/firebase.messaging',
+    aud: 'https://oauth2.googleapis.com/token',
+    iat: now,
+    exp: now + 3600
+  };
+
+  function base64url_(obj) {
+    return Utilities.base64EncodeWebSafe(JSON.stringify(obj)).replace(/=+$/, '');
+  }
+  const toSign = base64url_(header) + '.' + base64url_(claimSet);
+  const signatureBytes = Utilities.computeRsaSha256Signature(toSign, svc.private_key);
+  const signature = Utilities.base64EncodeWebSafe(signatureBytes).replace(/=+$/, '');
+  const jwt = toSign + '.' + signature;
+
+  const res = UrlFetchApp.fetch('https://oauth2.googleapis.com/token', {
+    method: 'post',
+    contentType: 'application/x-www-form-urlencoded',
+    payload: {
+      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+      assertion: jwt
+    },
+    muteHttpExceptions: true
+  });
+  const data = JSON.parse(res.getContentText());
+  if (!data.access_token) throw new Error('Could not get an FCM access token: ' + res.getContentText());
+
+  cache.put('fcm_access_token', data.access_token, 3500); // just under the real 1-hour expiry
+  return data.access_token;
+}
+
+function getDeviceTokenForEmail_(email) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(DEVICETOKENS_SHEET);
+  if (!sheet) return null;
+  const values = sheet.getDataRange().getValues();
+  if (values.length < 2) return null;
+  const headers = values[0];
+  const emailCol = headers.indexOf('Email');
+  const tokenCol = headers.indexOf('Token');
+  const target = String(email).trim().toLowerCase();
+  for (let i = 1; i < values.length; i++) {
+    if (String(values[i][emailCol]).trim().toLowerCase() === target) {
+      return values[i][tokenCol] || null;
+    }
+  }
+  return null;
+}
+
+function removeDeviceTokenForEmail_(email) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(DEVICETOKENS_SHEET);
+  if (!sheet) return;
+  const values = sheet.getDataRange().getValues();
+  const headers = values[0];
+  const emailCol = headers.indexOf('Email');
+  const target = String(email).trim().toLowerCase();
+  for (let i = 1; i < values.length; i++) {
+    if (String(values[i][emailCol]).trim().toLowerCase() === target) {
+      sheet.deleteRow(i + 1);
+      return;
+    }
+  }
+}
+
+/**
+ * The one reusable notification sender -- every one of the 9 workflow
+ * events will just call this with the right person's email and a message.
+ * Deliberately fails silent: a notification is a nice-to-have layered on
+ * top of the real business action (approving a slip, raising an STO,
+ * etc.), and must never be the reason that real action itself fails, so
+ * every error here is caught and logged, never thrown back to the caller.
+ * Also silently does nothing for a user with no device token on file yet
+ * (e.g. hasn't opened the Android app since this feature shipped).
+ */
+function sendPushNotification(toEmail, title, body) {
+  try {
+    const token = getDeviceTokenForEmail_(toEmail);
+    if (!token) return;
+
+    const svcJson = PropertiesService.getScriptProperties().getProperty('FIREBASE_SERVICE_ACCOUNT_JSON');
+    const svc = JSON.parse(svcJson);
+    const accessToken = getFcmAccessToken_();
+
+    const url = 'https://fcm.googleapis.com/v1/projects/' + svc.project_id + '/messages:send';
+    const payload = {
+      message: {
+        token: token,
+        notification: { title: title, body: body }
+      }
+    };
+    const res = UrlFetchApp.fetch(url, {
+      method: 'post',
+      contentType: 'application/json',
+      headers: { Authorization: 'Bearer ' + accessToken },
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
+    // A stale token (app reinstalled/uninstalled since it was saved) comes
+    // back as UNREGISTERED -- clean it up so future sends to this person
+    // don't keep silently failing against a dead token.
+    if (res.getResponseCode() === 404 || res.getContentText().indexOf('UNREGISTERED') !== -1) {
+      removeDeviceTokenForEmail_(toEmail);
+    }
+  } catch (e) {
+    console.error('sendPushNotification failed for ' + toEmail + ': ' + e.message);
+  }
+}
+
+/**
+ * RUN ONCE FROM THE EDITOR to test the whole pipeline standalone, before
+ * wiring sendPushNotification() into any real workflow event. Edit the
+ * email below to your own, select this function in the dropdown next to
+ * the Run button, click Run, then check your phone.
+ */
+function testSendPushNotification() {
+  sendPushNotification('anuragika0713@gmail.com', 'Test Notification', 'If you see this, push notifications are working end-to-end!');
+}
 function canManageSTO(authorizedAreaString, roleString) {
   return hasCommaValue(authorizedAreaString, 'Planning') && !hasCommaValue(roleString, 'Store Incharge');
 }
