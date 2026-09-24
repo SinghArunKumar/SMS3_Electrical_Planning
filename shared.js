@@ -440,6 +440,20 @@ async function registerPushNotifications() {
       showInAppNotificationToast_(notification.title, notification.body);
     });
 
+    // Tapping a notification should open the specific relevant page, not
+    // just whatever the app happens to land on. This reuses the shell's
+    // OWN existing deep-link mechanism (the URL hash, already used above
+    // for reloading straight into a page after login) rather than adding
+    // separate state: if already logged in, jump there directly; if not
+    // (app was fully closed), set the hash and let the normal post-login
+    // logic pick it up automatically once they log in.
+    PushNotifications.addListener('pushNotificationActionPerformed', function (action) {
+      const page = action.notification && action.notification.data && action.notification.data.page;
+      if (!page) return;
+      if (Shell.currentUser) loadPage(page);
+      else window.location.hash = page;
+    });
+
     await PushNotifications.register();
   } catch (e) {
     console.error('Push notification setup failed:', e);
