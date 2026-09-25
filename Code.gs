@@ -106,7 +106,28 @@ function doGet(e) {
   return jsonResponse({ status: 'ok', message: 'Apps Script backend is running.' });
 }
 
+/**
+ * Entry point. Runs the requested action, THEN (after any script lock the
+ * action held has already been released): invalidates caches if it was a
+ * write, and sends any queued push notifications in one parallel batch.
+ */
 function doPost(e) {
+  // "Refresh Now" sends forceFresh: discard every cache first, so the button
+  // always shows the true current state -- including after a row was
+  // deleted by hand in the Sheet (the one edit onEdit can't detect).
+  try {
+    if (JSON.parse(e.postData.contents).forceFresh === true) bumpDataVersion_();
+  } catch (err) { /* malformed body -- doPostInner_ reports it */ }
+  const response = doPostInner_(e);
+  try {
+    const action = String(JSON.parse(e.postData.contents).action || '');
+    if (!isCacheNeutralAction_(action)) bumpDataVersion_();
+  } catch (err) { /* malformed body -- doPostInner_ already returned an error */ }
+  flushPushNotifications_();
+  return response;
+}
+
+function doPostInner_(e) {
   try {
     const data = JSON.parse(e.postData.contents);
     const action = data.action;
@@ -178,6 +199,141 @@ function jsonResponse(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
 }
 
+// =====================================================================
+// ====== PERFORMANCE: SERVER-SIDE CACHE ======
+// =====================================================================
+// Every read used to recompute from raw sheets (Planning Stock alone reads
+// 4 sheets; Area Stock reads 6) -- and with ~20 users polling every few
+// seconds, that load is what pushed the script past Google's limit of ~30
+// simultaneous executions, causing 20s queues and outright load failures.
+//
+// SAFETY MODEL -- a cached value can never outlive the data it came from:
+// every cached value is stored under the current DATA VERSION. The version
+// changes the moment anything is written -- by the app (bumped in doPost
+// after every write action) or by hand in the Sheet (bumped in onEdit) --
+// so the very next read after any change recomputes fresh. The TTL is only
+// a backstop for the one change onEdit can't see: deleting whole rows by
+// hand, which reflects within the TTL (5-10 min).
+//
+// Write paths that VALIDATE against stock (raise/issue requisition, local
+// issue, raise/approve return) deliberately never use these caches -- they
+// always recompute fresh inside their script lock, so a stock check can
+// never be made against a stale number.
+const CACHE_CHUNK_CHARS = 24000; // CacheService caps each value at 100KB; 24k chars stays under it even for multi-byte text
+
+function putCachedString_(key, str, ttlSeconds) {
+  try {
+    const cache = CacheService.getScriptCache();
+    const n = Math.ceil(str.length / CACHE_CHUNK_CHARS) || 1;
+    const entries = {};
+    for (let i = 0; i < n; i++) entries[key + '_c' + i] = str.substring(i * CACHE_CHUNK_CHARS, (i + 1) * CACHE_CHUNK_CHARS);
+    const keys = Object.keys(entries);
+    for (let b = 0; b < keys.length; b += 20) {
+      const batch = {};
+      keys.slice(b, b + 20).forEach(function (k) { batch[k] = entries[k]; });
+      cache.putAll(batch, ttlSeconds);
+    }
+    cache.put(key + '_n', String(n), ttlSeconds); // written LAST -- a reader never sees a count whose chunks aren't all there yet
+  } catch (e) {
+    console.error('putCachedString_ failed for ' + key + ': ' + e.message); // too big / cache full -- just skip caching, never fail the request
+  }
+}
+
+function getCachedString_(key) {
+  try {
+    const cache = CacheService.getScriptCache();
+    const nStr = cache.get(key + '_n');
+    if (!nStr) return null;
+    const n = Number(nStr);
+    const keys = [];
+    for (let i = 0; i < n; i++) keys.push(key + '_c' + i);
+    const got = cache.getAll(keys);
+    let out = '';
+    for (let i = 0; i < n; i++) {
+      const part = got[keys[i]];
+      if (part === undefined || part === null) return null; // a chunk was evicted -- treat the whole entry as a miss
+      out += part;
+    }
+    return out;
+  } catch (e) {
+    return null;
+  }
+}
+
+function getDataVersion_() {
+  const cache = CacheService.getScriptCache();
+  let v = cache.get('dataVersion');
+  if (!v) {
+    v = String(Date.now()) + Math.floor(Math.random() * 1000);
+    cache.put('dataVersion', v, 21600);
+  }
+  return v;
+}
+
+function bumpDataVersion_() {
+  try {
+    CacheService.getScriptCache().put('dataVersion', String(Date.now()) + Math.floor(Math.random() * 1000), 21600);
+  } catch (e) { /* worst case: caches expire on their own TTL */ }
+}
+
+/** Cached JSON value under the current data version -- recomputed after any write. */
+function cachedJson_(name, ttlSeconds, computeFn) {
+  const key = name + '_v' + getDataVersion_(); // captured BEFORE computing, so a write mid-compute can never be cached as current
+  const hit = getCachedString_(key);
+  if (hit !== null) return JSON.parse(hit);
+  const value = computeFn();
+  putCachedString_(key, JSON.stringify(value), ttlSeconds);
+  return value;
+}
+
+/**
+ * Same idea for a whole API response. Only a successful response is ever
+ * cached -- an error is always recomputed next time. versioned=false is
+ * only for data this spreadsheet's writes can't affect (the external
+ * PR/PO sheet), which relies on its TTL alone.
+ */
+function cachedResponse_(name, versioned, ttlSeconds, computeFn) {
+  const key = versioned ? name + '_v' + getDataVersion_() : name;
+  const hit = getCachedString_(key);
+  if (hit !== null) return ContentService.createTextOutput(hit).setMimeType(ContentService.MimeType.JSON);
+  const out = computeFn();
+  const text = out.getContent();
+  if (text.indexOf('{"success":true') === 0) putCachedString_(key, text, ttlSeconds);
+  return out;
+}
+
+/** Users sheet, cached -- checkLogin runs on EVERY API call, so this alone removes a full sheet read from every request. */
+function getUsersValues_() {
+  return cachedJson_('users', 300, function () {
+    return SpreadsheetApp.getActiveSpreadsheet().getSheetByName(USERS_SHEET).getDataRange().getValues();
+  });
+}
+
+/** Display-only stock numbers (dashboards, search). Write-path validation must call the uncached compute functions directly. */
+function getPlanningStockMapCached_() {
+  return cachedJson_('plngMap', 600, computePlanningStockMap_);
+}
+function getAreaStockMapCached_() {
+  return cachedJson_('areaMap', 600, computeAreaStockMap_);
+}
+
+/**
+ * Simple trigger: runs automatically whenever someone edits the Sheet by
+ * hand (a new user row, a corrected quantity, etc.), so a manual edit is
+ * picked up by the very next read, exactly like an in-app write is.
+ */
+function onEdit(e) {
+  bumpDataVersion_();
+}
+
+// Actions that never change anything a cache depends on. Every OTHER
+// action bumps the data version after it runs (see doPost). Unknown or
+// newly added actions therefore invalidate by default -- the safe side.
+function isCacheNeutralAction_(action) {
+  if (/^(get|check)/.test(action)) return true;
+  return ['login', 'requestAccountCode', 'registerPushToken', 'refreshPlanningStock', 'refreshAreaStock'].indexOf(action) !== -1;
+}
+
 function hasCommaValue(str, target) {
   if (!str) return false;
   const targetLower = String(target).toLowerCase();
@@ -226,8 +382,7 @@ function checkLogin(email, password) {
   if (!email || !password) {
     return { success: false, message: 'Email and password are required.' };
   }
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(USERS_SHEET);
-  const values = sheet.getDataRange().getValues();
+  const values = getUsersValues_();
   const headers = values[0];
   const emailCol = headers.indexOf('User_email');
   const passCol = headers.indexOf('Password');
@@ -391,48 +546,97 @@ function removeDeviceTokenForEmail_(email) {
  * Also silently does nothing for a user with no device token on file yet
  * (e.g. hasn't opened the Android app since this feature shipped).
  */
-function sendPushNotification(toEmail, title, body) {
+// Notifications are QUEUED during an action, not sent inline. The old
+// inline send cost ~0.3-0.7s per recipient, one after another, while the
+// action still held the script lock -- so every other user's save waited
+// behind it, and any wait over 10s failed outright. doPost now sends the
+// whole queue in ONE parallel batch after the action has finished and
+// released its lock. Globals reset per execution, so a queue can never
+// leak between two different requests.
+var PUSH_QUEUE_ = [];
+
+/**
+ * The one reusable notification call -- every workflow event calls this.
+ * Never throws and never slows the action it's called from; the real
+ * sending happens later in flushPushNotifications_().
+ */
+function sendPushNotification(toEmail, title, body, page) {
+  if (!toEmail) return;
+  PUSH_QUEUE_.push({ email: String(toEmail), title: title, body: body, page: page });
+}
+
+function flushPushNotifications_() {
+  if (!PUSH_QUEUE_.length) return;
+  const queue = PUSH_QUEUE_.splice(0);
   try {
-    const token = getDeviceTokenForEmail_(toEmail);
-    if (!token) return;
-
-    const svcJson = PropertiesService.getScriptProperties().getProperty('FIREBASE_SERVICE_ACCOUNT_JSON');
-    const svc = JSON.parse(svcJson);
-    const accessToken = getFcmAccessToken_();
-
-    const url = 'https://fcm.googleapis.com/v1/projects/' + svc.project_id + '/messages:send';
-    const payload = {
-      message: {
-        token: token,
-        notification: { title: title, body: body }
-      }
-    };
-    const res = UrlFetchApp.fetch(url, {
-      method: 'post',
-      contentType: 'application/json',
-      headers: { Authorization: 'Bearer ' + accessToken },
-      payload: JSON.stringify(payload),
-      muteHttpExceptions: true
-    });
-    // A stale token (app reinstalled/uninstalled since it was saved) comes
-    // back as UNREGISTERED -- clean it up so future sends to this person
-    // don't keep silently failing against a dead token.
-    if (res.getResponseCode() === 404 || res.getContentText().indexOf('UNREGISTERED') !== -1) {
-      removeDeviceTokenForEmail_(toEmail);
+    // One read of DeviceTokens for the whole batch (was one read per recipient).
+    const tokenSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(DEVICETOKENS_SHEET);
+    if (!tokenSheet) return;
+    const tv = tokenSheet.getDataRange().getValues();
+    if (tv.length < 2) return;
+    const eCol = tv[0].indexOf('Email');
+    const tCol = tv[0].indexOf('Token');
+    const tokenByEmail = {};
+    for (let i = 1; i < tv.length; i++) {
+      const em = String(tv[i][eCol]).trim().toLowerCase();
+      if (em && tv[i][tCol]) tokenByEmail[em] = String(tv[i][tCol]);
     }
+
+    const svc = JSON.parse(PropertiesService.getScriptProperties().getProperty('FIREBASE_SERVICE_ACCOUNT_JSON'));
+    const accessToken = getFcmAccessToken_();
+    const url = 'https://fcm.googleapis.com/v1/projects/' + svc.project_id + '/messages:send';
+
+    const requests = [];
+    const requestEmails = [];
+    const seen = {};
+    queue.forEach(function (n) {
+      const em = n.email.trim().toLowerCase();
+      const token = tokenByEmail[em];
+      if (!token) return; // no device on file (never opened the Android app) -- silently skip
+      const dedupeKey = em + '|' + n.title + '|' + n.body;
+      if (seen[dedupeKey]) return;
+      seen[dedupeKey] = true;
+      const message = { token: token, notification: { title: n.title, body: n.body } };
+      // 'page' matches a key in shared.js's PAGES array -- read by the
+      // pushNotificationActionPerformed listener to deep-link a tap
+      // straight to the relevant screen.
+      if (n.page) message.data = { page: String(n.page) };
+      requests.push({
+        url: url,
+        method: 'post',
+        contentType: 'application/json',
+        headers: { Authorization: 'Bearer ' + accessToken },
+        payload: JSON.stringify({ message: message }),
+        muteHttpExceptions: true
+      });
+      requestEmails.push(n.email);
+    });
+    if (!requests.length) return;
+
+    const responses = UrlFetchApp.fetchAll(requests); // all sent in parallel
+    const removed = {};
+    responses.forEach(function (res, i) {
+      // A stale token (app reinstalled/uninstalled since it was saved) comes
+      // back as UNREGISTERED -- clean it up so future sends don't keep
+      // silently failing against a dead token.
+      if (res.getResponseCode() === 404 || res.getContentText().indexOf('UNREGISTERED') !== -1) {
+        const em = requestEmails[i].trim().toLowerCase();
+        if (!removed[em]) { removed[em] = true; removeDeviceTokenForEmail_(requestEmails[i]); }
+      }
+    });
   } catch (e) {
-    console.error('sendPushNotification failed for ' + toEmail + ': ' + e.message);
+    console.error('flushPushNotifications_ failed: ' + e.message); // never let a notification problem affect the user's action
   }
 }
 
 /**
- * RUN ONCE FROM THE EDITOR to test the whole pipeline standalone, before
- * wiring sendPushNotification() into any real workflow event. Edit the
- * email below to your own, select this function in the dropdown next to
- * the Run button, click Run, then check your phone.
+ * RUN FROM THE EDITOR to test the pipeline standalone (e.g. after adding a
+ * new user). Edit the email below, select this function next to the Run
+ * button, click Run, then check that phone.
  */
 function testSendPushNotification() {
   sendPushNotification('YOUR-EMAIL-HERE@example.com', 'Test Notification', 'If you see this, push notifications are working end-to-end!');
+  flushPushNotifications_(); // editor runs don't go through doPost, so flush explicitly
 }
 function canManageSTO(authorizedAreaString, roleString) {
   return hasCommaValue(authorizedAreaString, 'Planning') && !hasCommaValue(roleString, 'Store Incharge');
@@ -551,6 +755,10 @@ function checkUCSCodeExists(data) {
 function getUCSSearchData(data) {
   const check = requireAnyUser(data);
   if (!check.ok) return check.response;
+  return cachedResponse_('ucsSearch', true, 600, function () { return getUCSSearchDataUncached_(data); });
+}
+
+function getUCSSearchDataUncached_(data) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(UCS_SHEET);
   const values = sheet.getDataRange().getValues();
   const headers = values[0];
@@ -558,7 +766,7 @@ function getUCSSearchData(data) {
   const shortCol = headers.indexOf('Short_Text');
   const longCol = headers.indexOf('Long_Text');
   const unitCol = headers.indexOf('Unit');
-  const stockMap = computePlanningStockMap_();
+  const stockMap = getPlanningStockMapCached_();
   const items = [];
   for (let i = 1; i < values.length; i++) {
     const ucsCode = String(values[i][codeCol] || '').trim();
@@ -1533,8 +1741,7 @@ function canIssueRequisition(roleString) { return hasCommaValue(roleString, 'Sto
  * to the right person(s) without hardcoding anyone's email anywhere.
  */
 function getAreaInchargeEmails_(area) {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(USERS_SHEET);
-  const values = sheet.getDataRange().getValues();
+  const values = getUsersValues_();
   const headers = values[0];
   const emailCol = headers.indexOf('User_email');
   const areaCol = headers.indexOf('Authorized_Area');
@@ -1555,8 +1762,7 @@ function getAreaInchargeEmails_(area) {
  * collect the material once it's issued.
  */
 function getAreaStoreSupervisorEmails_(area) {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(USERS_SHEET);
-  const values = sheet.getDataRange().getValues();
+  const values = getUsersValues_();
   const headers = values[0];
   const emailCol = headers.indexOf('User_email');
   const areaCol = headers.indexOf('Authorized_Area');
@@ -1565,6 +1771,63 @@ function getAreaStoreSupervisorEmails_(area) {
   for (let i = 1; i < values.length; i++) {
     const row = values[i];
     if (hasCommaValue(row[areaCol], area) && hasCommaValue(row[roleCol], 'Area Store Supervisor')) emails.push(row[emailCol]);
+  }
+  return emails;
+}
+
+/**
+ * Every user who can sanction a requisition -- Approver is a global role,
+ * not area-scoped (canSanctionRequisition() itself checks no area), same
+ * as how getPendingSanctions() already shows every Approver every pending
+ * slip regardless of area. So every Approver gets notified here too.
+ */
+function getApproverEmails_() {
+  const values = getUsersValues_();
+  const headers = values[0];
+  const emailCol = headers.indexOf('User_email');
+  const roleCol = headers.indexOf('Role');
+  const emails = [];
+  for (let i = 1; i < values.length; i++) {
+    if (canSanctionRequisition(values[i][roleCol])) emails.push(values[i][emailCol]);
+  }
+  return emails;
+}
+
+/**
+ * Every user who can issue a requisition -- Store Incharge is also a
+ * global role, not area-scoped (canIssueRequisition() itself checks no
+ * area, and getPendingIssues() already shows every Store Incharge every
+ * pending slip regardless of area) -- one central store issuing for every
+ * area, per this project's design.
+ */
+function getStoreInchargeEmails_() {
+  const values = getUsersValues_();
+  const headers = values[0];
+  const emailCol = headers.indexOf('User_email');
+  const roleCol = headers.indexOf('Role');
+  const emails = [];
+  for (let i = 1; i < values.length; i++) {
+    if (canIssueRequisition(values[i][roleCol])) emails.push(values[i][emailCol]);
+  }
+  return emails;
+}
+
+/**
+ * Every Planning staff member (excluding Store Incharge) -- the exact same
+ * group canManageSTO() already gates requireSTOAccess() on, which is what
+ * getDemandAlerts()/updateDemandAlertStatus() use. So this is "everyone who
+ * can already see and triage demand alerts on their dashboard."
+ */
+function getPlanningStaffEmails_() {
+  const values = getUsersValues_();
+  const headers = values[0];
+  const emailCol = headers.indexOf('User_email');
+  const areaCol = headers.indexOf('Authorized_Area');
+  const roleCol = headers.indexOf('Role');
+  const emails = [];
+  for (let i = 1; i < values.length; i++) {
+    const row = values[i];
+    if (canManageSTO(row[areaCol], row[roleCol])) emails.push(row[emailCol]);
   }
   return emails;
 }
@@ -1620,7 +1883,7 @@ function getRequisitionRowsByStatus_(status) {
   const dHeaders = detailsValues[0];
   const dCol = {};
   dHeaders.forEach(function (h, idx) { dCol[h] = idx; });
-  const stockMap = computePlanningStockMap_();
+  const stockMap = getPlanningStockMapCached_();
   const out = [];
   for (let i = 1; i < detailsValues.length; i++) {
     const row = detailsValues[i];
@@ -1720,12 +1983,19 @@ function raiseRequisition(data) {
       // physically sent to collect the material once it's issued.
       getAreaStoreSupervisorEmails_(area).forEach(function (email) {
         if (String(email).trim().toLowerCase() === raiserEmailLower) return;
-        sendPushNotification(email, 'Requisition raised', 'Slip ' + slipId + ' — ' + area);
+        sendPushNotification(email, 'Requisition raised', 'Slip ' + slipId + ' — ' + area, 'raise-requisition');
+      });
+      // Fast-track lands directly on "Pending Planning Approval", same as a
+      // normal area-approval does -- so Approvers need the same notification
+      // here too, not just from approveAreaRequisition.
+      getApproverEmails_().forEach(function (email) {
+        if (String(email).trim().toLowerCase() === raiserEmailLower) return;
+        sendPushNotification(email, 'Requisition pending sanction', 'Slip ' + slipId + ' — ' + area, 'sanction-dashboard');
       });
     } else {
       getAreaInchargeEmails_(area).forEach(function (email) {
         if (String(email).trim().toLowerCase() === raiserEmailLower) return;
-        sendPushNotification(email, 'Requisition pending approval', 'Slip ' + slipId + ' — ' + area);
+        sendPushNotification(email, 'Requisition pending approval', 'Slip ' + slipId + ' — ' + area, 'area-approval-dashboard');
       });
     }
     return jsonResponse({ success: true, message: 'Requisition slip ' + slipId + ' raised successfully.' + (isFastTrack ? ' Auto-approved and forwarded to Sanction.' : ''), slipId: slipId });
@@ -1796,6 +2066,17 @@ function approveAreaRequisition(data) {
     });
     headerSheet.getRange(headerRowIdx + 1, hCol['Slip_Status'] + 1).setValue('Pending Planning Approval');
     logAudit(login.name, data.email, 'AREA_APPROVE_REQUISITION', 'Slip ' + slipId + ' | Area ' + area + ' | Approved qty set for ' + writes.length + ' item(s).');
+
+    const raisedByEmail = headerValues[headerRowIdx][hCol['Raised_By_Email']];
+    const actingUserEmailLower = String(data.email).trim().toLowerCase();
+    if (raisedByEmail && String(raisedByEmail).trim().toLowerCase() !== actingUserEmailLower) {
+      sendPushNotification(raisedByEmail, 'Requisition approved', 'Slip ' + slipId + ' — ' + area, 'raise-requisition');
+    }
+    getApproverEmails_().forEach(function (email) {
+      if (String(email).trim().toLowerCase() === actingUserEmailLower) return;
+      sendPushNotification(email, 'Requisition pending sanction', 'Slip ' + slipId + ' — ' + area, 'sanction-dashboard');
+    });
+
     return jsonResponse({ success: true, message: 'Slip ' + slipId + ' approved and forwarded to Sanction.' });
   } finally {
     lock.releaseLock();
@@ -1860,6 +2141,18 @@ function sanctionRequisition(data) {
     });
     headerSheet.getRange(headerRowIdx + 1, hCol['Slip_Status'] + 1).setValue('Pending Issue');
     logAudit(login.name, data.email, 'SANCTION_REQUISITION', 'Slip ' + slipId + ' | Sanctioned qty set for ' + writes.length + ' item(s).');
+
+    const sanctionedArea = headerValues[headerRowIdx][hCol['Area']];
+    const sanctionedRaisedByEmail = headerValues[headerRowIdx][hCol['Raised_By_Email']];
+    const sanctionerEmailLower = String(data.email).trim().toLowerCase();
+    if (sanctionedRaisedByEmail && String(sanctionedRaisedByEmail).trim().toLowerCase() !== sanctionerEmailLower) {
+      sendPushNotification(sanctionedRaisedByEmail, 'Requisition sanctioned', 'Slip ' + slipId + ' — ' + sanctionedArea, 'raise-requisition');
+    }
+    getStoreInchargeEmails_().forEach(function (email) {
+      if (String(email).trim().toLowerCase() === sanctionerEmailLower) return;
+      sendPushNotification(email, 'Requisition pending issue', 'Slip ' + slipId + ' — ' + sanctionedArea, 'issue-dashboard');
+    });
+
     return jsonResponse({ success: true, message: 'Slip ' + slipId + ' sanctioned and forwarded for Issue.' });
   } finally {
     lock.releaseLock();
@@ -1958,6 +2251,20 @@ function finishIssueRequisition_(data, login, slipId, area, issuedTo, headerShee
     ledgerSheet.getRange(ledgerSheet.getLastRow(), getColIndexOrThrow_(ledgerHeaders, 'UCS_Code', ISSUE_LEDGER_SHEET) + 1).setNumberFormat('@STRING@');
   });
   logAudit(login.name, data.email, 'ISSUE_REQUISITION', 'Slip ' + slipId + ' | Area ' + area + ' | Issued to: ' + issuedTo + ' | ' + writes.length + ' item(s): ' + writes.map(function (w) { return w.ucsCode + ' x' + w.qtyIssued; }).join(', '));
+
+  // Closes the information loop: the Requester finally hears their material
+  // is in hand, and every Approver (the same group notified at the pending-
+  // sanction stage) sees the slip they sanctioned has now actually completed.
+  const issuedRaisedByEmail = headerSheet.getRange(headerRowIdx + 1, hCol['Raised_By_Email'] + 1).getValue();
+  const issuerEmailLower = String(data.email).trim().toLowerCase();
+  if (issuedRaisedByEmail && String(issuedRaisedByEmail).trim().toLowerCase() !== issuerEmailLower) {
+    sendPushNotification(issuedRaisedByEmail, 'Requisition issued', 'Slip ' + slipId + ' — ' + area, 'raise-requisition');
+  }
+  getApproverEmails_().forEach(function (email) {
+    if (String(email).trim().toLowerCase() === issuerEmailLower) return;
+    sendPushNotification(email, 'Requisition issued', 'Slip ' + slipId + ' — ' + area, 'sanction-dashboard');
+  });
+
   return jsonResponse({ success: true, message: 'Slip ' + slipId + ' issued to ' + issuedTo + '. Requisition completed.' });
 }
 
@@ -2107,6 +2414,10 @@ function refreshPlanningStockEndpoint(data) {
 function getPlanningStockList(data) {
   const check = requireAnyUser(data);
   if (!check.ok) return check.response;
+  return cachedResponse_('plngList', true, 600, function () { return getPlanningStockListUncached_(); });
+}
+
+function getPlanningStockListUncached_() {
   const ucsSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(UCS_SHEET);
   const ucsValues = ucsSheet.getDataRange().getValues();
   const ucsHeaders = ucsValues[0];
@@ -2114,7 +2425,7 @@ function getPlanningStockList(data) {
   const ucsShortCol = getColIndexOrThrow_(ucsHeaders, 'Short_Text', UCS_SHEET);
   const ucsLongCol = getColIndexOrThrow_(ucsHeaders, 'Long_Text', UCS_SHEET);
   const ucsUnitCol = getColIndexOrThrow_(ucsHeaders, 'Unit', UCS_SHEET);
-  const map = computePlanningStockMap_();
+  const map = getPlanningStockMapCached_();
   const items = [];
   for (let i = 1; i < ucsValues.length; i++) {
     const code = String(ucsValues[i][ucsCodeCol]).trim();
@@ -2374,6 +2685,19 @@ function stageRank_(s) { const idx = STAGE_ORDER_.indexOf(s); return idx === -1 
  */
 function getPRPODashboardData(data) {
   const check = requireSTOAccess(data); // Planning, excluding Store Incharge -- matches the stated audience exactly
+  if (!check.ok) return check.response;
+  // The slowest call in the app: opens a SEPARATE spreadsheet and reads two
+  // large tabs plus every row's font colour. That sheet is updated outside
+  // this app, so no write here can signal a change -- this cache relies on
+  // a short TTL alone: data is at most 5 minutes old. The key includes
+  // every input that changes the result, so the look-back setting, the
+  // analysis date and Budget Matrix's full-history mode each get their own entry.
+  const key = 'prpo_' + String(data.analysisSinceDate || '').trim() + '_' + (data.fullHistory ? 1 : 0) + '_' + getDeliveredGraceDays_();
+  return cachedResponse_(key, false, 300, function () { return getPRPODashboardDataUncached_(data); });
+}
+
+function getPRPODashboardDataUncached_(data) {
+  const check = requireSTOAccess(data);
   if (!check.ok) return check.response;
 
   try {
@@ -3056,8 +3380,10 @@ function recordLocalIssue(data) {
   try {
     const neededByCode = {};
     clean.forEach(function (c) { neededByCode[c.ucsCode] = (neededByCode[c.ucsCode] || 0) + c.qty; });
+    const areaMapNow = computeAreaStockMap_(); // fresh (never cached) -- this is a write-path check; computed ONCE, not once per item (was up to 10x, 6 sheet reads each)
     for (const code in neededByCode) {
-      const available = computeAreaAvailableBalance_(area, code);
+      const entryNow = areaMapNow.find(function (r) { return r.area === area && r.ucsCode === code; });
+      const available = entryNow ? entryNow.qtyBalance : 0;
       if (neededByCode[code] > available) return jsonResponse({ success: false, message: code + ': only ' + available + ' available in ' + area + "'s local stock -- cannot issue " + neededByCode[code] + '.' });
     }
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(LOCAL_ISSUE_SHEET);
@@ -3082,6 +3408,22 @@ function recordLocalIssue(data) {
       sheet.getRange(sheet.getLastRow(), codeCol + 1).setNumberFormat('@STRING@');
     });
     logAudit(login.name, data.email, 'RECORD_LOCAL_ISSUE', area + ': ' + clean.map(function (c) { return c.ucsCode + ' x' + c.qty; }).join(', ') + ' -> ' + issuedTo);
+
+    // No approval chain here -- a local issue is a same-area, self-contained
+    // transaction. So the natural notification is simply the mirror-image
+    // role for this area: if a Supervisor recorded it, tell the Incharge(s);
+    // if the Incharge recorded it, tell the Supervisor(s). Either way, the
+    // person who didn't act stays aware of movement in their own area's stock.
+    const localIssuerEmailLower = String(data.email).trim().toLowerCase();
+    const localIssueRecipients = getAreaInchargeEmails_(area).concat(getAreaStoreSupervisorEmails_(area));
+    const seenLocalIssueEmails = {};
+    localIssueRecipients.forEach(function (email) {
+      const key = String(email).trim().toLowerCase();
+      if (key === localIssuerEmailLower || seenLocalIssueEmails[key]) return;
+      seenLocalIssueEmails[key] = true;
+      sendPushNotification(email, 'Local issue recorded', area + ' — ' + clean.length + ' item(s)', 'area-stock-dashboard');
+    });
+
     return jsonResponse({ success: true, message: clean.length + ' item(s) issued from ' + area + "'s local stock." });
   } finally {
     lock.releaseLock();
@@ -3303,9 +3645,13 @@ function getAreaStockList(data) {
   const requestedArea = String(data.area || '').trim();
   if (!requestedArea) return jsonResponse({ success: true, availableAreas: availableAreas, area: '', items: [] });
   if (availableAreas.indexOf(requestedArea) === -1) return jsonResponse({ success: false, message: 'You are not authorized to view ' + requestedArea + "'s stock." });
-  const longTextMap = getUCSLongTextMap_();
-  const items = computeAreaStockMap_().filter(function (r) { return r.area === requestedArea; })
-    .map(function (r) { return Object.assign({}, r, { longText: longTextMap[r.ucsCode] || '' }); });
+  // Only the per-area item list is cached -- availableAreas above is
+  // per-user and is always computed fresh from the caller's own login.
+  const items = cachedJson_('areaItems_' + encodeURIComponent(requestedArea), 600, function () {
+    const longTextMap = getUCSLongTextMap_();
+    return getAreaStockMapCached_().filter(function (r) { return r.area === requestedArea; })
+      .map(function (r) { return Object.assign({}, r, { longText: longTextMap[r.ucsCode] || '' }); });
+  });
   return jsonResponse({ success: true, availableAreas: availableAreas, area: requestedArea, items: items });
 }
 
@@ -3383,6 +3729,13 @@ function submitDemandAlert(data) {
     sheet.getRange(newRow, getColIndexOrThrow_(headers, 'Alert_ID', DEMAND_SHEET) + 1).setNumberFormat('@STRING@');
     if (ucsCode) sheet.getRange(newRow, getColIndexOrThrow_(headers, 'UCS_Code', DEMAND_SHEET) + 1).setNumberFormat('@STRING@');
     logAudit(login.name, data.email, 'SUBMIT_DEMAND_ALERT', 'Alert ' + alertId + ' | Area ' + area + ' | ' + requestType + (ucsCode ? ' | UCS ' + ucsCode : ' | New: ' + itemDescription) + ' | Est. Qty ' + qty + ' ' + unit);
+
+    const demandRaiserEmailLower = String(data.email).trim().toLowerCase();
+    getPlanningStaffEmails_().forEach(function (email) {
+      if (String(email).trim().toLowerCase() === demandRaiserEmailLower) return;
+      sendPushNotification(email, 'Demand alert raised', 'Alert ' + alertId + ' — ' + area, 'demand-dashboard');
+    });
+
     return jsonResponse({ success: true, message: 'Demand alert ' + alertId + ' submitted to Planning.', alertId: alertId });
   } finally {
     lock.releaseLock();
@@ -3438,6 +3791,13 @@ function updateDemandAlertStatus(data) {
       sheet.getRange(rowNum, updByCol + 1).setValue(login.name);
       sheet.getRange(rowNum, updAtCol + 1).setValue(new Date());
       logAudit(login.name, data.email, 'UPDATE_DEMAND_ALERT', 'Alert ' + alertId + ' | Status -> ' + newStatus + (planningRemarks ? ' | Remarks: ' + planningRemarks : ''));
+
+      const demandRaisedByEmail = values[i][headers.indexOf('Raised_By_Email')];
+      const demandArea = values[i][headers.indexOf('Area')];
+      if (demandRaisedByEmail && String(demandRaisedByEmail).trim().toLowerCase() !== String(data.email).trim().toLowerCase()) {
+        sendPushNotification(demandRaisedByEmail, 'Demand alert updated', 'Alert ' + alertId + ' (' + demandArea + ') — ' + newStatus, 'raise-demand-alert');
+      }
+
       return jsonResponse({ success: true, message: 'Alert ' + alertId + ' updated to ' + newStatus + '.' });
     }
   }
@@ -3539,7 +3899,7 @@ function getReturnRowsByStatus_(status) {
   const dCol = {};
   dHeaders.forEach(function (h, idx) { dCol[h] = idx; });
 
-  const areaStockList = computeAreaStockMap_();
+  const areaStockList = getAreaStockMapCached_();
   const areaBalanceLookup = {};
   areaStockList.forEach(function (r) { areaBalanceLookup[r.area + '||' + r.ucsCode] = r.qtyBalance; });
 
@@ -3686,6 +4046,12 @@ function raiseReturn(data) {
       'Return ' + returnId + ' | Area ' + area + ' | ' + resolvedItems.length + ' item(s): ' +
       resolvedItems.map(function (it) { return it.ucsCode + ' x' + it.qty; }).join(', '));
 
+    const returnRaiserEmailLower = String(data.email).trim().toLowerCase();
+    getApproverEmails_().forEach(function (email) {
+      if (String(email).trim().toLowerCase() === returnRaiserEmailLower) return;
+      sendPushNotification(email, 'Return pending approval', 'Return ' + returnId + ' — ' + area, 'return-approval-dashboard');
+    });
+
     return jsonResponse({ success: true, message: 'Return ' + returnId + ' raised, pending Approver action.', returnId: returnId });
   } finally {
     lock.releaseLock();
@@ -3803,6 +4169,19 @@ function approveReturn(data) {
     logAudit(login.name, data.email, 'APPROVE_RETURN',
       'Return ' + returnId + ' | Area ' + area + ' | ' + writes.length + ' item(s): ' +
       writes.map(function (w) { return w.ucsCode + ' x' + w.qtyApproved; }).join(', '));
+
+    const returnRaisedByEmail = headerValues[headerRowIdx][hCol['Raised_By_Email']];
+    const returnApproverEmailLower = String(data.email).trim().toLowerCase();
+    if (returnRaisedByEmail && String(returnRaisedByEmail).trim().toLowerCase() !== returnApproverEmailLower) {
+      sendPushNotification(returnRaisedByEmail, 'Return approved', 'Return ' + returnId + ' — ' + area, 'raise-return');
+    }
+    // The material now physically needs to go back onto the shelf/rack --
+    // that's a Store Incharge action, same role that physically hands
+    // material out on a normal Issue.
+    getStoreInchargeEmails_().forEach(function (email) {
+      if (String(email).trim().toLowerCase() === returnApproverEmailLower) return;
+      sendPushNotification(email, 'Return to shelve', 'Return ' + returnId + ' — ' + area);
+    });
 
     // Snapshot refresh (PLNG_STOCK / AREA_STOCK) intentionally NOT triggered
     // here -- matches the rest of this app: nothing in the web app reads
