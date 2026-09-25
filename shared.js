@@ -94,10 +94,52 @@ const Shell = {
               status: 200, headers: { 'Content-Type': 'application/json' }
             }));
           }
-        } catch (e) { /* not JSON, or not a login call -- fall through */ }
+          return self._fetchWithRetry(originalFetch, url, options, String(parsed.action || ''));
+        } catch (e) { /* not JSON -- fall through */ }
       }
       return originalFetch(url, options);
     };
+  },
+
+  // "Could not reach the server" was usually a MOMENTARY blip: a network
+  // drop on plant Wi-Fi / mobile data, or Google briefly answering with an
+  // HTML error page (busy / throttled) instead of our JSON. The same request
+  // a second or two later almost always succeeds -- but every page gave up
+  // after one try. This retries, centrally, for every page at once.
+  //
+  // SAFETY: only READ actions (get* / check* / login) are ever retried. A
+  // write (raise, approve, sanction, issue, return...) is sent exactly once,
+  // no matter what -- a write that looked failed may in fact have been
+  // saved, and resending it could create a duplicate slip/entry.
+  //
+  // When every attempt fails, the page receives the same kind of failure it
+  // always did (a rejected fetch, or the last non-JSON response), so each
+  // page's existing error handling behaves exactly as before.
+  _fetchWithRetry(originalFetch, url, options, action) {
+    const isRead = /^(get|check)/.test(action) || action === 'login';
+    if (!isRead) return originalFetch(url, options);
+    const delaysMs = [0, 1500, 4000]; // up to 3 attempts, ~5.5s of patience in total
+    let lastResponseText = null;
+    let lastError = null;
+    const attempt = async function (i) {
+      if (delaysMs[i]) await new Promise(function (r) { setTimeout(r, delaysMs[i]); });
+      try {
+        const res = await originalFetch(url, options);
+        const text = await res.text();
+        try {
+          JSON.parse(text);
+          return new Response(text, { status: 200, headers: { 'Content-Type': 'application/json' } });
+        } catch (notJson) {
+          lastResponseText = text; lastError = null; // Google's error page, not our data -- try again
+        }
+      } catch (networkErr) {
+        lastError = networkErr; // request never got an answer -- try again
+      }
+      if (i + 1 < delaysMs.length) return attempt(i + 1);
+      if (lastError) throw lastError;
+      return new Response(lastResponseText, { status: 200, headers: { 'Content-Type': 'text/html' } });
+    };
+    return attempt(0);
   },
 
   logout() {
