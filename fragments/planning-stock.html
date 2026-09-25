@@ -148,7 +148,7 @@
       <button type="button" class="secondary" onclick="Page.clearFilters()">Clear filters</button>
     </div>
     <div>
-      <button type="button" onclick="Page.loadStock(true)">Refresh Now</button>
+      <button type="button" onclick="Page.loadStock(true, true)">Refresh Now</button>
     </div>
     <div id="exportCsvWrap" style="display:none;">
       <button type="button" class="secondary" onclick="Page.exportMainCsv()">Export CSV</button>
@@ -259,6 +259,18 @@
   let sortKey = 'ucsCode';
   let sortDir = 'asc';        // 'asc' | 'desc'
   let pollTimer = null;
+  // Background polling must never pile up or run unseen. A poll tick is
+  // skipped when (a) the previous request hasn't come back yet -- otherwise
+  // one slow response triggers more requests, which makes every response
+  // slower still -- or (b) the page isn't visible (tab in the background,
+  // app minimized, screen off), where nobody is looking at the numbers.
+  // Returning to the page triggers one immediate refresh instead.
+  let pollBusy = false;
+  function pollTick() {
+    if (pollBusy || document.hidden) return;
+    pollBusy = true;
+    loadStock(false).finally(function () { pollBusy = false; });
+  }
   let listRequestInFlight = null; // guard against an in-flight request being overtaken by a newer one
   let lastRenderedRows = [];  // mirrors the table currently on screen, for CSV export
   let isPlanningStaff = false; // client-side UI gate only -- the real gate is server-side on getUCSCodeHistory
@@ -405,7 +417,10 @@
       }
 
       loadStock(true);
-      pollTimer = setInterval(function () { loadStock(false); }, POLL_INTERVAL_MS); Shell.registerInterval(pollTimer);
+      pollTimer = setInterval(pollTick, POLL_INTERVAL_MS); Shell.registerInterval(pollTimer);
+      // Tracked by the shell (document listener) -- removed automatically
+      // when the user navigates to another page.
+      document.addEventListener('visibilitychange', function () { if (!document.hidden) pollTick(); });
     } catch (err) {
       showMessage('Could not reach the server. Check your connection or the Apps Script URL.', 'error');
     } finally {
@@ -420,7 +435,7 @@
   }
 
   // ====== LOAD (polled + manual) ======
-  async function loadStock(showSpinner) {
+  async function loadStock(showSpinner, forceFresh) {
     const dot = document.getElementById('liveDot');
     const liveText = document.getElementById('liveText');
 
@@ -432,7 +447,7 @@
     listRequestInFlight = thisRequest;
 
     try {
-      const data = await callApi({ action: 'getPlanningStockList' });
+      const data = await callApi({ action: 'getPlanningStockList', forceFresh: !!forceFresh });
       if (listRequestInFlight !== thisRequest) return; // superseded by a newer poll
 
       document.getElementById('loadingRow').style.display = 'none';

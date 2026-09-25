@@ -119,7 +119,7 @@
       <button type="button" class="secondary" onclick="clearFilters()">Clear filters</button>
     </div>
     <div>
-      <button type="button" onclick="loadStock(true)">Refresh Now</button>
+      <button type="button" onclick="loadStock(true, true)">Refresh Now</button>
     </div>
     <div>
       <button type="button" class="secondary small" onclick="forceSnapshotRefresh()" id="snapshotBtn">Also update spreadsheet snapshot</button>
@@ -210,6 +210,18 @@
   const PAGE_SIZE = 50;
   let currentPage = 1;
   let pollTimer = null;
+  // Background polling must never pile up or run unseen. A poll tick is
+  // skipped when (a) the previous request hasn't come back yet -- otherwise
+  // one slow response triggers more requests, which makes every response
+  // slower still -- or (b) the page isn't visible (tab in the background,
+  // app minimized, screen off), where nobody is looking at the numbers.
+  // Returning to the page triggers one immediate refresh instead.
+  let pollBusy = false;
+  function pollTick() {
+    if (pollBusy || document.hidden) return;
+    pollBusy = true;
+    loadStock(false).finally(function () { pollBusy = false; });
+  }
   let listRequestInFlight = null; // guard against an in-flight request being overtaken by a newer one
 
   function showMessage(text, type) {
@@ -346,7 +358,10 @@
       }
 
       loadStock(true);
-      pollTimer = setInterval(function () { loadStock(false); }, POLL_INTERVAL_MS);
+      pollTimer = setInterval(pollTick, POLL_INTERVAL_MS); Shell.registerInterval(pollTimer); // registered so the shell stops it on navigation -- previously missing, so every visit leaked a permanent 8s loop
+      // Tracked by the shell (document listener) -- removed automatically
+      // when the user navigates to another page.
+      document.addEventListener('visibilitychange', function () { if (!document.hidden) pollTick(); });
     } catch (err) {
       showMessage('Could not reach the server. Check your connection or the Apps Script URL.', 'error');
     } finally {
@@ -378,7 +393,7 @@
   }
 
   // ====== LOAD (polled + manual) ======
-  async function loadStock(showSpinner) {
+  async function loadStock(showSpinner, forceFresh) {
     if (!selectedArea) return;
     const dot = document.getElementById('liveDot');
     const liveText = document.getElementById('liveText');
@@ -391,7 +406,7 @@
     listRequestInFlight = thisRequest;
 
     try {
-      const data = await callApi({ action: 'getAreaStockList', area: selectedArea });
+      const data = await callApi({ action: 'getAreaStockList', area: selectedArea, forceFresh: !!forceFresh });
       if (listRequestInFlight !== thisRequest) return; // superseded by a newer poll or area change
 
       document.getElementById('loadingRow').style.display = 'none';
