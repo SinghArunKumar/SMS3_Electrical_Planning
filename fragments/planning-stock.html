@@ -47,6 +47,20 @@
   .clickableCode { color: #0b57d0; cursor: pointer; font-weight: 600; text-decoration: underline; text-decoration-style: solid; text-decoration-thickness: 1px; text-underline-offset: 2px; }
   .clickableCode:hover { color: #0b47a1; }
 
+  /* ---- (i) full-description popup -- open to everyone on this page ---- */
+  .infoBtn { display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; min-width:18px; padding:0; margin-left:6px; border-radius:50%; border:1.5px solid #0b57d0; background:#fff; color:#0b57d0; font:italic 700 11px Georgia, 'Times New Roman', serif; line-height:1; cursor:pointer; vertical-align:middle; }
+  .infoBtn:hover, .infoBtn:focus-visible { background:#0b57d0; color:#fff; outline:none; }
+  #infoOverlay { display:none; position: fixed; top:0; left:0; right:0; bottom:0; background: rgba(0,0,0,0.45); align-items: flex-start; justify-content: center; padding: 60px 16px; z-index: 30; overflow-y: auto; }
+  #infoCard { background: white; border-radius: 10px; max-width: 620px; width: 100%; padding: 20px 22px; box-shadow: 0 8px 30px rgba(0,0,0,0.3); }
+  #infoCard .infoHead { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom: 12px; }
+  #infoCode { font-family: 'Courier New', monospace; font-weight: bold; font-size: 17px; color: #1a73e8; }
+  #infoCard .detailLabel { font-weight: bold; font-size: 12px; color: #888; text-transform: uppercase; margin-top: 14px; margin-bottom: 4px; }
+  #infoCard .detailValue { font-size: 14px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+  #infoCard .detailUnit { display:inline-block; background:#f1f3f4; padding: 3px 10px; border-radius: 10px; font-size: 12px; margin-top: 6px; }
+  #infoStock { display:flex; gap:18px; flex-wrap:wrap; margin-top: 16px; padding-top: 12px; border-top: 1px solid #eee; font-size: 13px; color:#555; }
+  #infoStock b { color:#1f2430; }
+  #infoCloseBtn { background:#666; padding:6px 12px; }
+
   /* ---- History drill-down modal ---- */
   #historyOverlay { display:none; position: fixed; top:0; left:0; right:0; bottom:0; background: rgba(0,0,0,0.45); align-items: flex-start; justify-content: center; padding: 30px 16px; z-index: 20; overflow-y: auto; }
   #historyCard { background: white; border-radius: 10px; max-width: 900px; width: 100%; padding: 22px; box-shadow: 0 8px 30px rgba(0,0,0,0.3); }
@@ -187,6 +201,24 @@
 
 <!-- ====== PR / PO / UCS drill-down panel stack (see CSS above) ====== -->
 <div id="drillBackdrop" onclick="Page.closeAllDrillPanels()"></div>
+
+<!-- ====== (i) FULL DESCRIPTION POPUP (everyone) ====== -->
+<div id="infoOverlay" onclick="if(event.target===this) Page.closeInfo()">
+  <div id="infoCard">
+    <div class="infoHead">
+      <div>
+        <div id="infoCode"></div>
+        <span class="detailUnit" id="infoUnit"></span>
+      </div>
+      <button type="button" id="infoCloseBtn" onclick="Page.closeInfo()">Close</button>
+    </div>
+    <div class="detailLabel">Short Text</div>
+    <div class="detailValue" id="infoShort"></div>
+    <div class="detailLabel">Long Text</div>
+    <div class="detailValue" id="infoLong"></div>
+    <div id="infoStock"></div>
+  </div>
+</div>
 
 <!-- ====== HISTORY DRILL-DOWN MODAL (Planning-area staff only) ====== -->
 <div id="historyOverlay" onclick="if(event.target===this) Page.closeHistory()">
@@ -585,9 +617,11 @@
       tbody.innerHTML = pageRows.map(function (m) {
         const bal = Number(m.balance) || 0;
         const rowClass = bal <= 0 ? 'zeroBalance' : '';
-        const codeCell = isPlanningStaff
-          ? '<span class="clickableCode" onclick="Page.openHistory(\'' + Page.escapeHtml(m.ucsCode).replace(/'/g, "\\'") + '\')" title="Click for full history">' + highlight(m.ucsCode, tokens) + '</span>'
-          : highlight(m.ucsCode, tokens);
+        const codeArg = Page.escapeHtml(m.ucsCode).replace(/'/g, "\\'");
+        const infoBtn = '<button type="button" class="infoBtn" onclick="Page.openInfo(\'' + codeArg + '\')" title="View full description" aria-label="View full description">i</button>';
+        const codeCell = (isPlanningStaff
+          ? '<span class="clickableCode" onclick="Page.openHistory(\'' + codeArg + '\')" title="Click for full history">' + highlight(m.ucsCode, tokens) + '</span>'
+          : highlight(m.ucsCode, tokens)) + infoBtn;
         return '<tr class="' + rowClass + '">' +
           '<td class="code">' + codeCell + '</td>' +
           '<td>' + highlight(m.itemDescription, tokens) + '</td>' +
@@ -916,8 +950,38 @@
     return svg;
   }
 
+  /**
+   * (i) popup: full Short + Long Text for one UCS Code, with the words
+   * currently typed in the search box highlighted -- so a row that matched
+   * only because of its LONG text shows exactly why. No server call: every
+   * item's long text already arrives with the stock list (allItems).
+   */
+  function openInfo(code) {
+    const item = allItems.find(function (m) { return m.ucsCode === code; });
+    if (!item) return;
+    const raw = document.getElementById('searchBox').value.trim().toLowerCase();
+    const tokens = raw ? raw.split(/\s+/).filter(Boolean) : [];
+    document.getElementById('infoCode').innerHTML = highlight(item.ucsCode, tokens);
+    const unitEl = document.getElementById('infoUnit');
+    unitEl.textContent = item.unit || '';
+    unitEl.style.display = item.unit ? 'inline-block' : 'none';
+    document.getElementById('infoShort').innerHTML = highlight(item.itemDescription || '', tokens) || '<span style="color:#999">(none)</span>';
+    document.getElementById('infoLong').innerHTML = highlight(item.longText || '', tokens) || '<span style="color:#999">(no long text recorded)</span>';
+    document.getElementById('infoStock').innerHTML =
+      '<span>Received: <b>' + Number(item.received || 0).toLocaleString() + '</b></span>' +
+      '<span>Released: <b>' + Number(item.released || 0).toLocaleString() + '</b></span>' +
+      '<span>Balance: <b>' + Number(item.balance || 0).toLocaleString() + '</b></span>';
+    document.getElementById('infoOverlay').style.display = 'flex';
+  }
+
+  function closeInfo() {
+    document.getElementById('infoOverlay').style.display = 'none';
+  }
+
   document.addEventListener('keydown', function (e) {
     if (e.key !== 'Escape') return;
+    // The (i) popup sits on top of everything else here -- close it first.
+    if (document.getElementById('infoOverlay').style.display === 'flex') { closeInfo(); return; }
     // Layered close: Escape pops the topmost PR/PO/UCS drill panel first (if
     // any are open) rather than the whole history modal underneath it.
     if (drillPanelStack.length) { closeDrillPanel(drillPanelStack[drillPanelStack.length - 1].id); return; }
@@ -1107,6 +1171,8 @@
     closeAllDrillPanels: { get: function(){ return closeAllDrillPanels; }, set: function(v){ closeAllDrillPanels = v; }, enumerable: true, configurable: true },
     closeDrillPanel: { get: function(){ return closeDrillPanel; }, set: function(v){ closeDrillPanel = v; }, enumerable: true, configurable: true },
     closeHistory: { get: function(){ return closeHistory; }, set: function(v){ closeHistory = v; }, enumerable: true, configurable: true },
+    closeInfo: { get: function(){ return closeInfo; }, set: function(v){ closeInfo = v; }, enumerable: true, configurable: true },
+    openInfo: { get: function(){ return openInfo; }, set: function(v){ openInfo = v; }, enumerable: true, configurable: true },
     csvEscape: { get: function(){ return csvEscape; }, set: function(v){ csvEscape = v; }, enumerable: true, configurable: true },
     currentPage: { get: function(){ return currentPage; }, set: function(v){ currentPage = v; }, enumerable: true, configurable: true },
     currentUser: { get: function(){ return currentUser; }, set: function(v){ currentUser = v; }, enumerable: true, configurable: true },
