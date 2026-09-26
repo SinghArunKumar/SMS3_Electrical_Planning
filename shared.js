@@ -215,6 +215,7 @@ const PAGES = [
   // every other group, and bold-styled in the sidebar) ---
   { key: 'pr-po-dashboard', file: 'pr-po-dashboard.html', label: 'Procurement Dashboard', icon: 'clipboardList', group: 'Procurement', access: Access.canManageSTO, bold: true },
   { key: 'budget-matrix', file: 'budget-matrix.html', label: 'Budget Matrix', icon: 'trend', group: 'Procurement', access: Access.canManageSTO },
+  { key: 'vendor-finder', file: 'vendor-finder.html', label: 'Vendor Finder', icon: 'vendorSearch', group: 'Procurement', access: Access.canManageSTO },
 
   // --- UCS Codes ---
   { key: 'search-ucs', file: 'search-ucs.html', label: 'Search UCS Codes', icon: 'search', group: 'UCS Codes', access: Access.anyLoggedIn },
@@ -258,6 +259,7 @@ const PAGES = [
 // there's no external dependency and it works offline for Phase 2 (PWA).
 
 const ICONS = {
+  vendorSearch: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l1.5-5h15L21 9"/><path d="M3 9h18v1.5a3 3 0 0 1-6 0 3 3 0 0 1-6 0 3 3 0 0 1-6 0z"/><path d="M5 13v7h6"/><circle cx="16.5" cy="18" r="2.5"/><path d="M18.3 19.8 20.5 22"/></svg>',
   search: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h6"/><path d="M14 3l5 5h-5V3z"/><circle cx="16.5" cy="16.5" r="3.5"/><path d="M19.2 19.2 22 22"/></svg>',
   filePlus: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z"/><path d="M14 3l5 5h-5V3z"/><path d="M12 12v6M9 15h6"/></svg>',
   filePen: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h5"/><path d="M14 3l5 5h-5V3z"/><path d="M14 21h3l4.5-4.5-3-3L14 18v3z"/></svg>',
@@ -680,6 +682,36 @@ function toggleSidebar() {
     backdrop.classList.remove('open');
   });
 })();
+
+// ====== VENDOR FINDER HAND-OFF ======
+// Lets any page (Search UCS Codes, Planning Stock) drop an item into the
+// Vendor Finder list and open that page. The list lives in sessionStorage
+// under an 'smsCache:' key, so clearAllPageCaches() empties it on logout.
+// UI convenience only -- Code.gs re-checks access on every vendor call.
+Shell.canUseVendorFinder = function () {
+  const u = this.getUser();
+  return !!u && Access.canManageSTO(u);
+};
+Shell.addToVendorBasket = function (item) {
+  const KEY = 'smsCache:vendorBasket';
+  const code = String((item && item.ucsCode) || '').trim();
+  if (!/^[1-9]\d{13}$/.test(code)) return 'invalid';
+  let list = [];
+  try { list = JSON.parse(sessionStorage.getItem(KEY) || '[]'); if (!Array.isArray(list)) list = []; } catch (e) { list = []; }
+  if (list.some(b => b && b.ucsCode === code)) return 'dup';
+  if (list.length >= 25) return 'full';
+  list.push({ ucsCode: code, shortText: String(item.shortText || ''), unit: String(item.unit || '') });
+  try {
+    sessionStorage.setItem(KEY, JSON.stringify(list));
+    sessionStorage.setItem('smsCache:vendorBasketJustAdded', '1');
+  } catch (e) { return 'storage'; }
+  return 'ok';
+};
+// Opens a page exactly as if its sidebar link had been clicked.
+Shell.openPage = function (key) {
+  const link = document.querySelector('.navItem[data-key="' + key + '"]');
+  if (link) link.click();
+};
 
 // Install the addEventListener tracking wrapper and the login-caching
 // fetch wrapper immediately, before any fragment ever gets a chance to run.
