@@ -26,6 +26,11 @@
  * Phase 3, Feature 2: Vendor Finder -- read-only list of past vendors for up to 25 UCS Codes, for
  *                     calling budgetary offers. Reads the "Material List" and "Vendor" tabs of the
  *                     external SMS3E PRs sheet. Planning staff (excluding Store Incharge) only.
+ * Phase 3, Feature 3: UCS Search "Export CSV" -- for up to 500 UCS Codes from a search (e.g.
+ *                     "180L"), returns each code's LATEST PO: PO No., PO Date, PO DP, Alt DP,
+ *                     PO Qty, rate and vendor. Served from the same cached Material List bundle
+ *                     as Vendor Finder. Planning staff (excluding Store Incharge) only; every
+ *                     export is written to the AuditLog.
  *
  * IMPORTANT ONE-TIME SETUP FOR THIS VERSION: the LOCAL_ISSUE_SHEET tab's headers must read
  * EXACTLY (retype each cell from scratch, Bug Pattern 3):
@@ -193,6 +198,8 @@ function doPostInner_(e) {
     if (action === 'getPastVendors') { return getPastVendors(data); }
     if (action === 'getVendorSupplyHistory') { return getVendorSupplyHistory(data); }
     if (action === 'getVendorFinderWarmup') { return getVendorFinderWarmup(data); }
+
+    if (action === 'getUCSPOExportData') { return getUCSPOExportData(data); }
 
     if (action === 'registerPushToken') { return registerPushToken(data); }
 
@@ -4385,7 +4392,10 @@ function getAreaReturns(data) {
 const VENDOR_TAB_NAME = 'Vendor';
 const VENDOR_FINDER_MAX_CODES = 25;
 const VENDOR_FINDER_ALLOWED_YEARS = [0, 1, 2, 3, 5, 10]; // 0 = all history
-const VENDOR_BUNDLE_CACHE_KEY = 'vfBundle_v3'; // bump whenever the bundle's shape/cleaning changes, so an old cached copy is never served
+// v4: each bundle row now also carries PO DP and Alt DP separately (VFI.PO_DP
+// / VFI.ALT_DP) for the UCS Search export. Bumped so no v3 copy (which lacks
+// those two fields) is ever served after deploying this version.
+const VENDOR_BUNDLE_CACHE_KEY = 'vfBundle_v4'; // bump whenever the bundle's shape/cleaning changes, so an old cached copy is never served
 const ML_LITE_CACHE_KEY = 'mlLite_v1';
 const VENDOR_BUNDLE_TTL_SECONDS = 600; // both caches share this TTL -- they are always built together
 const VENDOR_HISTORY_MAX_ROWS = 500;
@@ -4399,8 +4409,9 @@ const VENDOR_HISTORY_MAX_ROWS = 500;
 const MLL = { CODE: 0, PR_NO: 1, PO_NO: 2, PO_DATE: 3, PO_MS: 4, QTY: 5, RCPT_DATE: 6, RCPT_MS: 7, V_CODE: 8, V_NAME: 9 };
 
 // Compact row layout inside the cached bundle (arrays, not objects, to keep
-// the cached JSON small).
-const VFI = { CODE: 0, VCODE: 1, VNAME: 2, PO_NO: 3, PO_DT: 4, PO_QTY: 5, RATE: 6, QTY105: 7, DT105: 8, DUE: 9 };
+// the cached JSON small). PO_DP / ALT_DP added at the END so every existing
+// index above them is unchanged.
+const VFI = { CODE: 0, VCODE: 1, VNAME: 2, PO_NO: 3, PO_DT: 4, PO_QTY: 5, RATE: 6, QTY105: 7, DT105: 8, DUE: 9, PO_DP: 10, ALT_DP: 11 };
 
 // Vendor tab header -> field name sent to the page.
 const VENDOR_TAB_FIELDS_ = {
@@ -4518,13 +4529,16 @@ function buildMaterialListCaches_() {
       if (!descByCode[code]) descByCode[code] = String(r[ML_COL.DESCRIPTION] || '').trim();
       const poDt = vfDate_(r[ML_COL.PO_DT]);
       const dt105 = vfDate_(r[ML_COL.DT_105]);
-      const due = vfDate_(r[ML_COL.ALT_DP]) || vfDate_(r[ML_COL.PO_DP]); // renegotiated date wins, same priority as the dashboard
+      const poDP = vfDate_(r[ML_COL.PO_DP]);
+      const altDP = vfDate_(r[ML_COL.ALT_DP]);
+      const due = altDP || poDP; // renegotiated date wins, same priority as the dashboard
       let poQty = vfNum_(r[ML_COL.PO_QTY]);
       if (!poQty) poQty = vfNum_(r[ML_COL.PO_LINE_QTY]);
       rows.push([
         code, vCode, String(r[ML_COL.V_NAME] || '').trim(), poNo,
         poDt ? poDt.getTime() : 0, poQty, vfNum_(r[ML_COL.PO_RATE]), vfNum_(r[ML_COL.QTY_105]),
-        dt105 ? dt105.getTime() : 0, due ? due.getTime() : 0
+        dt105 ? dt105.getTime() : 0, due ? due.getTime() : 0,
+        poDP ? poDP.getTime() : 0, altDP ? altDP.getTime() : 0
       ]);
     }
   }
@@ -4824,6 +4838,129 @@ function getVendorSupplyHistory(data) {
   } catch (e) {
     return jsonResponse({ success: false, message: 'Could not load vendor history: ' + e.message });
   }
+}
+
+
+// =====================================================================
+// ====== UCS SEARCH -> EXPORT CSV (Phase 3, Feature 3) ======
+// =====================================================================
+// READ-ONLY. Powers the "Export CSV" bar on search-ucs.html: for the UCS
+// Codes a search matched (e.g. every "180L" motor), returns each code's
+// LATEST PO -- PO No., PO Date, PO DP, Alt DP, PO Qty, rate and vendor --
+// so the page can build a CSV in the browser. Nothing is written except
+// one AuditLog row per export.
+//
+// ACCESS: Planning staff EXCLUDING Store Incharge (requireSTOAccess) --
+// the same tier as Vendor Finder, since this hands out rates and vendors
+// in bulk. The page hides the button for everyone else, but this check is
+// the real gate.
+//
+// DATA: served from the SAME cached vendor bundle Vendor Finder uses
+// (getVendorBundle_), so an export normally costs no external-sheet read
+// at all, and the numbers always match what Vendor Finder shows:
+//   - only black-font Material List rows (dummy/masked rows excluded),
+//   - only rows that actually have a PO No. and a numeric vendor code,
+//   - PO Qty = "PO Qty" column, falling back to the PO-line Qty if blank,
+//   - vendor name from the Vendor tab when listed there, else Material List.
+// Data is at most 10 minutes old (same TTL as Vendor Finder).
+//
+// "LATEST PO" for a code = the row with the newest PO Dt; on a same-date
+// tie, the higher PO No. wins. If that one PO carries the same material on
+// more than one line, the line quantities are summed and the Note column
+// says so. A code with no PO at all still gets a row ("No PO found"), so
+// the export never silently drops a code the user asked for.
+const UCS_EXPORT_MAX_CODES = 500; // must match EXPORT_MAX in search-ucs.html
+
+/** data: { email, password, ucsCodes: [up to 500 x 14-digit strings], searchText?: string } */
+function getUCSPOExportData(data) {
+  const check = requireSTOAccess(data);
+  if (!check.ok) return check.response;
+  const login = check.login;
+
+  const raw = Array.isArray(data.ucsCodes) ? data.ucsCodes : null;
+  if (!raw || raw.length === 0) return jsonResponse({ success: false, message: 'No UCS Codes were sent for export.' });
+  if (raw.length > UCS_EXPORT_MAX_CODES) return jsonResponse({ success: false, message: 'You can export at most ' + UCS_EXPORT_MAX_CODES + ' UCS Codes at a time (you sent ' + raw.length + ').' });
+
+  const codes = [];
+  const wanted = {};
+  for (let i = 0; i < raw.length; i++) {
+    const c = String(raw[i] === null || raw[i] === undefined ? '' : raw[i]).trim();
+    if (!/^[1-9]\d{13}$/.test(c)) return jsonResponse({ success: false, message: '"' + c.substring(0, 20) + '" is not a valid 14-digit UCS Code.' });
+    if (!wanted[c]) { wanted[c] = true; codes.push(c); }
+  }
+  // Only used for the audit trail -- never searched or trusted.
+  const searchText = String(data.searchText || '').replace(/[\s\u00a0]+/g, ' ').trim().substring(0, 200);
+
+  try {
+    const bundle = getVendorBundle_(false);
+    const shortMap = getUCSShortTextMap_();
+
+    // Pick the latest PO per requested code.
+    const latest = {}; // code -> { t, poNo, rows: [] }
+    bundle.rows.forEach(function (r) {
+      const code = r[VFI.CODE];
+      if (!wanted[code]) return;
+      const poNo = String(r[VFI.PO_NO]);
+      const t = r[VFI.PO_DT] || 0;
+      const cur = latest[code];
+      if (!cur || t > cur.t || (t === cur.t && poNo !== cur.poNo && comparePoNo_(poNo, cur.poNo) > 0)) {
+        latest[code] = { t: t, poNo: poNo, rows: [r] };
+      } else if (t === cur.t && poNo === cur.poNo) {
+        cur.rows.push(r); // same material on another line of the same PO
+      }
+    });
+
+    let withPO = 0;
+    const rows = codes.map(function (code) {
+      const out = { ucsCode: code, shortText: shortMap[code] || bundle.descByCode[code] || '' };
+      const hit = latest[code];
+      if (!hit) {
+        out.poNo = ''; out.poDate = ''; out.poDP = ''; out.altDP = ''; out.poQty = ''; out.rate = '';
+        out.vendorCode = ''; out.vendorName = ''; out.note = 'No PO found';
+        return out;
+      }
+      withPO++;
+      const first = hit.rows[0];
+      let qty = 0;
+      const rates = [];
+      let poDPms = 0, altDPms = 0;
+      hit.rows.forEach(function (r) {
+        qty += r[VFI.PO_QTY];
+        if (rates.indexOf(r[VFI.RATE]) === -1) rates.push(r[VFI.RATE]);
+        if (!poDPms && r[VFI.PO_DP]) poDPms = r[VFI.PO_DP];
+        if (!altDPms && r[VFI.ALT_DP]) altDPms = r[VFI.ALT_DP];
+      });
+      const vc = first[VFI.VCODE];
+      const m = bundle.vendors[vc] || null;
+      out.poNo = hit.poNo;
+      out.poDate = vfDateOut_(hit.t);
+      out.poDP = vfDateOut_(poDPms);
+      out.altDP = vfDateOut_(altDPms);
+      out.poQty = qty;
+      // Normally one rate. If the same PO has this material at two different
+      // rates on two lines, show both rather than guessing which is "right".
+      out.rate = rates.length === 1 ? rates[0] : rates.join(' / ');
+      out.vendorCode = vc;
+      out.vendorName = (m && m.vendorName) || first[VFI.VNAME] || '';
+      out.note = hit.rows.length > 1 ? hit.rows.length + ' lines on this PO combined' : '';
+      return out;
+    });
+
+    // Rates + vendors leaving the system as a file -- worth a trail.
+    logAudit(login.name, data.email, 'EXPORT_UCS_PO_CSV',
+      codes.length + ' code(s), ' + withPO + ' with a PO | Search: "' + searchText + '"');
+
+    return jsonResponse({ success: true, rows: rows, withPO: withPO, total: rows.length, dataAsOfMs: bundle.builtAt });
+  } catch (e) {
+    return jsonResponse({ success: false, message: 'Could not prepare the export: ' + e.message });
+  }
+}
+
+/** Numeric-aware PO No. comparison (so "4500012345" > "450009999"). */
+function comparePoNo_(a, b) {
+  const na = Number(a), nb = Number(b);
+  if (!isNaN(na) && !isNaN(nb)) return na - nb;
+  return String(a).localeCompare(String(b));
 }
 
 
