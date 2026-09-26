@@ -678,6 +678,78 @@ function requirePlanningAreaStaff(data) {
   return { ok: true, login: login };
 }
 
+// =====================================================================
+// ====== PERFORMANCE: BATCHED SHEET WRITES ======
+// =====================================================================
+// Every Sheets call is a separate round trip (~0.1-0.2s). Saves used to
+// write cell by cell -- approving a 10-item slip made ~40 calls, all while
+// holding the script lock, so everyone else's save waited too. These
+// helpers write the SAME values to the SAME cells in as few calls as
+// possible. They only ever touch the exact cells listed -- never a whole
+// row -- so any formula or manual entry in other columns is left alone.
+
+/** Header row only -- instead of reading the WHOLE sheet just to get row 1. */
+function readHeaderRow_(sheet) {
+  const lastCol = sheet.getLastColumn();
+  if (lastCol < 1) return [];
+  return sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+}
+
+/**
+ * Writes cells = [{ row: 1-based sheet row, col: 0-based column, value }].
+ * Groups them into rectangles (consecutive rows that share consecutive
+ * columns) and writes each rectangle with one setValues() call. Same
+ * result as one setValue() per cell.
+ */
+function writeCells_(sheet, cells) {
+  if (!cells.length) return;
+  const byRow = {};
+  cells.forEach(function (c) { (byRow[c.row] = byRow[c.row] || {})[c.col] = c.value; });
+  const rows = Object.keys(byRow).map(Number).sort(function (a, b) { return a - b; });
+  const colKey = function (r) { return Object.keys(byRow[r]).map(Number).sort(function (a, b) { return a - b; }).join(','); };
+  let i = 0;
+  while (i < rows.length) {
+    // run of consecutive rows writing the identical set of columns
+    let j = i;
+    const key = colKey(rows[i]);
+    while (j + 1 < rows.length && rows[j + 1] === rows[j] + 1 && colKey(rows[j + 1]) === key) j++;
+    const cols = key.split(',').map(Number);
+    // split the column set into consecutive column runs
+    let k = 0;
+    while (k < cols.length) {
+      let m = k;
+      while (m + 1 < cols.length && cols[m + 1] === cols[m] + 1) m++;
+      const block = [];
+      for (let r = i; r <= j; r++) {
+        const line = [];
+        for (let c = k; c <= m; c++) line.push(byRow[rows[r]][cols[c]]);
+        block.push(line);
+      }
+      sheet.getRange(rows[i], cols[k] + 1, j - i + 1, m - k + 1).setValues(block);
+      k = m + 1;
+    }
+    i = j + 1;
+  }
+}
+
+/**
+ * Appends rows (arrays, one per sheet row) in ONE call instead of one
+ * appendRow() each, then applies plain-text format to the listed 0-based
+ * columns over just the new rows -- same end state as appendRow() +
+ * setNumberFormat('@STRING@') per row. Always called inside the caller's
+ * script lock, so nobody else can append between the two steps.
+ */
+function appendRows_(sheet, rows, textCols) {
+  if (!rows.length) return;
+  const width = rows.reduce(function (w, r) { return Math.max(w, r.length); }, 0);
+  const block = rows.map(function (r) { const out = r.slice(); while (out.length < width) out.push(''); return out; });
+  const start = sheet.getLastRow() + 1;
+  sheet.getRange(start, 1, block.length, width).setValues(block);
+  (textCols || []).forEach(function (c) {
+    sheet.getRange(start, c + 1, block.length, 1).setNumberFormat('@STRING@');
+  });
+}
+
 function getColIndexOrThrow_(headers, name, sheetLabel) {
   const idx = headers.indexOf(name);
   if (idx === -1) throw new Error('Column "' + name + '" not found in ' + sheetLabel + '. Check the header row for exact spelling/case/underscores.');
@@ -922,6 +994,71 @@ function addSTOEntry(data) {
   return jsonResponse({ success: true, message: 'STO ' + stoNo + ' added successfully.' + (isLocked ? ' Received details were complete, so it has been locked.' : ''), itemDescription: itemDescription, unit: unit, locked: isLocked });
 }
 
+/**
+ * PERFORMANCE: every STO row (deleted ones included, flagged) with its Z04 /
+ * 201 status, computed from STO_MasterList + S_Z04 + S_201 and cached under
+ * the data version -- so any save, or any hand edit in the Sheet, makes the
+ * very next call recompute. getSTOList() then only filters and pages this
+ * list, instead of re-reading three sheets on every search keystroke,
+ * filter change and page flip of the STO Dashboard. Returns null for an
+ * empty STO sheet.
+ */
+function getSTOAllRowsCached_() {
+  return cachedJson_('stoAllRows', 600, function () {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(STO_SHEET);
+    const values = sheet.getDataRange().getValues();
+    if (values.length < 2) return null; // empty sheet -- caller returns the same empty page as before
+    const headers = values[0];
+    const col = {};
+    headers.forEach((h, idx) => { col[h] = idx; });
+
+    const z04Sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(Z04_SHEET);
+    const z04Values = z04Sheet.getDataRange().getValues();
+    const z04Done = {};
+    const z04QtyByStoNo = {};
+    if (z04Values.length >= 2) {
+      const z04Headers = z04Values[0];
+      const z04StoCol = z04Headers.indexOf('STO_No');
+      const z04QtyCol = z04Headers.indexOf('Qty_Recieved_Z04');
+      for (let i = 1; i < z04Values.length; i++) {
+        const stoNoKey = String(z04Values[i][z04StoCol]).trim();
+        z04Done[stoNoKey] = true;
+        z04QtyByStoNo[stoNoKey] = Number(z04Values[i][z04QtyCol]) || 0;
+      }
+    }
+
+    const releasedByStoNo201 = sumReleasedByStoNo();
+    function compute201Status(stoNo) {
+      if (!z04Done[stoNo]) return 'na';
+      const qtyZ04 = z04QtyByStoNo[stoNo] || 0;
+      const released = releasedByStoNo201[stoNo] || 0;
+      const remaining = qtyZ04 - released;
+      if (remaining <= 0) return 'done';
+      if (released > 0) return 'partial';
+      return 'pending';
+    }
+
+    const allRows = [];
+    for (let i = 1; i < values.length; i++) {
+      const r = values[i];
+      const isDeleted = isSTODeleted_(r, col);
+      const receivedQty = r[col['Received_Qty']];
+      const receivedDate = r[col['Received_Date']];
+      const referencePO = r[col['Reference_PO']];
+      const pending = isBlankCell(receivedQty) && isBlankCell(receivedDate) && !referencePO;
+      const stoNo = String(r[col['STO_No']]).trim();
+      allRows.push({
+        stoDateMs: (function (d) { return d ? d.getTime() : null; })(toMidnight(r[col['STO_Date']])), stoDate: formatDateOut(r[col['STO_Date']]), stoNo: stoNo,
+        ucsCode: String(r[col['UCS_Code']]).trim(), itemDescription: r[col['Item_Description']], qty: r[col['Qty']], unit: r[col['Unit']],
+        receivedQty: isBlankCell(receivedQty) ? '' : receivedQty, receivedDate: formatDateOut(receivedDate), referencePO: referencePO || '',
+        pending: pending, z04Done: !!z04Done[stoNo], status201: compute201Status(stoNo),
+        isDeleted: isDeleted, deletedBy: isDeleted ? r[col['Deleted_By']] : '', deletedDate: isDeleted ? formatDateOut(r[col['Deleted_Timestamp']]) : '', deletedReason: isDeleted ? (r[col['Deleted_Reason']] || '') : ''
+      });
+    }
+    return allRows;
+  });
+}
+
 function getSTOList(data) {
   const check = requireSTOAccess(data);
   if (!check.ok) return check.response;
@@ -931,57 +1068,11 @@ function getSTOList(data) {
   // client-supplied flag this app doesn't trust blindly.
   const includeDeleted = !!data.includeDeleted && !!login.isAdmin;
   const pageSize = Number(data.pageSize) > 0 ? Number(data.pageSize) : 20;
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(STO_SHEET);
-  const values = sheet.getDataRange().getValues();
-  if (values.length < 2) return jsonResponse({ success: true, rows: [], totalCount: 0, currentPage: 1, totalPages: 1, pageSize: pageSize });
-  const headers = values[0];
-  const col = {};
-  headers.forEach((h, idx) => { col[h] = idx; });
-
-  const z04Sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(Z04_SHEET);
-  const z04Values = z04Sheet.getDataRange().getValues();
-  const z04Done = {};
-  const z04QtyByStoNo = {};
-  if (z04Values.length >= 2) {
-    const z04Headers = z04Values[0];
-    const z04StoCol = z04Headers.indexOf('STO_No');
-    const z04QtyCol = z04Headers.indexOf('Qty_Recieved_Z04');
-    for (let i = 1; i < z04Values.length; i++) {
-      const stoNoKey = String(z04Values[i][z04StoCol]).trim();
-      z04Done[stoNoKey] = true;
-      z04QtyByStoNo[stoNoKey] = Number(z04Values[i][z04QtyCol]) || 0;
-    }
-  }
-
-  const releasedByStoNo201 = sumReleasedByStoNo();
-  function compute201Status(stoNo) {
-    if (!z04Done[stoNo]) return 'na';
-    const qtyZ04 = z04QtyByStoNo[stoNo] || 0;
-    const released = releasedByStoNo201[stoNo] || 0;
-    const remaining = qtyZ04 - released;
-    if (remaining <= 0) return 'done';
-    if (released > 0) return 'partial';
-    return 'pending';
-  }
-
-  let allRows = [];
-  for (let i = 1; i < values.length; i++) {
-    const r = values[i];
-    const isDeleted = isSTODeleted_(r, col);
-    if (isDeleted && !includeDeleted) continue;
-    const receivedQty = r[col['Received_Qty']];
-    const receivedDate = r[col['Received_Date']];
-    const referencePO = r[col['Reference_PO']];
-    const pending = isBlankCell(receivedQty) && isBlankCell(receivedDate) && !referencePO;
-    const stoNo = String(r[col['STO_No']]).trim();
-    allRows.push({
-      stoDateObj: toMidnight(r[col['STO_Date']]), stoDate: formatDateOut(r[col['STO_Date']]), stoNo: stoNo,
-      ucsCode: String(r[col['UCS_Code']]).trim(), itemDescription: r[col['Item_Description']], qty: r[col['Qty']], unit: r[col['Unit']],
-      receivedQty: isBlankCell(receivedQty) ? '' : receivedQty, receivedDate: formatDateOut(receivedDate), referencePO: referencePO || '',
-      pending: pending, z04Done: !!z04Done[stoNo], status201: compute201Status(stoNo),
-      isDeleted: isDeleted, deletedBy: isDeleted ? r[col['Deleted_By']] : '', deletedDate: isDeleted ? formatDateOut(r[col['Deleted_Timestamp']]) : '', deletedReason: isDeleted ? (r[col['Deleted_Reason']] || '') : ''
-    });
-  }
+  const cachedRows = getSTOAllRowsCached_();
+  if (cachedRows === null) return jsonResponse({ success: true, rows: [], totalCount: 0, currentPage: 1, totalPages: 1, pageSize: pageSize });
+  let allRows = cachedRows
+    .filter(function (row) { return !(row.isDeleted && !includeDeleted); })
+    .map(function (row) { const out = Object.assign({}, row, { stoDateObj: row.stoDateMs === null ? null : new Date(row.stoDateMs) }); delete out.stoDateMs; return out; });
 
   const startDateObj = data.startDate ? parseDateOnly(String(data.startDate).trim()) : null;
   const endDateObj = data.endDate ? parseDateOnly(String(data.endDate).trim()) : null;
@@ -1078,9 +1169,11 @@ function receiveSTOMaterial(data) {
     const stoDateMidnight = toMidnight(row[col['STO_Date']]);
     if (stoDateMidnight && recDateObj < stoDateMidnight) return jsonResponse({ success: false, message: 'Received Date cannot be earlier than STO Date.' });
     const rowNum = targetIndex + 1;
-    sheet.getRange(rowNum, col['Received_Qty'] + 1).setValue(recQty);
-    sheet.getRange(rowNum, col['Received_Date'] + 1).setValue(recDateObj);
-    sheet.getRange(rowNum, col['Reference_PO'] + 1).setValue(refPO);
+    writeCells_(sheet, [ // one batched write instead of 3 separate calls
+      { row: rowNum, col: col['Received_Qty'], value: recQty },
+      { row: rowNum, col: col['Received_Date'], value: recDateObj },
+      { row: rowNum, col: col['Reference_PO'], value: refPO }
+    ]);
     logAudit(login.name, data.email, 'RECEIVE_STO_MATERIAL', 'STO ' + stoNo + ' | Received Qty ' + recQty + ' | Received Date ' + recDateStr + ' | Ref PO ' + refPO);
     return jsonResponse({ success: true, message: 'STO ' + stoNo + ' marked as received and locked.' });
   } finally {
@@ -1149,10 +1242,12 @@ function deleteSTOEntry(data) {
 
     const now = new Date();
     const rowNum = targetIndex + 1;
-    sheet.getRange(rowNum, col['Deleted_Status'] + 1).setValue('Deleted');
-    sheet.getRange(rowNum, col['Deleted_By'] + 1).setValue(login.name);
-    sheet.getRange(rowNum, col['Deleted_Timestamp'] + 1).setValue(now);
-    sheet.getRange(rowNum, col['Deleted_Reason'] + 1).setValue(reason);
+    writeCells_(sheet, [ // one batched write instead of 4 separate calls
+      { row: rowNum, col: col['Deleted_Status'], value: 'Deleted' },
+      { row: rowNum, col: col['Deleted_By'], value: login.name },
+      { row: rowNum, col: col['Deleted_Timestamp'], value: now },
+      { row: rowNum, col: col['Deleted_Reason'], value: reason }
+    ]);
     logAudit(login.name, data.email, 'DELETE_STO_ENTRY', 'STO ' + stoNo + ' | UCS ' + row[col['UCS_Code']] + ' | Qty ' + row[col['Qty']] + ' | Reason: ' + reason);
     return jsonResponse({ success: true, message: 'STO ' + stoNo + ' deleted. It will no longer appear on any dashboard, and its number can never be reused.' });
   } finally {
@@ -1193,10 +1288,12 @@ function restoreSTOEntry(data) {
 
     const oldReason = row[col['Deleted_Reason']];
     const rowNum = targetIndex + 1;
-    sheet.getRange(rowNum, col['Deleted_Status'] + 1).setValue('');
-    sheet.getRange(rowNum, col['Deleted_By'] + 1).setValue('');
-    sheet.getRange(rowNum, col['Deleted_Timestamp'] + 1).setValue('');
-    sheet.getRange(rowNum, col['Deleted_Reason'] + 1).setValue('');
+    writeCells_(sheet, [ // one batched write instead of 4 separate calls
+      { row: rowNum, col: col['Deleted_Status'], value: '' },
+      { row: rowNum, col: col['Deleted_By'], value: '' },
+      { row: rowNum, col: col['Deleted_Timestamp'], value: '' },
+      { row: rowNum, col: col['Deleted_Reason'], value: '' }
+    ]);
     logAudit(login.name, data.email, 'RESTORE_STO_ENTRY', 'STO ' + stoNo + ' | Previously deleted -- reason was: ' + oldReason);
     return jsonResponse({ success: true, message: 'STO ' + stoNo + ' restored.' });
   } finally {
@@ -1308,11 +1405,13 @@ function editSTOEntry(data) {
     }
 
     const rowNum = targetIndex + 1;
-    sheet.getRange(rowNum, col['Qty'] + 1).setValue(newQty);
-    sheet.getRange(rowNum, col['UCS_Code'] + 1).setValue(newUcsCode);
+    writeCells_(sheet, [ // one batched write instead of 4 separate calls
+      { row: rowNum, col: col['Qty'], value: newQty },
+      { row: rowNum, col: col['UCS_Code'], value: newUcsCode },
+      { row: rowNum, col: col['Item_Description'], value: newItemDescription },
+      { row: rowNum, col: col['Unit'], value: newUnit }
+    ]);
     sheet.getRange(rowNum, col['UCS_Code'] + 1).setNumberFormat('@STRING@');
-    sheet.getRange(rowNum, col['Item_Description'] + 1).setValue(newItemDescription);
-    sheet.getRange(rowNum, col['Unit'] + 1).setValue(newUnit);
 
     logAudit(login.name, data.email, 'EDIT_STO_ENTRY',
       'STO ' + stoNo + ' | Qty: ' + oldQty + ' -> ' + newQty +
@@ -1361,9 +1460,11 @@ function editSTOReceivedInfo(data) {
   const oldDate = formatDateOut(row[col['Received_Date']]);
   const oldPO = row[col['Reference_PO']];
   const rowNum = targetIndex + 1;
-  sheet.getRange(rowNum, col['Received_Qty'] + 1).setValue(recQty);
-  sheet.getRange(rowNum, col['Received_Date'] + 1).setValue(recDateObj);
-  sheet.getRange(rowNum, col['Reference_PO'] + 1).setValue(refPO);
+  writeCells_(sheet, [ // one batched write instead of 3 separate calls
+    { row: rowNum, col: col['Received_Qty'], value: recQty },
+    { row: rowNum, col: col['Received_Date'], value: recDateObj },
+    { row: rowNum, col: col['Reference_PO'], value: refPO }
+  ]);
   logAudit(login.name, data.email, 'EDIT_STO_RECEIVED_INFO', 'STO ' + stoNo + ' | Qty: ' + oldQty + ' -> ' + recQty + ' | Date: ' + oldDate + ' -> ' + recDateStr + ' | Ref: "' + oldPO + '" -> "' + refPO + '"');
   return jsonResponse({ success: true, message: 'STO ' + stoNo + ' received details corrected by Approver.' });
 }
@@ -1539,7 +1640,7 @@ function getOptionsList(data) {
   if (!category) return jsonResponse({ success: false, message: 'Category is required.' });
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(OPTIONS_SHEET);
   if (!sheet) return jsonResponse({ success: false, message: 'Options_List sheet not found.' });
-  const headers = sheet.getDataRange().getValues()[0] || [];
+  const headers = readHeaderRow_(sheet);
   if (headers.indexOf(category) === -1) return jsonResponse({ success: false, message: 'Unknown Options_List category: ' + category });
   return jsonResponse({ success: true, category: category, values: readOptionsColumn(category) });
 }
@@ -1947,7 +2048,7 @@ function raiseRequisition(data) {
     const slipId = getNextSlipSerial_(area, dateStr);
     const initialStatus = isFastTrack ? 'Pending Planning Approval' : 'Pending Area Approval';
     const headerSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(REQ_HEADER_SHEET);
-    const headerHeaders = headerSheet.getDataRange().getValues()[0];
+    const headerHeaders = readHeaderRow_(headerSheet);
     const headerRow = new Array(headerHeaders.length).fill('');
     headerRow[getColIndexOrThrow_(headerHeaders, 'Slip_ID', REQ_HEADER_SHEET)] = slipId;
     headerRow[getColIndexOrThrow_(headerHeaders, 'Slip_Date', REQ_HEADER_SHEET)] = now;
@@ -1960,7 +2061,8 @@ function raiseRequisition(data) {
     headerSheet.appendRow(headerRow);
     headerSheet.getRange(headerSheet.getLastRow(), getColIndexOrThrow_(headerHeaders, 'Slip_ID', REQ_HEADER_SHEET) + 1).setNumberFormat('@STRING@');
     const detailsSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(REQ_DETAILS_SHEET);
-    const detailsHeaders = detailsSheet.getDataRange().getValues()[0];
+    const detailsHeaders = readHeaderRow_(detailsSheet);
+    const newDetailRows = [];
     resolvedItems.forEach(function (item, idx) {
       const row = new Array(detailsHeaders.length).fill('');
       row[getColIndexOrThrow_(detailsHeaders, 'Detail_ID', REQ_DETAILS_SHEET)] = Utilities.getUuid().substring(0, 8);
@@ -1976,11 +2078,9 @@ function raiseRequisition(data) {
         row[getColIndexOrThrow_(detailsHeaders, 'Approved_By', REQ_DETAILS_SHEET)] = login.name;
         row[getColIndexOrThrow_(detailsHeaders, 'Approved_Timestamp', REQ_DETAILS_SHEET)] = now;
       }
-      detailsSheet.appendRow(row);
-      const newRow = detailsSheet.getLastRow();
-      detailsSheet.getRange(newRow, getColIndexOrThrow_(detailsHeaders, 'Slip_ID', REQ_DETAILS_SHEET) + 1).setNumberFormat('@STRING@');
-      detailsSheet.getRange(newRow, getColIndexOrThrow_(detailsHeaders, 'UCS_Code', REQ_DETAILS_SHEET) + 1).setNumberFormat('@STRING@');
+      newDetailRows.push(row);
     });
+    appendRows_(detailsSheet, newDetailRows, [getColIndexOrThrow_(detailsHeaders, 'Slip_ID', REQ_DETAILS_SHEET), getColIndexOrThrow_(detailsHeaders, 'UCS_Code', REQ_DETAILS_SHEET)]);
     logAudit(login.name, data.email, 'RAISE_REQUISITION', 'Slip ' + slipId + ' | Area ' + area + ' | ' + resolvedItems.length + ' item(s): ' + resolvedItems.map(function (it) { return it.ucsCode + ' x' + it.qty; }).join(', '));
     const raiserEmailLower = String(data.email).trim().toLowerCase();
     if (isFastTrack) {
@@ -2064,13 +2164,15 @@ function approveAreaRequisition(data) {
       if (qtyApproved > requested) return jsonResponse({ success: false, message: 'Approved qty for ' + detailId + ' (' + qtyApproved + ') cannot exceed requested qty (' + requested + ').' });
       writes.push({ rowIdx: rowIdx, qtyApproved: qtyApproved });
     }
+    const cells = [];
     writes.forEach(function (w) {
       const sheetRow = w.rowIdx + 1;
-      detailsSheet.getRange(sheetRow, dCol['Qty_Approved'] + 1).setValue(w.qtyApproved);
-      detailsSheet.getRange(sheetRow, dCol['Approved_By'] + 1).setValue(login.name);
-      detailsSheet.getRange(sheetRow, dCol['Approved_Timestamp'] + 1).setValue(now);
-      detailsSheet.getRange(sheetRow, dCol['Slip_Status'] + 1).setValue('Pending Planning Approval');
+      cells.push({ row: sheetRow, col: dCol['Qty_Approved'], value: w.qtyApproved });
+      cells.push({ row: sheetRow, col: dCol['Approved_By'], value: login.name });
+      cells.push({ row: sheetRow, col: dCol['Approved_Timestamp'], value: now });
+      cells.push({ row: sheetRow, col: dCol['Slip_Status'], value: 'Pending Planning Approval' });
     });
+    writeCells_(detailsSheet, cells);
     headerSheet.getRange(headerRowIdx + 1, hCol['Slip_Status'] + 1).setValue('Pending Planning Approval');
     logAudit(login.name, data.email, 'AREA_APPROVE_REQUISITION', 'Slip ' + slipId + ' | Area ' + area + ' | Approved qty set for ' + writes.length + ' item(s).');
 
@@ -2139,13 +2241,15 @@ function sanctionRequisition(data) {
       if (qtySanctioned > approved) return jsonResponse({ success: false, message: 'Sanctioned qty for ' + detailId + ' (' + qtySanctioned + ') cannot exceed approved qty (' + approved + ').' });
       writes.push({ rowIdx: rowIdx, qtySanctioned: qtySanctioned });
     }
+    const cells = [];
     writes.forEach(function (w) {
       const sheetRow = w.rowIdx + 1;
-      detailsSheet.getRange(sheetRow, dCol['Qty_Sanctioned'] + 1).setValue(w.qtySanctioned);
-      detailsSheet.getRange(sheetRow, dCol['Sanctioned_By'] + 1).setValue(login.name);
-      detailsSheet.getRange(sheetRow, dCol['Sanctioned_Timestamp'] + 1).setValue(now);
-      detailsSheet.getRange(sheetRow, dCol['Slip_Status'] + 1).setValue('Pending Issue');
+      cells.push({ row: sheetRow, col: dCol['Qty_Sanctioned'], value: w.qtySanctioned });
+      cells.push({ row: sheetRow, col: dCol['Sanctioned_By'], value: login.name });
+      cells.push({ row: sheetRow, col: dCol['Sanctioned_Timestamp'], value: now });
+      cells.push({ row: sheetRow, col: dCol['Slip_Status'], value: 'Pending Issue' });
     });
+    writeCells_(detailsSheet, cells);
     headerSheet.getRange(headerRowIdx + 1, hCol['Slip_Status'] + 1).setValue('Pending Issue');
     logAudit(login.name, data.email, 'SANCTION_REQUISITION', 'Slip ' + slipId + ' | Sanctioned qty set for ' + writes.length + ' item(s).');
 
@@ -2232,17 +2336,20 @@ function issueRequisition(data) {
 }
 
 function finishIssueRequisition_(data, login, slipId, area, issuedTo, headerSheet, headerRowIdx, hCol, detailsSheet, dCol, writes, now) {
+  const cells = [];
   writes.forEach(function (w) {
     const sheetRow = w.rowIdx + 1;
-    detailsSheet.getRange(sheetRow, dCol['Qty_Issued'] + 1).setValue(w.qtyIssued);
-    detailsSheet.getRange(sheetRow, dCol['Issued_To'] + 1).setValue(issuedTo);
-    detailsSheet.getRange(sheetRow, dCol['Issued_By'] + 1).setValue(login.name);
-    detailsSheet.getRange(sheetRow, dCol['Issued_Timestamp'] + 1).setValue(now);
-    detailsSheet.getRange(sheetRow, dCol['Slip_Status'] + 1).setValue('Completed');
+    cells.push({ row: sheetRow, col: dCol['Qty_Issued'], value: w.qtyIssued });
+    cells.push({ row: sheetRow, col: dCol['Issued_To'], value: issuedTo });
+    cells.push({ row: sheetRow, col: dCol['Issued_By'], value: login.name });
+    cells.push({ row: sheetRow, col: dCol['Issued_Timestamp'], value: now });
+    cells.push({ row: sheetRow, col: dCol['Slip_Status'], value: 'Completed' });
   });
+  writeCells_(detailsSheet, cells);
   headerSheet.getRange(headerRowIdx + 1, hCol['Slip_Status'] + 1).setValue('Completed');
   const ledgerSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(ISSUE_LEDGER_SHEET);
-  const ledgerHeaders = ledgerSheet.getDataRange().getValues()[0];
+  const ledgerHeaders = readHeaderRow_(ledgerSheet);
+  const ledgerRows = [];
   writes.forEach(function (w) {
     const row = new Array(ledgerHeaders.length).fill('');
     row[getColIndexOrThrow_(ledgerHeaders, 'ID', ISSUE_LEDGER_SHEET)] = Utilities.getUuid().substring(0, 8);
@@ -2254,9 +2361,9 @@ function finishIssueRequisition_(data, login, slipId, area, issuedTo, headerShee
     row[getColIndexOrThrow_(ledgerHeaders, 'Issued_to', ISSUE_LEDGER_SHEET)] = issuedTo;
     row[getColIndexOrThrow_(ledgerHeaders, 'Area', ISSUE_LEDGER_SHEET)] = area;
     row[getColIndexOrThrow_(ledgerHeaders, 'Req_Slip_number', ISSUE_LEDGER_SHEET)] = slipId;
-    ledgerSheet.appendRow(row);
-    ledgerSheet.getRange(ledgerSheet.getLastRow(), getColIndexOrThrow_(ledgerHeaders, 'UCS_Code', ISSUE_LEDGER_SHEET) + 1).setNumberFormat('@STRING@');
+    ledgerRows.push(row);
   });
+  appendRows_(ledgerSheet, ledgerRows, [getColIndexOrThrow_(ledgerHeaders, 'UCS_Code', ISSUE_LEDGER_SHEET)]);
   logAudit(login.name, data.email, 'ISSUE_REQUISITION', 'Slip ' + slipId + ' | Area ' + area + ' | Issued to: ' + issuedTo + ' | ' + writes.length + ' item(s): ' + writes.map(function (w) { return w.ucsCode + ' x' + w.qtyIssued; }).join(', '));
 
   // Closes the information loop: the Requester finally hears their material
@@ -3377,7 +3484,7 @@ function recordLocalIssue(data) {
       if (neededByCode[code] > available) return jsonResponse({ success: false, message: code + ': only ' + available + ' available in ' + area + "'s local stock -- cannot issue " + neededByCode[code] + '.' });
     }
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(LOCAL_ISSUE_SHEET);
-    const headers = sheet.getDataRange().getValues()[0];
+    const headers = readHeaderRow_(sheet);
     const dateCol = getColIndexOrThrow_(headers, 'Issue_Date', LOCAL_ISSUE_SHEET);
     const areaCol = getColIndexOrThrow_(headers, 'Area', LOCAL_ISSUE_SHEET);
     const codeCol = getColIndexOrThrow_(headers, 'UCS_Code', LOCAL_ISSUE_SHEET);
@@ -3390,13 +3497,13 @@ function recordLocalIssue(data) {
     const byEmailCol = getColIndexOrThrow_(headers, 'Issued_By_Email', LOCAL_ISSUE_SHEET);
     const tsCol = getColIndexOrThrow_(headers, 'Timestamp', LOCAL_ISSUE_SHEET);
     const now = new Date();
-    clean.forEach(function (c) {
+    const newRows = clean.map(function (c) {
       const row = new Array(headers.length).fill('');
       row[dateCol] = now; row[areaCol] = area; row[codeCol] = c.ucsCode; row[descCol] = c.itemDescription; row[unitCol] = c.unit; row[qtyCol] = c.qty;
       row[issuedToCol] = issuedTo; row[remarksCol] = remarks; row[byNameCol] = login.name; row[byEmailCol] = data.email; row[tsCol] = now;
-      sheet.appendRow(row);
-      sheet.getRange(sheet.getLastRow(), codeCol + 1).setNumberFormat('@STRING@');
+      return row;
     });
+    appendRows_(sheet, newRows, [codeCol]);
     logAudit(login.name, data.email, 'RECORD_LOCAL_ISSUE', area + ': ' + clean.map(function (c) { return c.ucsCode + ' x' + c.qty; }).join(', ') + ' -> ' + issuedTo);
 
     // No approval chain here -- a local issue is a same-area, self-contained
@@ -3700,7 +3807,7 @@ function submitDemandAlert(data) {
     const now = new Date();
     const alertId = getNextDemandAlertSerial_(formatDateYYYYMMDD_(now));
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(DEMAND_SHEET);
-    const headers = sheet.getDataRange().getValues()[0];
+    const headers = readHeaderRow_(sheet);
     const row = new Array(headers.length).fill('');
     row[getColIndexOrThrow_(headers, 'Alert_ID', DEMAND_SHEET)] = alertId;
     row[getColIndexOrThrow_(headers, 'Date_Raised', DEMAND_SHEET)] = now;
@@ -3776,10 +3883,12 @@ function updateDemandAlertStatus(data) {
   for (let i = 1; i < values.length; i++) {
     if (String(values[i][idCol]) === alertId) {
       const rowNum = i + 1;
-      sheet.getRange(rowNum, statusCol + 1).setValue(newStatus);
-      sheet.getRange(rowNum, planningRemarksCol + 1).setValue(planningRemarks);
-      sheet.getRange(rowNum, updByCol + 1).setValue(login.name);
-      sheet.getRange(rowNum, updAtCol + 1).setValue(new Date());
+      writeCells_(sheet, [ // one batched write instead of 4 separate calls
+        { row: rowNum, col: statusCol, value: newStatus },
+        { row: rowNum, col: planningRemarksCol, value: planningRemarks },
+        { row: rowNum, col: updByCol, value: login.name },
+        { row: rowNum, col: updAtCol, value: new Date() }
+      ]);
       logAudit(login.name, data.email, 'UPDATE_DEMAND_ALERT', 'Alert ' + alertId + ' | Status -> ' + newStatus + (planningRemarks ? ' | Remarks: ' + planningRemarks : ''));
 
       const demandRaisedByEmail = values[i][headers.indexOf('Raised_By_Email')];
@@ -3999,7 +4108,7 @@ function raiseReturn(data) {
     const returnId = getNextReturnSerial_(area, dateStr);
 
     const headerSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(RETURN_HEADER_SHEET);
-    const headerHeaders = headerSheet.getDataRange().getValues()[0];
+    const headerHeaders = readHeaderRow_(headerSheet);
     const headerRow = new Array(headerHeaders.length).fill('');
     headerRow[getColIndexOrThrow_(headerHeaders, 'Return_ID', RETURN_HEADER_SHEET)] = returnId;
     headerRow[getColIndexOrThrow_(headerHeaders, 'Return_Date', RETURN_HEADER_SHEET)] = now;
@@ -4013,8 +4122,9 @@ function raiseReturn(data) {
     headerSheet.getRange(headerSheet.getLastRow(), getColIndexOrThrow_(headerHeaders, 'Return_ID', RETURN_HEADER_SHEET) + 1).setNumberFormat('@STRING@');
 
     const detailsSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(RETURN_DETAILS_SHEET);
-    const detailsHeaders = detailsSheet.getDataRange().getValues()[0];
+    const detailsHeaders = readHeaderRow_(detailsSheet);
 
+    const newDetailRows = [];
     resolvedItems.forEach(function (item, idx) {
       const row = new Array(detailsHeaders.length).fill('');
       row[getColIndexOrThrow_(detailsHeaders, 'Detail_ID', RETURN_DETAILS_SHEET)] = Utilities.getUuid().substring(0, 8);
@@ -4026,11 +4136,9 @@ function raiseReturn(data) {
       row[getColIndexOrThrow_(detailsHeaders, 'Qty_Return_Requested', RETURN_DETAILS_SHEET)] = item.qty;
       row[getColIndexOrThrow_(detailsHeaders, 'Reason', RETURN_DETAILS_SHEET)] = item.reason;
       row[getColIndexOrThrow_(detailsHeaders, 'Slip_Status', RETURN_DETAILS_SHEET)] = 'Pending Approval';
-      detailsSheet.appendRow(row);
-      const newRow = detailsSheet.getLastRow();
-      detailsSheet.getRange(newRow, getColIndexOrThrow_(detailsHeaders, 'Return_ID', RETURN_DETAILS_SHEET) + 1).setNumberFormat('@STRING@');
-      detailsSheet.getRange(newRow, getColIndexOrThrow_(detailsHeaders, 'UCS_Code', RETURN_DETAILS_SHEET) + 1).setNumberFormat('@STRING@');
+      newDetailRows.push(row);
     });
+    appendRows_(detailsSheet, newDetailRows, [getColIndexOrThrow_(detailsHeaders, 'Return_ID', RETURN_DETAILS_SHEET), getColIndexOrThrow_(detailsHeaders, 'UCS_Code', RETURN_DETAILS_SHEET)]);
 
     logAudit(login.name, data.email, 'RAISE_RETURN',
       'Return ' + returnId + ' | Area ' + area + ' | ' + resolvedItems.length + ' item(s): ' +
@@ -4147,13 +4255,15 @@ function approveReturn(data) {
       }
     }
 
+    const cells = [];
     writes.forEach(function (w) {
       const sheetRow = w.rowIdx + 1;
-      detailsSheet.getRange(sheetRow, dCol['Qty_Approved'] + 1).setValue(w.qtyApproved);
-      detailsSheet.getRange(sheetRow, dCol['Approved_By'] + 1).setValue(login.name);
-      detailsSheet.getRange(sheetRow, dCol['Approved_Timestamp'] + 1).setValue(now);
-      detailsSheet.getRange(sheetRow, dCol['Slip_Status'] + 1).setValue('Completed');
+      cells.push({ row: sheetRow, col: dCol['Qty_Approved'], value: w.qtyApproved });
+      cells.push({ row: sheetRow, col: dCol['Approved_By'], value: login.name });
+      cells.push({ row: sheetRow, col: dCol['Approved_Timestamp'], value: now });
+      cells.push({ row: sheetRow, col: dCol['Slip_Status'], value: 'Completed' });
     });
+    writeCells_(detailsSheet, cells);
     headerSheet.getRange(headerRowIdx + 1, hCol['Return_Status'] + 1).setValue('Completed');
 
     logAudit(login.name, data.email, 'APPROVE_RETURN',
