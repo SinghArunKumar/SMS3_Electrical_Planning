@@ -192,6 +192,7 @@ function doPostInner_(e) {
 
     if (action === 'getPastVendors') { return getPastVendors(data); }
     if (action === 'getVendorSupplyHistory') { return getVendorSupplyHistory(data); }
+    if (action === 'getVendorFinderWarmup') { return getVendorFinderWarmup(data); }
 
     if (action === 'registerPushToken') { return registerPushToken(data); }
 
@@ -2471,35 +2472,23 @@ function canViewAreaUCSHistory(area, authorizedAreaString, roleString) {
  * back as poPrError rather than failing the whole request.
  */
 function getPoPrRowsForUcsCode_(ucsCode, fromDate, toDate) {
-  const extSpreadsheet = SpreadsheetApp.openById(PO_PR_SHEET_ID);
-  const extSheet = extSpreadsheet.getSheetByName(PO_PR_TAB_NAME);
-  if (!extSheet) return [];
-  const values = extSheet.getDataRange().getValues();
-  if (values.length < 2) return [];
-  const h = values[0];
-  const col = {};
-  h.forEach(function (hd, idx) { col[String(hd).trim()] = idx; });
-  const required = ['Mat Code', 'PR No.', 'PO No.', 'PO Dt', 'Qty', '105_Dt', 'V Code', 'V Name'];
-  required.forEach(function (c) {
-    if (!(c in col)) throw new Error('PO&PR sheet is missing expected column: "' + c + '"');
-  });
+  // PERFORMANCE: served from the cached compact copy of Material List (see
+  // getMaterialListLite_) instead of opening the external spreadsheet on
+  // every click. Same rows, same fields, same order as before; data is at
+  // most 10 minutes old, like the Procurement Dashboard.
+  const lite = getMaterialListLite_(false);
+  if (lite.tabMissing) return [];
+  if (lite.error) throw new Error(lite.error);
   const rows = [];
-  for (let i = 1; i < values.length; i++) {
-    const r = values[i];
-    if (String(r[col['Mat Code']]).trim() !== ucsCode) continue;
-    if (!withinDateRange_(r[col['105_Dt']], fromDate, toDate)) continue; // filtered by receipt date, matching Z04's convention
-    const poDateRaw = toMidnight(r[col['PO Dt']]);
+  lite.rows.forEach(function (r) {
+    if (r[MLL.CODE] !== ucsCode) return;
+    if (!withinDateRange_(r[MLL.RCPT_MS] ? new Date(r[MLL.RCPT_MS]) : '', fromDate, toDate)) return; // filtered by receipt date, matching Z04's convention
     rows.push({
-      prNo: r[col['PR No.']],
-      poNo: r[col['PO No.']],
-      poDate: formatDateOut(r[col['PO Dt']]),
-      poDateSort_: poDateRaw ? poDateRaw.getTime() : -Infinity, // used only to sort, stripped before returning
-      qty: Number(r[col['Qty']]) || 0,
-      receiptDate: formatDateOut(r[col['105_Dt']]),
-      vendorCode: r[col['V Code']],
-      vendorName: r[col['V Name']]
+      prNo: r[MLL.PR_NO], poNo: r[MLL.PO_NO], poDate: r[MLL.PO_DATE],
+      poDateSort_: r[MLL.PO_MS] === null ? -Infinity : r[MLL.PO_MS],
+      qty: r[MLL.QTY], receiptDate: r[MLL.RCPT_DATE], vendorCode: r[MLL.V_CODE], vendorName: r[MLL.V_NAME]
     });
-  }
+  });
   // Latest PO first -- undated rows (shouldn't normally happen) sort last, not first.
   rows.sort(function (a, b) { return b.poDateSort_ - a.poDateSort_; });
   rows.forEach(function (r) { delete r.poDateSort_; });
@@ -2514,18 +2503,27 @@ function getPoPrRowsForUcsCode_(ucsCode, fromDate, toDate) {
  * loads every UCS Code's full text up front), not from this endpoint.
  */
 function getUCSShortTextMap_() {
-  const ucsSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(UCS_SHEET);
-  const ucsValues = ucsSheet.getDataRange().getValues();
-  const map = {};
-  if (ucsValues.length < 1) return map;
-  const h = ucsValues[0];
-  const codeCol = getColIndexOrThrow_(h, 'UCS_Code', UCS_SHEET);
-  const shortCol = getColIndexOrThrow_(h, 'Short_Text', UCS_SHEET);
-  for (let i = 1; i < ucsValues.length; i++) {
-    const code = String(ucsValues[i][codeCol]).trim();
-    if (code) map[code] = ucsValues[i][shortCol];
-  }
-  return map;
+  // PERFORMANCE: was a full read of UCS_MasterList (including every Long
+  // Text) on EVERY PR/PO drill-down and Vendor Finder call. Now reads just
+  // the two columns it needs, and is cached under the data version -- so an
+  // added or edited UCS Code still shows on the very next call.
+  return cachedJson_('ucsShortMap', 600, function () {
+    const ucsSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(UCS_SHEET);
+    const lastRow = ucsSheet.getLastRow();
+    const map = {};
+    if (lastRow < 1) return map;
+    const h = ucsSheet.getRange(1, 1, 1, ucsSheet.getLastColumn()).getValues()[0];
+    const codeCol = getColIndexOrThrow_(h, 'UCS_Code', UCS_SHEET);
+    const shortCol = getColIndexOrThrow_(h, 'Short_Text', UCS_SHEET);
+    if (lastRow < 2) return map;
+    const codes = ucsSheet.getRange(2, codeCol + 1, lastRow - 1, 1).getValues();
+    const shorts = ucsSheet.getRange(2, shortCol + 1, lastRow - 1, 1).getValues();
+    for (let i = 0; i < codes.length; i++) {
+      const code = String(codes[i][0]).trim();
+      if (code) map[code] = shorts[i][0];
+    }
+    return map;
+  });
 }
 
 /**
@@ -2538,37 +2536,23 @@ function getUCSShortTextMap_() {
  * full paper trail, not a time-windowed view.
  */
 function getPoPrRowsByField_(filterColumnName, filterValue) {
-  const extSpreadsheet = SpreadsheetApp.openById(PO_PR_SHEET_ID);
-  const extSheet = extSpreadsheet.getSheetByName(PO_PR_TAB_NAME);
-  if (!extSheet) return [];
-  const values = extSheet.getDataRange().getValues();
-  if (values.length < 2) return [];
-  const h = values[0];
-  const col = {};
-  h.forEach(function (hd, idx) { col[String(hd).trim()] = idx; });
-  const required = ['Mat Code', 'PR No.', 'PO No.', 'PO Dt', 'Qty', '105_Dt', 'V Code', 'V Name'];
-  required.forEach(function (c) {
-    if (!(c in col)) throw new Error('PO&PR sheet is missing expected column: "' + c + '"');
-  });
-  const filterCol = col[filterColumnName];
+  // PERFORMANCE: served from the cached compact copy of Material List (see
+  // getMaterialListLite_). Same rows, same fields, same order as before.
+  const lite = getMaterialListLite_(false);
+  if (lite.tabMissing) return [];
+  if (lite.error) throw new Error(lite.error);
+  const idx = filterColumnName === 'PR No.' ? MLL.PR_NO : (filterColumnName === 'PO No.' ? MLL.PO_NO : (filterColumnName === 'Mat Code' ? MLL.CODE : -1));
+  if (idx === -1) throw new Error('Unsupported PO/PR filter column: ' + filterColumnName);
   const target = String(filterValue).trim();
   const rows = [];
-  for (let i = 1; i < values.length; i++) {
-    const r = values[i];
-    if (String(r[filterCol]).trim() !== target) continue;
-    const poDateRaw = toMidnight(r[col['PO Dt']]);
+  lite.rows.forEach(function (r) {
+    if (String(r[idx]).trim() !== target) return;
     rows.push({
-      ucsCode: String(r[col['Mat Code']]).trim(),
-      prNo: r[col['PR No.']],
-      poNo: r[col['PO No.']],
-      poDate: formatDateOut(r[col['PO Dt']]),
-      poDateSort_: poDateRaw ? poDateRaw.getTime() : -Infinity, // sort key only, stripped before returning
-      qty: Number(r[col['Qty']]) || 0,
-      receiptDate: formatDateOut(r[col['105_Dt']]),
-      vendorCode: r[col['V Code']],
-      vendorName: r[col['V Name']]
+      ucsCode: r[MLL.CODE], prNo: r[MLL.PR_NO], poNo: r[MLL.PO_NO], poDate: r[MLL.PO_DATE],
+      poDateSort_: r[MLL.PO_MS] === null ? -Infinity : r[MLL.PO_MS],
+      qty: r[MLL.QTY], receiptDate: r[MLL.RCPT_DATE], vendorCode: r[MLL.V_CODE], vendorName: r[MLL.V_NAME]
     });
-  }
+  });
   rows.sort(function (a, b) { return b.poDateSort_ - a.poDateSort_; }); // latest PO first
   rows.forEach(function (r) { delete r.poDateSort_; });
   return rows;
@@ -4291,9 +4275,18 @@ function getAreaReturns(data) {
 const VENDOR_TAB_NAME = 'Vendor';
 const VENDOR_FINDER_MAX_CODES = 25;
 const VENDOR_FINDER_ALLOWED_YEARS = [0, 1, 2, 3, 5, 10]; // 0 = all history
-const VENDOR_BUNDLE_CACHE_KEY = 'vfBundle_v2'; // bump whenever the bundle's shape/cleaning changes, so an old cached copy is never served
-const VENDOR_BUNDLE_TTL_SECONDS = 600;
+const VENDOR_BUNDLE_CACHE_KEY = 'vfBundle_v3'; // bump whenever the bundle's shape/cleaning changes, so an old cached copy is never served
+const ML_LITE_CACHE_KEY = 'mlLite_v1';
+const VENDOR_BUNDLE_TTL_SECONDS = 600; // both caches share this TTL -- they are always built together
 const VENDOR_HISTORY_MAX_ROWS = 500;
+
+// Compact copy of Material List used by every PR/PO drill-down in the app
+// (Planning Stock's PO & PR tab and PR/PO panels, Vendor Finder's PO/PR
+// panels). Built in the SAME external-sheet read as the vendor bundle, so
+// one openById() every 10 minutes serves all of them. Rows keep the exact
+// raw values the old per-click readers returned (all rows, same header
+// columns: "Qty" = the LAST "Qty" column i.e. PO-line qty, "PO Dt", "105_Dt", "V Code", "V Name").
+const MLL = { CODE: 0, PR_NO: 1, PO_NO: 2, PO_DATE: 3, PO_MS: 4, QTY: 5, RCPT_DATE: 6, RCPT_MS: 7, V_CODE: 8, V_NAME: 9 };
 
 // Compact row layout inside the cached bundle (arrays, not objects, to keep
 // the cached JSON small).
@@ -4362,17 +4355,48 @@ function vfStatus_(v) {
   return vfClean_(v);
 }
 
-/** Reads Material List + Vendor tab from the external sheet in one go. */
-function buildVendorBundle_() {
+/**
+ * ONE read of the external SMS3E PRs sheet builds and caches BOTH:
+ *   - the vendor bundle (Vendor Finder), and
+ *   - the compact Material List copy (every PR/PO drill-down in the app).
+ * Called only on a cache miss (at most once per 10 minutes per cache), or
+ * when someone clicks "refresh now" in Vendor Finder.
+ */
+function buildMaterialListCaches_() {
   const ext = SpreadsheetApp.openById(PO_PR_SHEET_ID);
-
-  // ---- Material List ----
+  const builtAt = Date.now();
   const mlSheet = ext.getSheetByName(PO_PR_TAB_NAME);
-  if (!mlSheet) throw new Error('Tab "' + PO_PR_TAB_NAME + '" not found in the PO/PR sheet.');
-  const values = mlSheet.getDataRange().getValues();
+  const values = mlSheet ? mlSheet.getDataRange().getValues() : [];
+
+  // ---- compact copy for PR/PO drill-downs (all rows, no font filter -- same as the old readers) ----
+  const lite = { rows: [], tabMissing: !mlSheet, error: null, builtAt: builtAt };
+  if (mlSheet && values.length >= 2) {
+    const col = {};
+    values[0].forEach(function (hd, idx) { col[String(hd).trim()] = idx; }); // LAST match wins on a repeated header (so "Qty" = the PO-line Qty) -- exactly what the old per-click readers did
+    const required = ['Mat Code', 'PR No.', 'PO No.', 'PO Dt', 'Qty', '105_Dt', 'V Code', 'V Name'];
+    const missing = required.filter(function (c) { return !(c in col); });
+    if (missing.length) {
+      lite.error = 'PO&PR sheet is missing expected column: "' + missing[0] + '"';
+    } else {
+      for (let i = 1; i < values.length; i++) {
+        const r = values[i];
+        const poMid = toMidnight(r[col['PO Dt']]);
+        const rcMid = toMidnight(r[col['105_Dt']]);
+        lite.rows.push([
+          String(r[col['Mat Code']]).trim(), r[col['PR No.']], r[col['PO No.']],
+          formatDateOut(r[col['PO Dt']]), poMid ? poMid.getTime() : null,
+          Number(r[col['Qty']]) || 0,
+          formatDateOut(r[col['105_Dt']]), rcMid ? rcMid.getTime() : null,
+          r[col['V Code']], r[col['V Name']]
+        ]);
+      }
+    }
+  }
+
+  // ---- vendor bundle ----
   const rows = [];
   const descByCode = {};
-  if (values.length >= 2) {
+  if (mlSheet && values.length >= 2) {
     const fonts = mlSheet.getRange(2, ML_COL.PR_NO + 1, values.length - 1, 1).getFontColors(); // one batch call
     for (let i = 1; i < values.length; i++) {
       const r = values[i];
@@ -4395,7 +4419,6 @@ function buildVendorBundle_() {
     }
   }
 
-  // ---- Vendor tab ----
   const vendors = {};
   let vendorTabMissing = false;
   const vSheet = ext.getSheetByName(VENDOR_TAB_NAME);
@@ -4415,33 +4438,98 @@ function buildVendorBundle_() {
         const o = {};
         Object.keys(colOf).forEach(function (k) {
           const c = colOf[k];
-          o[k] = c === -1 ? '' : vfClean_(vValues[i][c]);
+          const v = c === -1 ? '' : vfClean_(vValues[i][c]);
+          if (v) o[k] = v; // PERFORMANCE: empty fields not stored -- keeps the cached copy small; vfContact_ fills them back in
         });
         o.status = vfStatus_(o.status);
         vendors[code] = o;
       }
     }
   }
+  const bundle = { rows: rows, descByCode: descByCode, vendors: vendors, vendorTabMissing: vendorTabMissing, mlTabMissing: !mlSheet, builtAt: builtAt };
 
-  return { rows: rows, descByCode: descByCode, vendors: vendors, vendorTabMissing: vendorTabMissing, builtAt: Date.now() };
+  putCachedString_(ML_LITE_CACHE_KEY, JSON.stringify(lite), VENDOR_BUNDLE_TTL_SECONDS);
+  putCachedString_(VENDOR_BUNDLE_CACHE_KEY, JSON.stringify(bundle), VENDOR_BUNDLE_TTL_SECONDS);
+  return { bundle: bundle, lite: lite };
 }
 
 function getVendorBundle_(forceFresh) {
+  let bundle = null;
   if (!forceFresh) {
     const hit = getCachedString_(VENDOR_BUNDLE_CACHE_KEY);
-    if (hit !== null) {
-      try { return JSON.parse(hit); } catch (e) { /* corrupt -- rebuild below */ }
-    }
+    if (hit !== null) { try { bundle = JSON.parse(hit); } catch (e) { bundle = null; } }
   }
-  const bundle = buildVendorBundle_();
-  putCachedString_(VENDOR_BUNDLE_CACHE_KEY, JSON.stringify(bundle), VENDOR_BUNDLE_TTL_SECONDS);
+  if (!bundle) bundle = buildMaterialListCaches_().bundle;
+  if (bundle.mlTabMissing) throw new Error('Tab "' + PO_PR_TAB_NAME + '" not found in the PO/PR sheet.');
   return bundle;
+}
+
+function getMaterialListLite_(forceFresh) {
+  if (!forceFresh) {
+    const hit = getCachedString_(ML_LITE_CACHE_KEY);
+    if (hit !== null) { try { return JSON.parse(hit); } catch (e) { /* rebuild below */ } }
+  }
+  return buildMaterialListCaches_().lite;
+}
+
+/**
+ * Called by Vendor Finder the moment the page opens, in the background.
+ * Two jobs in one round trip:
+ *   1. Builds the caches while the user is still picking items, so the
+ *      first "Find vendors" (and every PR/PO click) is served from cache.
+ *   2. Returns the compact vendor list that powers "Search by vendor"
+ *      (name, part of a name, or vendor code) -- searched on the phone, so
+ *      typing never waits on the server.
+ * The list = every vendor with at least one PO line in Material List, plus
+ * any extra vendors listed only in the Vendor tab.
+ */
+function getVendorFinderWarmup(data) {
+  const check = requireSTOAccess(data);
+  if (!check.ok) return check.response;
+  try {
+    const cache = CacheService.getScriptCache();
+    if (!cache.get(ML_LITE_CACHE_KEY + '_n')) buildMaterialListCaches_(); // both caches are built together
+    const bundle = getVendorBundle_(false);
+    getUCSShortTextMap_(); // warm this one too
+
+    const agg = {};
+    bundle.rows.forEach(function (r) {
+      const vc = r[VFI.VCODE];
+      let a = agg[vc];
+      if (!a) a = agg[vc] = { name: r[VFI.VNAME], pos: {}, items: {}, lastPoMs: 0 };
+      a.pos[r[VFI.PO_NO]] = true;
+      a.items[r[VFI.CODE]] = true;
+      if (r[VFI.PO_DT] > a.lastPoMs) { a.lastPoMs = r[VFI.PO_DT]; if (r[VFI.VNAME]) a.name = r[VFI.VNAME]; }
+    });
+    const codes = {};
+    Object.keys(agg).forEach(function (vc) { codes[vc] = true; });
+    Object.keys(bundle.vendors).forEach(function (vc) { codes[vc] = true; });
+    const vendors = Object.keys(codes).map(function (vc) {
+      const m = bundle.vendors[vc] || null;
+      const a = agg[vc] || null;
+      return {
+        vendorCode: vc,
+        vendorName: (m && m.vendorName) || (a && a.name) || vc,
+        city: (m && m.city) || '',
+        vendorType: (m && m.vendorType) || '',
+        currency: (m && m.currency) || '',
+        status: m ? m.status : 'Unknown',
+        poCount: a ? Object.keys(a.pos).length : 0,
+        itemCount: a ? Object.keys(a.items).length : 0,
+        lastPoDate: a ? vfDateOut_(a.lastPoMs) : ''
+      };
+    });
+    vendors.sort(function (x, y) { return String(x.vendorName).localeCompare(String(y.vendorName)); });
+    return jsonResponse({ success: true, vendors: vendors, dataAsOfMs: bundle.builtAt });
+  } catch (e) {
+    return jsonResponse({ success: false, message: e.message });
+  }
 }
 
 function vfContact_(m) {
   if (!m) return null;
   const out = {};
-  Object.keys(VENDOR_TAB_FIELDS_).forEach(function (k) { if (k !== 'vendorName') out[k] = m[k]; });
+  Object.keys(VENDOR_TAB_FIELDS_).forEach(function (k) { if (k !== 'vendorName') out[k] = m[k] || ''; });
   return out;
 }
 
