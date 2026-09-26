@@ -20,7 +20,17 @@
   .vfPanelHead .vfGrow { flex: 1; }
   .vfPanelHead a { font-weight: normal; font-size: 12px; }
   #vfBasketPanel { border-color: #1a73e8; border-width: 2px; }
-  #vfSearch { font-size: 16px; padding: 11px; }
+  #vfSearch, #vfVSearch { font-size: 16px; padding: 11px; }
+  .vfModes { display: inline-flex; background: #f1f3f4; border-radius: 6px; padding: 3px; gap: 2px; }
+  .vf .vfMode { background: transparent; color: #444; padding: 6px 14px; font-size: 13.5px; font-weight: 600; border-radius: 4px; }
+  .vf .vfMode.active { background: #fff; color: #1557b0; box-shadow: 0 1px 2px rgba(0,0,0,0.15); }
+  .vfVRow { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border: 1px solid #eee; border-radius: 6px; margin-top: 6px; cursor: pointer; }
+  .vfVRow:hover { background: #f5f8ff; border-color: #d2e3fc; }
+  .vfVName { font-weight: 600; font-size: 13.5px; color: #1a73e8; overflow-wrap: anywhere; }
+  .vfPeriodBar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 4px 0 10px; font-size: 13px; }
+  .vfPeriodBar select { width: auto; padding: 5px 8px; font-size: 13px; }
+  .vfPeriodBar .vfGrow { flex: 1; }
+  .vfPeriodBar button { padding: 6px 12px; font-size: 13px; }
   .vfMeta { font-size: 12px; color: #666; margin-top: 6px; min-height: 16px; }
 
   .vfRow { display: flex; align-items: center; gap: 8px; padding: 9px 10px; border: 1px solid #eee; border-radius: 6px; margin-top: 6px; }
@@ -130,14 +140,25 @@
 
 <div class="vf" id="vfRoot">
   <h2>Vendor Finder</h2>
-  <div class="vfSub">Build a list of items for a budgetary enquiry and see every vendor who has supplied them before.</div>
+  <div class="vfSub">Build a list of items for a budgetary enquiry and see every vendor who has supplied them before, or look up a vendor to see everything they have supplied.</div>
 
   <div id="vfNotAuth" class="vfNotice" style="display:none;">Vendor Finder is available to Planning staff only (excluding Store Incharge). You can still look up materials in <b>Search UCS Codes</b>.</div>
 
   <div id="vfMain" style="display:none;">
     <div class="vfGrid">
       <section class="vfPanel" aria-labelledby="vfSearchHead">
-        <div class="vfPanelHead" id="vfSearchHead">Find an item</div>
+        <div class="vfPanelHead" id="vfSearchHead">
+          <div class="vfModes" role="tablist" aria-label="Search by">
+            <button type="button" class="vfMode active" data-action="mode" data-mode="item" role="tab" aria-selected="true">Find an item</button>
+            <button type="button" class="vfMode" data-action="mode" data-mode="vendor" role="tab" aria-selected="false">Find a vendor</button>
+          </div>
+        </div>
+        <div id="vfVendorMode" style="display:none;">
+          <input type="text" id="vfVSearch" placeholder="Vendor name, part of it, or vendor code" autocomplete="off" aria-describedby="vfVSearchMeta">
+          <div id="vfVSearchMeta" class="vfMeta"></div>
+          <div id="vfVResults"></div>
+        </div>
+        <div id="vfItemMode">
         <input type="text" id="vfSearch" placeholder="UCS code digits or any words, e.g. motor 0.18 kw" autocomplete="off" aria-describedby="vfSearchMeta">
         <div id="vfSearchMeta" class="vfMeta"></div>
         <div id="vfResults"></div>
@@ -146,6 +167,7 @@
           <textarea id="vfPasteText" rows="4" placeholder="14-digit codes separated by spaces, commas or new lines"></textarea>
           <button type="button" data-action="addPasted">Add these codes</button>
           <div id="vfPasteMsg" class="vfMeta"></div>
+        </div>
         </div>
       </section>
 
@@ -235,6 +257,12 @@
   let drillStack = [];
   let drillSeq = 0;
   let vendorHistCache = {}; // vendorCode -> getVendorSupplyHistory response, for this page visit
+  let vendorList = [];      // for 'Find a vendor': [{vendorCode, vendorName, city, status, poCount, itemCount, lastPoDate, haystack}]
+  let shownVendors = [];
+  let vSearchTimer = null;
+  const VENDOR_LIST_KEY = 'smsCache:vfVendors';
+  const MAX_VENDORS_SHOWN = 8;
+  let drillDataCache = {};  // 'po|<no>' / 'pr|<no>' -> response, so reopening a panel is instant
   let searchTimer = null;
   let toastTimer = null;
 
@@ -365,6 +393,8 @@
     clearResults();
     showMsg('');
     $('vfSearch').value = '';
+    $('vfVSearch').value = '';
+    runVendorSearch();
     $('vfPasteText').value = '';
     $('vfPasteMsg').textContent = '';
     $('vfPasteBox').style.display = 'none';
@@ -525,6 +555,68 @@
   }
   function closeInfo() { $('vfInfoOverlay').style.display = 'none'; infoCode = null; }
 
+  // ====== FIND A VENDOR (name, part of it, or vendor code) ======
+  function setMode(mode) {
+    document.querySelectorAll('#vfRoot .vfMode').forEach(function (b) {
+      const on = b.dataset.mode === mode;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    $('vfItemMode').style.display = mode === 'item' ? 'block' : 'none';
+    $('vfVendorMode').style.display = mode === 'vendor' ? 'block' : 'none';
+    (mode === 'vendor' ? $('vfVSearch') : $('vfSearch')).focus();
+    if (mode === 'vendor') runVendorSearch();
+  }
+
+  function setVendorList(list) {
+    vendorList = (list || []).map(function (v) {
+      return Object.assign({}, v, { haystack: (v.vendorName + ' ' + v.vendorCode + ' ' + (v.city || '')).toLowerCase() });
+    });
+  }
+
+  /** Warms the server caches AND brings back the vendor list, in one background call. */
+  async function loadVendorList() {
+    try {
+      const cached = JSON.parse(sessionStorage.getItem(VENDOR_LIST_KEY) || 'null');
+      if (cached && cached.length && !vendorList.length) { setVendorList(cached); runVendorSearch(); }
+    } catch (e) {}
+    try {
+      const d = await callApi({ action: 'getVendorFinderWarmup' });
+      if (d && d.success && d.vendors) {
+        setVendorList(d.vendors);
+        try { sessionStorage.setItem(VENDOR_LIST_KEY, JSON.stringify(d.vendors)); } catch (e) {}
+        runVendorSearch();
+      }
+    } catch (e) { /* background call -- the page still works without it */ }
+  }
+
+  function runVendorSearch() {
+    const tokens = $('vfVSearch').value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const res = $('vfVResults'), meta = $('vfVSearchMeta');
+    if (!vendorList.length) { res.innerHTML = ''; meta.textContent = 'Loading vendor list…'; shownVendors = []; return; }
+    if (!tokens.length) {
+      res.innerHTML = '';
+      shownVendors = [];
+      meta.textContent = 'Search ' + vendorList.length + ' vendors by any part of the name, the vendor code, or the city. Then pick a period to see what they supplied.';
+      return;
+    }
+    const matches = vendorList.filter(function (v) { return tokens.every(function (t) { return v.haystack.indexOf(t) !== -1; }); });
+    shownVendors = matches.slice(0, MAX_VENDORS_SHOWN);
+    if (!matches.length) { meta.textContent = ''; res.innerHTML = '<div class="vfEmpty">No vendor matches all of those words.</div>'; return; }
+    meta.textContent = matches.length > MAX_VENDORS_SHOWN
+      ? 'Showing ' + MAX_VENDORS_SHOWN + ' of ' + matches.length + ' vendors. Type more to narrow it down.'
+      : matches.length + (matches.length === 1 ? ' vendor. Press Enter to open it.' : ' vendors');
+    res.innerHTML = shownVendors.map(function (v) {
+      const stats = v.poCount
+        ? countLabel(v.poCount) + ' PO' + (v.poCount === 1 ? '' : 's') + ', ' + v.itemCount + ' item' + (v.itemCount === 1 ? '' : 's') + ', last PO ' + fmtDate(v.lastPoDate)
+        : 'No POs on record in Material List';
+      return '<div class="vfVRow" data-action="drill" data-type="vendor" data-key="' + esc(v.vendorCode) + '" role="button" tabindex="0">' +
+        '<div class="vfRowMain"><div class="vfVName">' + highlight(v.vendorName, tokens) + vendorBadges({ status: v.status, contact: { vendorType: v.vendorType, currency: v.currency } }) + '</div>' +
+        '<div class="vfSmall">' + highlight(v.vendorCode, tokens) + (v.city ? ', ' + highlight(v.city, tokens) : '') + ' &mdash; ' + esc(stats) + '</div></div>' +
+        '<button type="button" class="vfAddBtn" data-action="drill" data-type="vendor" data-key="' + esc(v.vendorCode) + '">View supplies</button></div>';
+    }).join('');
+  }
+
   // ====== FIND VENDORS ======
   function markStale() {
     if (!lastResult) return;
@@ -545,7 +637,7 @@
       if (!data.success) { showMsg(data.message || 'Could not load vendors.'); return; }
       lastResult = data;
       lastQueryKey = key;
-      if (refresh === true) vendorHistCache = {}; // fresh data asked for -- drop cached vendor histories too
+      if (refresh === true) { vendorHistCache = {}; drillDataCache = {}; loadVendorList(); } // fresh data asked for -- drop cached panel data, reload vendor list
       renderBasket();
       selected = {};
       data.vendors.forEach(function (v) { selected[v.vendorCode] = !isBlocked(v); });
@@ -878,13 +970,18 @@
         const d = await getVendorHistory(parts[0]);
         if (!drillAlive(panel)) return;
         if (!d.success) { B.innerHTML = '<div class="vfMsg error">' + esc(d.message || 'Could not load this vendor.') + '</div>'; return; }
-        if (panel.type === 'vendor') renderVendorDrill(d, T, S, B);
+        if (panel.type === 'vendor') renderVendorDrill(panel, d, T, S, B);
         else renderVendorPOsDrill(d, parts[1] || '', T, S, B);
         return;
       }
       // PO / PR -- the same backend actions Planning Stock's panels use.
-      const payload = panel.type === 'po' ? { action: 'getPOItems', poNo: panel.key } : { action: 'getPRItems', prNo: panel.key };
-      const d = await callApi(payload);
+      const cacheKey = panel.type + '|' + panel.key;
+      let d = drillDataCache[cacheKey];
+      if (!d) {
+        const payload = panel.type === 'po' ? { action: 'getPOItems', poNo: panel.key } : { action: 'getPRItems', prNo: panel.key };
+        d = await callApi(payload);
+        if (d.success) drillDataCache[cacheKey] = d;
+      }
       if (!drillAlive(panel)) return;
       if (!d.success) { B.innerHTML = '<div class="vfMsg error">' + esc(d.message || 'Could not load this detail.') + '</div>'; return; }
       const rows = (d.rows || []).map(function (r) { return Object.assign({ _cls: inBasket(String(r.ucsCode)) ? 'vfInBasket' : '' }, r); });
@@ -949,8 +1046,8 @@
     ];
   }
 
-  function renderVendorDrill(d, T, S, B) {
-    vendorHeader(d, T, S);
+  function renderVendorDrill(panel, d, T, S, B) {
+    panel.data = d;
     const c = d.contact;
     let h = '';
     if (c) {
@@ -970,15 +1067,74 @@
     } else {
       h += '<div class="vfNotice" style="margin-bottom:14px;">' + (d.vendorTabMissing ? 'The "Vendor" tab was not found in the SMS3E PRs sheet.' : 'This vendor is not in the Vendor tab of SMS3E PRs yet, so there are no contact details.') + '</div>';
     }
-    if (!d.rows.length) {
-      h += '<div class="vfEmpty">No purchase lines found for this vendor.</div>';
-    } else {
-      const rows = d.rows.map(function (r) { return Object.assign({ _cls: inBasket(r.ucsCode) ? 'vfInBasket' : '' }, r); });
-      h += '<div style="font-size:13px;margin-bottom:8px;">Everything this vendor has supplied, newest first. Click a PO No. for its PR and other lines.' +
-        (basket.length ? ' <span class="vfMuted">Rows marked blue are in your list.</span>' : '') + '</div>' + dataTable(rows, lineCols());
-      if (d.truncated) h += '<div class="vfSmall" style="margin-top:6px;">Showing the latest ' + d.rows.length + ' of ' + d.summary.lineCount + ' lines.</div>';
-    }
+    const since = String(panel.since !== undefined ? panel.since : 0);
+    h += '<div class="vfPeriodBar"><label>Supplied in <select data-action="vperiod" data-id="' + panel.id + '" aria-label="Period">' +
+      [['0', 'all history'], ['1', 'the last 1 year'], ['2', 'the last 2 years'], ['3', 'the last 3 years'], ['5', 'the last 5 years'], ['10', 'the last 10 years']]
+        .map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === since ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') +
+      '</select></label><span class="vfGrow"></span>' +
+      '<button type="button" class="secondary" data-action="vaddAll" data-id="' + panel.id + '" title="Put the items this vendor supplied in this period into your list, for a new enquiry">Add these items to your list</button></div>' +
+      '<div id="' + panel.id + 'P"></div>';
     B.innerHTML = h;
+    applyVendorPeriod(panel);
+  }
+
+  function cutoffIso(years) {
+    if (!years) return '';
+    const t = new Date();
+    t.setFullYear(t.getFullYear() - years);
+    return t.getFullYear() + '-' + String(t.getMonth() + 1).padStart(2, '0') + '-' + String(t.getDate()).padStart(2, '0');
+  }
+  function vendorRowsInPeriod(panel) {
+    const cut = cutoffIso(Number(panel.since) || 0);
+    return panel.data.rows.filter(function (r) { return !cut || (r.poDate && r.poDate >= cut); });
+  }
+
+  /** Re-draws the vendor panel's summary + table for the chosen period (no server call). */
+  function applyVendorPeriod(panel) {
+    const d = panel.data;
+    const T = $(panel.id + 'T'), S = $(panel.id + 'S'), P = $(panel.id + 'P');
+    if (!P) return;
+    const years = Number(panel.since) || 0;
+    const rows = vendorRowsInPeriod(panel);
+    const pos = {}, items = {};
+    let onTime = 0, judged = 0, last = '';
+    rows.forEach(function (r) {
+      pos[r.poNo] = true; items[r.ucsCode] = true;
+      if (r.delivery === 'On time' || r.delivery === 'Late') { judged++; if (r.delivery === 'On time') onTime++; }
+      if (r.poDate > last) last = r.poDate;
+    });
+    const nPo = Object.keys(pos).length, nItems = Object.keys(items).length;
+    T.innerHTML = esc(d.vendorName) + vendorBadges({ status: d.status, contact: d.contact });
+    S.textContent = d.vendorCode + ' -- ' + countLabel(nItems) + ' item' + (nItems === 1 ? '' : 's') + ' across ' + countLabel(nPo) + ' PO' + (nPo === 1 ? '' : 's') +
+      periodText(years) + (last ? ', last PO ' + fmtDate(last) : '') + (judged ? ', ' + Math.round(100 * onTime / judged) + '% on time' : '');
+    const addBtn = panel.el.querySelector('[data-action="vaddAll"]');
+    if (addBtn) addBtn.disabled = !nItems;
+    if (!rows.length) {
+      P.innerHTML = '<div class="vfEmpty">' + (d.rows.length ? 'Nothing supplied' + periodText(years) + '. Try a longer period.' : 'No purchase lines found for this vendor.') + '</div>';
+      return;
+    }
+    const shown = rows.map(function (r) { return Object.assign({ _cls: inBasket(r.ucsCode) ? 'vfInBasket' : '' }, r); });
+    P.innerHTML = '<div style="font-size:13px;margin-bottom:8px;">Newest first. Click a PO No. for its PR and other lines.' +
+      (basket.length ? ' <span class="vfMuted">Rows marked blue are in your list.</span>' : '') + '</div>' + dataTable(shown, lineCols()) +
+      (d.truncated ? '<div class="vfSmall" style="margin-top:6px;">Only the latest ' + d.rows.length + ' of ' + d.summary.lineCount + ' lines are loaded for this vendor.</div>' : '');
+  }
+
+  /** Vendor-led enquiry: put every item this vendor supplied in the chosen period into the list. */
+  function addVendorItems(panel) {
+    if (!panel || !panel.data) return;
+    const codes = vendorRowsInPeriod(panel).map(function (r) { return r.ucsCode; }).filter(function (c, i, a) { return a.indexOf(c) === i; });
+    let added = 0, dup = 0, unknown = 0, full = 0;
+    codes.forEach(function (c) {
+      const r = addCode(c);
+      if (r === 'ok') added++; else if (r === 'dup') dup++; else if (r === 'full') full++; else unknown++;
+    });
+    renderBasket(); runSearch(); markStale();
+    applyVendorPeriod(panel);
+    const parts = [added + ' added'];
+    if (dup) parts.push(dup + ' already in your list');
+    if (unknown) parts.push(unknown + ' not in UCS master');
+    if (full) parts.push(full + ' skipped: list is full (25)');
+    toast(parts.join(', ') + '.');
   }
 
   /** The POs behind a "Five (5)" count: this vendor x the items in the last search (or one item). */
@@ -1015,6 +1171,8 @@
     else if (a === 'refresh') findVendors(true);
     else if (a === 'tab') setTab(el.dataset.tab);
     else if (a === 'drill') openDrill(el.dataset.type, el.dataset.key);
+    else if (a === 'mode') setMode(el.dataset.mode);
+    else if (a === 'vaddAll') addVendorItems(drillStack.find(function (p) { return p.id === el.dataset.id; }));
     else if (a === 'closeDrill') closeDrill(el.dataset.id);
     else if (a === 'closeAllDrills') closeAllDrills();
     else if (a === 'copyEmails') copyEmails();
@@ -1036,7 +1194,7 @@
   // Links styled as buttons: Enter/Space should work from the keyboard too.
   root.addEventListener('keydown', function (e) {
     const el = e.target;
-    if (el.tagName === 'A' && el.dataset.action && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); handleAction(el); }
+    if ((el.tagName === 'A' || el.classList.contains('vfVRow')) && el.dataset.action && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); handleAction(el); }
   });
   root.addEventListener('change', function (e) {
     const el = e.target;
@@ -1044,8 +1202,13 @@
     else if (el.dataset.action === 'selAll') { visibleVendors().forEach(function (v) { selected[v.vendorCode] = el.checked; }); renderVendorTab(); updateSelCount(); }
     else if (el.id === 'vfHideBlocked') { if (lastResult) { renderVendorTab(); renderItemTab(); updateSelCount(); } }
     else if (el.id === 'vfSince') markStale();
+    else if (el.dataset.action === 'vperiod') { const panel = drillStack.find(function (p) { return p.id === el.dataset.id; }); if (panel) { panel.since = Number(el.value) || 0; applyVendorPeriod(panel); } }
   });
   $('vfSearch').addEventListener('input', function () { clearTimeout(searchTimer); searchTimer = setTimeout(runSearch, 120); });
+  $('vfVSearch').addEventListener('input', function () { clearTimeout(vSearchTimer); vSearchTimer = setTimeout(runVendorSearch, 100); });
+  $('vfVSearch').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && shownVendors.length === 1) { e.preventDefault(); openDrill('vendor', shownVendors[0].vendorCode); }
+  });
   $('vfSearch').addEventListener('keydown', function (e) {
     if (e.key === 'Enter' && shownMatches.length === 1 && !inBasket(shownMatches[0].ucsCode)) { e.preventDefault(); addFromSearch(shownMatches[0].ucsCode); }
   });
@@ -1060,6 +1223,10 @@
   if (!user.email) return;
   if (!canUse) { $('vfNotAuth').style.display = 'block'; return; }
   $('vfMain').style.display = 'block';
+  // Fire-and-forget: gets the server to read SMS3E PRs NOW, while the user
+  // is still picking items, so "Find vendors" and PO/PR clicks come straight
+  // from cache. Costs almost nothing when the cache is already warm.
+  loadVendorList();
   renderBasket();
   loadMaterials();
   if (basket.length && sessionStorage.getItem('smsCache:vendorBasketJustAdded')) {
