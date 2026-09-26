@@ -23,6 +23,9 @@
  *                     stock balances or triggers a Requisition on its own.
  * Phase 3, Feature 1: Edit STO (Qty + UCS Code) -- pre-lock correction of an already-raised STO,
  *                     locked automatically once Received info is filled OR a Z04 already exists.
+ * Phase 3, Feature 2: Vendor Finder -- read-only list of past vendors for up to 25 UCS Codes, for
+ *                     calling budgetary offers. Reads the "Material List" and "Vendor" tabs of the
+ *                     external SMS3E PRs sheet. Planning staff (excluding Store Incharge) only.
  *
  * IMPORTANT ONE-TIME SETUP FOR THIS VERSION: the LOCAL_ISSUE_SHEET tab's headers must read
  * EXACTLY (retype each cell from scratch, Bug Pattern 3):
@@ -186,6 +189,9 @@ function doPostInner_(e) {
     if (action === 'getPendingReturnApprovals') { return getPendingReturnApprovals(data); }
     if (action === 'approveReturn') { return approveReturn(data); }
     if (action === 'getAreaReturns') { return getAreaReturns(data); }
+
+    if (action === 'getPastVendors') { return getPastVendors(data); }
+    if (action === 'getVendorSupplyHistory') { return getVendorSupplyHistory(data); }
 
     if (action === 'registerPushToken') { return registerPushToken(data); }
 
@@ -4250,6 +4256,376 @@ function getAreaReturns(data) {
     });
   }
   return jsonResponse({ success: true, items: items });
+}
+
+
+// =====================================================================
+// ====== VENDOR FINDER (Phase 3, Feature 2) ======
+// =====================================================================
+// READ-ONLY. "Which vendors have supplied these items before?" -- for
+// calling budgetary offers. Two actions, both Planning staff excluding
+// Store Incharge (requireSTOAccess), both named get* so doPost treats them
+// as cache-neutral:
+//   getPastVendors          -- vendors who supplied any of up to 25 UCS Codes
+//   getVendorSupplyHistory  -- everything one vendor has ever supplied
+//
+// DATA SOURCES -- both tabs live in the SAME external "SMS3E PRs"
+// spreadsheet (PO_PR_SHEET_ID) that the Procurement Dashboard already reads:
+//   - "Material List": only rows with a PO No. and a numeric V Code count,
+//     and only black-font rows (same dummy-row rule as getPRPODashboardData,
+//     checked on the PR No. column).
+//   - "Vendor": contact details, currency, status. Read by HEADER NAME, so
+//     columns can be reordered or added freely; a missing column just reads
+//     blank (Notes / Other_Names_Seen are optional). Status is matched
+//     case-insensitively: Active (or blank) / Blocked / Blacklisted / Check.
+//     Email and Mobile cells may hold several values separated by commas,
+//     semicolons or spaces -- the page splits them. If the tab is missing,
+//     results still work, just without contact details.
+//
+// PERFORMANCE: both tabs are read in ONE openById() call and cached together
+// for 10 minutes (external sheet -- no write in this app can signal a change,
+// same TTL-only approach as the PR/PO dashboard). The page's "Refresh data"
+// link passes refresh:true to rebuild immediately, e.g. right after someone
+// adds emails in the Vendor tab. Nothing here runs unless someone opens
+// Vendor Finder, so it adds no load to any other page.
+const VENDOR_TAB_NAME = 'Vendor';
+const VENDOR_FINDER_MAX_CODES = 25;
+const VENDOR_FINDER_ALLOWED_YEARS = [0, 1, 2, 3, 5, 10]; // 0 = all history
+const VENDOR_BUNDLE_CACHE_KEY = 'vfBundle_v2'; // bump whenever the bundle's shape/cleaning changes, so an old cached copy is never served
+const VENDOR_BUNDLE_TTL_SECONDS = 600;
+const VENDOR_HISTORY_MAX_ROWS = 500;
+
+// Compact row layout inside the cached bundle (arrays, not objects, to keep
+// the cached JSON small).
+const VFI = { CODE: 0, VCODE: 1, VNAME: 2, PO_NO: 3, PO_DT: 4, PO_QTY: 5, RATE: 6, QTY105: 7, DT105: 8, DUE: 9 };
+
+// Vendor tab header -> field name sent to the page.
+const VENDOR_TAB_FIELDS_ = {
+  vendorName: 'V_Name', otherNames: 'Other_Names_Seen', vendorType: 'Vendor_Type', country: 'Country',
+  currency: 'Currency', address: 'Address', city: 'City', state: 'State', pin: 'PIN',
+  contactPerson: 'Contact_Person', designation: 'Designation', email: 'Email', altEmail: 'Alt_Email',
+  mobile: 'Mobile', landline: 'Landline', gstin: 'GSTIN', status: 'Status', notes: 'Notes'
+};
+
+/** Number from a cell that may be a number or a "5,248.98"-style string. */
+function vfNum_(v) {
+  if (typeof v === 'number') return isFinite(v) ? v : 0;
+  const n = Number(String(v === null || v === undefined ? '' : v).replace(/,/g, '').trim());
+  return isFinite(n) ? n : 0;
+}
+
+/** Midnight Date from a real Date cell, or from a dd-mm-yy / dd-mm-yyyy string. Null otherwise. */
+function vfDate_(v) {
+  if (v === '' || v === null || v === undefined) return null;
+  if (Object.prototype.toString.call(v) === '[object Date]') {
+    return isNaN(v.getTime()) ? null : new Date(v.getFullYear(), v.getMonth(), v.getDate());
+  }
+  const m = /^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{2}|\d{4})$/.exec(String(v).trim());
+  if (!m) return null;
+  let y = Number(m[3]);
+  if (y < 100) y += 2000;
+  const d = new Date(y, Number(m[2]) - 1, Number(m[1]));
+  return (d.getMonth() === Number(m[2]) - 1) ? d : null;
+}
+
+function vfIsBlackFont_(color) {
+  if (!color) return true; // blank = Sheets default = black
+  return String(color).toLowerCase() === '#000000';
+}
+
+function vfDateOut_(ms) {
+  return ms > 0 ? formatDateOut(new Date(ms)) : '';
+}
+
+/**
+ * Vendor-tab cell -> clean text. The tab was built from an SAP HTML export,
+ * which fills Address/City with non-breaking spaces (&nbsp;); left as-is they
+ * leak into copied emails, CSV exports and mailto links. Collapses every run
+ * of whitespace (incl. U+00A0) to one normal space.
+ */
+function vfClean_(v) {
+  if (v === null || v === undefined) return '';
+  return String(v).replace(/[\s\u00a0]+/g, ' ').trim();
+}
+
+/**
+ * Status is typed by hand, so match it case-insensitively: "active",
+ * "ACTIVE " etc. all mean Active. Blank = Active. Anything unrecognised is
+ * kept as typed and treated as "not Active" (greyed out, unticked).
+ */
+function vfStatus_(v) {
+  const s = vfClean_(v).toLowerCase();
+  if (!s || s === 'active') return 'Active';
+  if (s === 'blocked') return 'Blocked';
+  if (s === 'blacklisted') return 'Blacklisted';
+  if (s === 'check') return 'Check';
+  return vfClean_(v);
+}
+
+/** Reads Material List + Vendor tab from the external sheet in one go. */
+function buildVendorBundle_() {
+  const ext = SpreadsheetApp.openById(PO_PR_SHEET_ID);
+
+  // ---- Material List ----
+  const mlSheet = ext.getSheetByName(PO_PR_TAB_NAME);
+  if (!mlSheet) throw new Error('Tab "' + PO_PR_TAB_NAME + '" not found in the PO/PR sheet.');
+  const values = mlSheet.getDataRange().getValues();
+  const rows = [];
+  const descByCode = {};
+  if (values.length >= 2) {
+    const fonts = mlSheet.getRange(2, ML_COL.PR_NO + 1, values.length - 1, 1).getFontColors(); // one batch call
+    for (let i = 1; i < values.length; i++) {
+      const r = values[i];
+      if (!vfIsBlackFont_(fonts[i - 1][0])) continue; // dummy/masked row
+      const code = String(r[ML_COL.MAT_CODE]).trim();
+      const vCode = String(r[ML_COL.V_CODE]).trim().replace(/\.0+$/, '');
+      const poNo = String(r[ML_COL.PO_NO]).trim();
+      if (!code || !poNo || !/^\d+$/.test(vCode)) continue; // no PO / no vendor yet
+      if (!descByCode[code]) descByCode[code] = String(r[ML_COL.DESCRIPTION] || '').trim();
+      const poDt = vfDate_(r[ML_COL.PO_DT]);
+      const dt105 = vfDate_(r[ML_COL.DT_105]);
+      const due = vfDate_(r[ML_COL.ALT_DP]) || vfDate_(r[ML_COL.PO_DP]); // renegotiated date wins, same priority as the dashboard
+      let poQty = vfNum_(r[ML_COL.PO_QTY]);
+      if (!poQty) poQty = vfNum_(r[ML_COL.PO_LINE_QTY]);
+      rows.push([
+        code, vCode, String(r[ML_COL.V_NAME] || '').trim(), poNo,
+        poDt ? poDt.getTime() : 0, poQty, vfNum_(r[ML_COL.PO_RATE]), vfNum_(r[ML_COL.QTY_105]),
+        dt105 ? dt105.getTime() : 0, due ? due.getTime() : 0
+      ]);
+    }
+  }
+
+  // ---- Vendor tab ----
+  const vendors = {};
+  let vendorTabMissing = false;
+  const vSheet = ext.getSheetByName(VENDOR_TAB_NAME);
+  if (!vSheet) {
+    vendorTabMissing = true;
+  } else {
+    const vValues = vSheet.getDataRange().getValues();
+    if (vValues.length >= 1) {
+      const headers = vValues[0].map(function (h) { return String(h).trim(); });
+      const vcCol = headers.indexOf('V_Code');
+      if (vcCol === -1) throw new Error('The "' + VENDOR_TAB_NAME + '" tab is missing its "V_Code" column. Check the header row spelling.');
+      const colOf = {};
+      Object.keys(VENDOR_TAB_FIELDS_).forEach(function (k) { colOf[k] = headers.indexOf(VENDOR_TAB_FIELDS_[k]); });
+      for (let i = 1; i < vValues.length; i++) {
+        const code = vfClean_(vValues[i][vcCol]).replace(/\.0+$/, '');
+        if (!code) continue;
+        const o = {};
+        Object.keys(colOf).forEach(function (k) {
+          const c = colOf[k];
+          o[k] = c === -1 ? '' : vfClean_(vValues[i][c]);
+        });
+        o.status = vfStatus_(o.status);
+        vendors[code] = o;
+      }
+    }
+  }
+
+  return { rows: rows, descByCode: descByCode, vendors: vendors, vendorTabMissing: vendorTabMissing, builtAt: Date.now() };
+}
+
+function getVendorBundle_(forceFresh) {
+  if (!forceFresh) {
+    const hit = getCachedString_(VENDOR_BUNDLE_CACHE_KEY);
+    if (hit !== null) {
+      try { return JSON.parse(hit); } catch (e) { /* corrupt -- rebuild below */ }
+    }
+  }
+  const bundle = buildVendorBundle_();
+  putCachedString_(VENDOR_BUNDLE_CACHE_KEY, JSON.stringify(bundle), VENDOR_BUNDLE_TTL_SECONDS);
+  return bundle;
+}
+
+function vfContact_(m) {
+  if (!m) return null;
+  const out = {};
+  Object.keys(VENDOR_TAB_FIELDS_).forEach(function (k) { if (k !== 'vendorName') out[k] = m[k]; });
+  return out;
+}
+
+/**
+ * data: { email, password, ucsCodes: [up to 25 x 14-digit strings], sinceYears: 0|1|2|3|5|10, refresh?: true }
+ * One entry per vendor who has a PO line for ANY of the codes, with
+ * per-item detail so the page can draw the coverage matrix.
+ */
+function getPastVendors(data) {
+  const check = requireSTOAccess(data);
+  if (!check.ok) return check.response;
+
+  const raw = Array.isArray(data.ucsCodes) ? data.ucsCodes : null;
+  if (!raw || raw.length === 0) return jsonResponse({ success: false, message: 'Add at least one item to your list first.' });
+  if (raw.length > VENDOR_FINDER_MAX_CODES) return jsonResponse({ success: false, message: 'You can search at most ' + VENDOR_FINDER_MAX_CODES + ' items at a time.' });
+
+  const codes = [];
+  const seen = {};
+  for (let i = 0; i < raw.length; i++) {
+    const c = String(raw[i] === null || raw[i] === undefined ? '' : raw[i]).trim();
+    if (!/^[1-9]\d{13}$/.test(c)) return jsonResponse({ success: false, message: '"' + c.substring(0, 20) + '" is not a valid 14-digit UCS Code.' });
+    if (!seen[c]) { seen[c] = true; codes.push(c); }
+  }
+
+  const sinceYears = (data.sinceYears === undefined || data.sinceYears === null || data.sinceYears === '') ? 0 : Number(data.sinceYears);
+  if (VENDOR_FINDER_ALLOWED_YEARS.indexOf(sinceYears) === -1) return jsonResponse({ success: false, message: 'Invalid time period.' });
+  let cutoffMs = 0;
+  if (sinceYears > 0) {
+    const t = startOfToday();
+    cutoffMs = new Date(t.getFullYear() - sinceYears, t.getMonth(), t.getDate()).getTime();
+  }
+
+  try {
+    const bundle = getVendorBundle_(data.refresh === true);
+    const shortMap = getUCSShortTextMap_();
+    const vendors = {};
+    const itemsWithHistory = {};
+
+    bundle.rows.forEach(function (r) {
+      const code = r[VFI.CODE];
+      if (!seen[code]) return;
+      const poMs = r[VFI.PO_DT];
+      if (cutoffMs && (!poMs || poMs < cutoffMs)) return;
+
+      const vc = r[VFI.VCODE];
+      let v = vendors[vc];
+      if (!v) v = vendors[vc] = { mlName: r[VFI.VNAME], pos: {}, items: {}, lastPoMs: 0, onTime: 0, judged: 0, openLines: 0 };
+      v.pos[r[VFI.PO_NO]] = true;
+      if (poMs > v.lastPoMs) { v.lastPoMs = poMs; if (r[VFI.VNAME]) v.mlName = r[VFI.VNAME]; }
+
+      let it = v.items[code];
+      if (!it) it = v.items[code] = { pos: {}, totalQty: 0, lastPoMs: -1, lastRate: 0, lastPoNo: '' };
+      it.pos[r[VFI.PO_NO]] = true;
+      it.totalQty += r[VFI.PO_QTY];
+      if (poMs >= it.lastPoMs) { it.lastPoMs = poMs; it.lastRate = r[VFI.RATE]; it.lastPoNo = r[VFI.PO_NO]; }
+
+      const received = r[VFI.PO_QTY] > 0 && r[VFI.QTY105] >= r[VFI.PO_QTY];
+      if (received) {
+        if (r[VFI.DT105] && r[VFI.DUE]) { v.judged++; if (r[VFI.DT105] <= r[VFI.DUE]) v.onTime++; }
+      } else {
+        v.openLines++;
+      }
+      itemsWithHistory[code] = true;
+    });
+
+    const out = Object.keys(vendors).map(function (vc) {
+      const v = vendors[vc];
+      const m = bundle.vendors[vc] || null;
+      const perItem = {};
+      Object.keys(v.items).forEach(function (c) {
+        const it = v.items[c];
+        perItem[c] = { poCount: Object.keys(it.pos).length, totalQty: it.totalQty, lastPoDate: vfDateOut_(it.lastPoMs), lastRate: it.lastRate, lastPoNo: it.lastPoNo };
+      });
+      return {
+        vendorCode: vc,
+        vendorName: (m && m.vendorName) || v.mlName || vc,
+        inMaster: !!m,
+        status: m ? m.status : 'Unknown',
+        contact: vfContact_(m),
+        itemCount: Object.keys(v.items).length,
+        poCount: Object.keys(v.pos).length,
+        lastPoDate: vfDateOut_(v.lastPoMs),
+        lastPoMs_: v.lastPoMs,
+        onTimePct: v.judged ? Math.round(100 * v.onTime / v.judged) : null,
+        onTimeJudged: v.judged,
+        openLines: v.openLines,
+        perItem: perItem
+      };
+    });
+
+    // Most items covered first; within that, contactable (Active/Unknown)
+    // before Blocked/Check; then most recent supplier first.
+    function statusRank(s) { return (s === 'Active' || s === 'Unknown') ? 0 : 1; }
+    out.sort(function (a, b) {
+      if (b.itemCount !== a.itemCount) return b.itemCount - a.itemCount;
+      if (statusRank(a.status) !== statusRank(b.status)) return statusRank(a.status) - statusRank(b.status);
+      return b.lastPoMs_ - a.lastPoMs_;
+    });
+    out.forEach(function (v) { delete v.lastPoMs_; });
+
+    const items = codes.map(function (c) {
+      return { ucsCode: c, shortText: shortMap[c] || bundle.descByCode[c] || '', hasHistory: !!itemsWithHistory[c] };
+    });
+
+    return jsonResponse({
+      success: true, items: items, vendors: out, sinceYears: sinceYears,
+      vendorTabMissing: !!bundle.vendorTabMissing, dataAsOfMs: bundle.builtAt
+    });
+  } catch (e) {
+    return jsonResponse({ success: false, message: 'Could not load vendor history: ' + e.message });
+  }
+}
+
+/** data: { email, password, vendorCode } -- every PO line for one vendor, newest first. */
+function getVendorSupplyHistory(data) {
+  const check = requireSTOAccess(data);
+  if (!check.ok) return check.response;
+  const vc = String(data.vendorCode || '').trim();
+  if (!/^\d{6,12}$/.test(vc)) return jsonResponse({ success: false, message: 'Invalid vendor code.' });
+
+  try {
+    const bundle = getVendorBundle_(false);
+    const shortMap = getUCSShortTextMap_();
+    const m = bundle.vendors[vc] || null;
+
+    const matched = bundle.rows.filter(function (r) { return r[VFI.VCODE] === vc; });
+    matched.sort(function (a, b) { return b[VFI.PO_DT] - a[VFI.PO_DT]; });
+
+    let mlName = '';
+    const pos = {}, codes = {};
+    let onTime = 0, judged = 0;
+    matched.forEach(function (r) {
+      if (!mlName && r[VFI.VNAME]) mlName = r[VFI.VNAME];
+      pos[r[VFI.PO_NO]] = true;
+      codes[r[VFI.CODE]] = true;
+      const received = r[VFI.PO_QTY] > 0 && r[VFI.QTY105] >= r[VFI.PO_QTY];
+      if (received && r[VFI.DT105] && r[VFI.DUE]) { judged++; if (r[VFI.DT105] <= r[VFI.DUE]) onTime++; }
+    });
+
+    const rows = matched.slice(0, VENDOR_HISTORY_MAX_ROWS).map(function (r) {
+      const received = r[VFI.PO_QTY] > 0 && r[VFI.QTY105] >= r[VFI.PO_QTY];
+      let delivery = 'Open';
+      if (received) {
+        if (r[VFI.DT105] && r[VFI.DUE]) delivery = r[VFI.DT105] <= r[VFI.DUE] ? 'On time' : 'Late';
+        else delivery = 'Received';
+      } else if (r[VFI.QTY105] > 0) {
+        delivery = 'Partial';
+      }
+      return {
+        ucsCode: r[VFI.CODE],
+        shortText: shortMap[r[VFI.CODE]] || bundle.descByCode[r[VFI.CODE]] || '',
+        poNo: r[VFI.PO_NO],
+        poDate: vfDateOut_(r[VFI.PO_DT]),
+        poQty: r[VFI.PO_QTY],
+        rate: r[VFI.RATE],
+        qty105: r[VFI.QTY105],
+        receiptDate: vfDateOut_(r[VFI.DT105]),
+        dueDate: vfDateOut_(r[VFI.DUE]),
+        delivery: delivery
+      };
+    });
+
+    return jsonResponse({
+      success: true,
+      vendorCode: vc,
+      vendorName: (m && m.vendorName) || mlName || vc,
+      inMaster: !!m,
+      status: m ? m.status : 'Unknown',
+      contact: vfContact_(m),
+      vendorTabMissing: !!bundle.vendorTabMissing,
+      summary: {
+        poCount: Object.keys(pos).length,
+        itemCount: Object.keys(codes).length,
+        lineCount: matched.length,
+        lastPoDate: matched.length ? vfDateOut_(matched[0][VFI.PO_DT]) : '',
+        onTimePct: judged ? Math.round(100 * onTime / judged) : null,
+        onTimeJudged: judged
+      },
+      rows: rows,
+      truncated: matched.length > VENDOR_HISTORY_MAX_ROWS
+    });
+  } catch (e) {
+    return jsonResponse({ success: false, message: 'Could not load vendor history: ' + e.message });
+  }
 }
 
 
