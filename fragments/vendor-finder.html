@@ -71,6 +71,7 @@
   .vf th { background: #f8f9fa; text-align: left; padding: 8px; border-bottom: 1px solid #e0e0e0; white-space: nowrap; font-weight: 600; color: #444; }
   .vf td { padding: 8px; border-bottom: 1px solid #f0f0f0; vertical-align: top; }
   .vf tr:last-child td { border-bottom: none; }
+  .vf th.vfNum2 { text-align: right; } /* numeric headers line up with their right-aligned numbers */
   .vf th.vfItemCol, .vf td.vfItemCol { text-align: center; padding: 8px 4px; min-width: 26px; }
   .vf th.vfItemCol { cursor: help; color: #1557b0; }
   .vfTick { color: #1e7e34; font-weight: bold; cursor: help; }
@@ -106,7 +107,23 @@
   .vfDel { font-size: 11.5px; font-weight: 600; white-space: nowrap; }
   .vfDel.ok { color: #1e7e34; } .vfDel.late { color: #c5221f; } .vfDel.open { color: #7a5b00; } .vfDel.rcv { color: #555; }
 
-  #vfToast { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); background: #323232; color: #fff; padding: 10px 18px; border-radius: 6px; font-size: 13px; z-index: 60; opacity: 0; pointer-events: none; transition: opacity 0.2s; max-width: 90vw; text-align: center; }
+  /* ---- Drill-down panels: vendor -> POs -> PO -> PR -> UCS (stacked, cascaded) ---- */
+  .vfDrillBackdrop { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.35); z-index: 40; }
+  .vfDrill { display: flex; flex-direction: column; position: fixed; background: #fff; border-radius: 10px; box-shadow: 0 10px 40px rgba(0,0,0,0.35); width: 860px; max-width: calc(100vw - 32px); max-height: calc(100vh - 90px); z-index: 41; }
+  .vfDrillHead { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 14px 18px 10px; border-bottom: 1px solid #eee; flex-shrink: 0; }
+  .vfDrillKind { font-size: 11.5px; color: #777; }
+  .vfDrillTitle { font-size: 16px; font-weight: 600; color: #1f2430; overflow-wrap: anywhere; }
+  .vfDrillSub { font-size: 12px; color: #666; margin-top: 3px; }
+  .vfDrillBody { padding: 12px 18px 18px; overflow-y: auto; }
+  .vf .vfDrillBody table { font-size: 12.5px; }
+  .vf .vfDrillClose { padding: 5px 12px; font-size: 12px; flex-shrink: 0; }
+  .vfPoLink { font-weight: 600; white-space: nowrap; }
+  @media (max-width: 700px) {
+    .vfDrill { left: 12px !important; right: 12px; top: 12px !important; bottom: 12px; width: auto; max-width: none; max-height: none; transform: none !important; }
+  }
+  #vfInfoOverlay { z-index: 60; } /* long text always sits above any open panel */
+
+  #vfToast { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); background: #323232; color: #fff; padding: 10px 18px; border-radius: 6px; font-size: 13px; z-index: 70; opacity: 0; pointer-events: none; transition: opacity 0.2s; max-width: 90vw; text-align: center; }
   #vfToast.show { opacity: 1; }
   @media (prefers-reduced-motion: reduce) { #vfToast { transition: none; } }
 </style>
@@ -133,7 +150,7 @@
       </section>
 
       <section class="vfPanel" id="vfBasketPanel" aria-labelledby="vfBasketHead">
-        <div class="vfPanelHead"><span id="vfBasketHead">Your items</span> <span id="vfBasketCount" class="vfMuted"></span><span class="vfGrow"></span><a id="vfClearLink" data-action="clearBasket" role="button" tabindex="0">Clear all</a></div>
+        <div class="vfPanelHead"><span id="vfBasketHead">Your items</span> <span id="vfBasketCount" class="vfMuted"></span><span class="vfGrow"></span><a id="vfClearLink" data-action="startOver" role="button" tabindex="0" title="Clear your items and results and begin a new enquiry">Start over</a></div>
         <div id="vfBasket"></div>
         <div class="vfFindRow">
           <select id="vfSince" aria-label="Purchase history period">
@@ -155,9 +172,12 @@
       <div id="vfStale" class="vfStale" style="display:none;">Your item list or period has changed since this search. <a data-action="find" role="button" tabindex="0">Find vendors again</a></div>
       <div class="vfResHead">
         <div id="vfSummary"></div>
-        <div class="vfTabs" role="tablist">
-          <button type="button" class="vfTab active" data-action="tab" data-tab="vendor" role="tab">By vendor</button>
-          <button type="button" class="vfTab" data-action="tab" data-tab="item" role="tab">By item</button>
+        <div class="vfTabs">
+          <div role="tablist" style="display:flex;gap:4px;">
+            <button type="button" class="vfTab active" data-action="tab" data-tab="vendor" role="tab">By vendor</button>
+            <button type="button" class="vfTab" data-action="tab" data-tab="item" role="tab">By item</button>
+          </div>
+          <button type="button" class="secondary" data-action="startOver" style="padding:7px 14px;font-size:13px;margin-left:8px;" title="Clear your items and results and begin a new enquiry">Start over</button>
         </div>
       </div>
       <div class="vfToolbar">
@@ -188,16 +208,8 @@
     </div>
   </div>
 
-  <!-- Vendor supply-history popup -->
-  <div id="vfVendorOverlay" class="vfOverlay" data-overlay="vendor">
-    <div class="vfCard vfWide" role="dialog" aria-modal="true" aria-labelledby="vfVTitle">
-      <div class="vfCardHead">
-        <div><div id="vfVTitle"></div><div id="vfVSub" class="vfSmall"></div></div>
-        <button type="button" class="secondary" data-action="closeVendor">Close</button>
-      </div>
-      <div id="vfVBody"></div>
-    </div>
-  </div>
+  <!-- Drill-down panels are created here by openDrill(); kept inside #vfRoot so leaving the page removes them too -->
+  <div id="vfDrillBackdrop" class="vfDrillBackdrop" data-action="closeAllDrills"></div>
 
   <div id="vfToast" role="status" aria-live="polite"></div>
 </div>
@@ -220,7 +232,9 @@
   let activeTab = 'vendor';
   let selected = {};
   let infoCode = null;
-  let currentVendorCode = null;
+  let drillStack = [];
+  let drillSeq = 0;
+  let vendorHistCache = {}; // vendorCode -> getVendorSupplyHistory response, for this page visit
   let searchTimer = null;
   let toastTimer = null;
 
@@ -328,22 +342,43 @@
     saveBasket();
     renderBasket();
     runSearch();
-    markStale();
+    if (!basket.length) clearResults(); // nothing left to compare -- don't leave old results hanging around
+    else markStale();
   }
 
-  function clearBasket() {
-    if (!basket.length) return;
-    if (!confirm('Remove all ' + basket.length + ' item(s) from your list?')) return;
+  function clearResults() {
+    lastResult = null;
+    lastQueryKey = '';
+    selected = {};
+    closeAllDrills();
+    $('vfResultsSection').style.display = 'none';
+    $('vfStale').style.display = 'none';
+    $('vfTabVendor').innerHTML = '';
+    $('vfTabItem').innerHTML = '';
+  }
+
+  /** Clean slate: empty list, no results, empty search box -- ready for a new enquiry. */
+  function startOver() {
+    if ((basket.length || lastResult) && !confirm('Start over? This clears your ' + basket.length + ' item(s) and the vendor results.')) return;
     basket = [];
     saveBasket();
+    clearResults();
+    showMsg('');
+    $('vfSearch').value = '';
+    $('vfPasteText').value = '';
+    $('vfPasteMsg').textContent = '';
+    $('vfPasteBox').style.display = 'none';
+    $('vfSince').value = '0';
     renderBasket();
     runSearch();
-    markStale();
+    $('vfRoot').scrollIntoView({ block: 'start' });
+    $('vfSearch').focus();
+    toast('Cleared. Search for the first item of your new enquiry.');
   }
 
   function renderBasket() {
     $('vfBasketCount').textContent = basket.length + ' of ' + MAX_ITEMS;
-    $('vfClearLink').style.display = basket.length ? 'inline' : 'none';
+    $('vfClearLink').style.display = (basket.length || lastResult) ? 'inline' : 'none';
     $('vfFindBtn').disabled = basket.length === 0;
     const el = $('vfBasket');
     if (!basket.length) {
@@ -510,6 +545,8 @@
       if (!data.success) { showMsg(data.message || 'Could not load vendors.'); return; }
       lastResult = data;
       lastQueryKey = key;
+      if (refresh === true) vendorHistCache = {}; // fresh data asked for -- drop cached vendor histories too
+      renderBasket();
       selected = {};
       data.vendors.forEach(function (v) { selected[v.vendorCode] = !isBlocked(v); });
       $('vfResultsSection').style.display = 'block';
@@ -570,6 +607,21 @@
     return list.length ? list.map(function (p) { return '<a href="tel:' + esc(p.replace(/[^\d+]/g, '')) + '">' + esc(p) + '</a>'; }).join('<br>') : esc(str);
   }
 
+  // 5 -> "Five (5)": easier to read at a glance than a bare digit in a wide table.
+  const NUM_ONES = ['Zero', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+  const NUM_TENS = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+  function numWords(n) {
+    n = Math.floor(Number(n) || 0);
+    if (n < 20) return NUM_ONES[n];
+    if (n < 100) return NUM_TENS[Math.floor(n / 10)] + (n % 10 ? '-' + NUM_ONES[n % 10] : '');
+    if (n < 1000) return NUM_ONES[Math.floor(n / 100)] + ' Hundred' + (n % 100 ? ' ' + numWords(n % 100) : '');
+    return String(n);
+  }
+  function countLabel(n) { return numWords(n) + ' (' + n + ')'; }
+  function drillLink(type, key, label, cls) {
+    return '<a data-action="drill" data-type="' + type + '" data-key="' + esc(key) + '" role="button" tabindex="0"' + (cls ? ' class="' + cls + '"' : '') + '>' + esc(label) + '</a>';
+  }
+
   function periodText(y) { return y ? ' in the last ' + y + ' year' + (y === 1 ? '' : 's') : ''; }
 
   function renderResults() {
@@ -601,16 +653,16 @@
     const allSel = list.every(function (v) { return selected[v.vendorCode]; });
     let h = '<div class="vfTableWrap"><table><thead><tr>' +
       '<th><input type="checkbox" data-action="selAll" aria-label="Select all vendors"' + (allSel ? ' checked' : '') + '></th>' +
-      '<th>Vendor</th><th>Covers</th>';
+      '<th>Vendor</th><th class="vfNum2">Covers</th>';
     d.items.forEach(function (it, i) {
       h += '<th class="vfItemCol" title="' + esc('#' + (i + 1) + ' ' + it.ucsCode + ' ' + it.shortText) + '">' + (i + 1) + '</th>';
     });
-    h += '<th class="vfNum2">POs</th><th>Last PO</th><th title="Share of fully received lines delivered on or before the promised date">On time</th><th>Contact</th></tr></thead><tbody>';
+    h += '<th class="vfNum2" title="Click a count to see those POs">POs</th><th>Last PO</th><th class="vfNum2" title="Share of fully received lines delivered on or before the promised date">On time</th><th>Contact</th></tr></thead><tbody>';
     list.forEach(function (v) {
       const vc = esc(v.vendorCode);
       h += '<tr class="' + (isBlocked(v) ? 'vfDim' : '') + '">' +
         '<td><input type="checkbox" data-action="sel" data-vc="' + vc + '" aria-label="Select ' + esc(v.vendorName) + '"' + (selected[v.vendorCode] ? ' checked' : '') + '></td>' +
-        '<td><a data-action="vendor" data-vc="' + vc + '" role="button" tabindex="0">' + esc(v.vendorName) + '</a>' + vendorBadges(v) +
+        '<td>' + drillLink('vendor', v.vendorCode, v.vendorName) + vendorBadges(v) +
         '<div class="vfSmall">' + vc + (v.contact && v.contact.city ? ', ' + esc(v.contact.city) : '') + '</div></td>' +
         '<td class="vfNum2"><b>' + v.itemCount + '</b> / ' + n + '</td>';
       d.items.forEach(function (it, i) {
@@ -619,7 +671,7 @@
           ? '<td class="vfItemCol"><span class="vfTick" title="' + esc('#' + (i + 1) + ' ' + it.ucsCode + ': last PO ' + fmtDate(p.lastPoDate) + ', rate ' + fmtNum(p.lastRate) + ', ' + p.poCount + ' PO(s), total qty ' + fmtNum(p.totalQty)) + '">&#10003;</span></td>'
           : '<td class="vfItemCol"><span class="vfDot">&middot;</span></td>';
       });
-      h += '<td class="vfNum2">' + v.poCount + '</td>' +
+      h += '<td class="vfNum2">' + drillLink('vendorPOs', v.vendorCode, countLabel(v.poCount), 'vfPoLink') + '</td>' +
         '<td style="white-space:nowrap;">' + esc(fmtDate(v.lastPoDate)) + '</td>' +
         '<td class="vfNum2">' + (v.onTimePct === null ? '<span class="vfMuted">&mdash;</span>' : v.onTimePct + '%<div class="vfSmall">of ' + v.onTimeJudged + '</div>') + '</td>' +
         '<td>' + contactCell(v) + '</td></tr>';
@@ -641,9 +693,9 @@
         body = '<div class="vfTableWrap"><table><thead><tr><th>Vendor</th><th>Last PO</th><th>Last PO No.</th><th class="vfNum2">Last rate</th><th class="vfNum2">Total qty</th><th class="vfNum2">POs</th><th>Contact</th></tr></thead><tbody>' +
           rows.map(function (v) {
             const p = v.perItem[it.ucsCode];
-            return '<tr class="' + (isBlocked(v) ? 'vfDim' : '') + '"><td><a data-action="vendor" data-vc="' + esc(v.vendorCode) + '" role="button" tabindex="0">' + esc(v.vendorName) + '</a>' + vendorBadges(v) + '</td>' +
-              '<td style="white-space:nowrap;">' + esc(fmtDate(p.lastPoDate)) + '</td><td>' + esc(p.lastPoNo) + '</td>' +
-              '<td class="vfNum2">' + fmtNum(p.lastRate) + '</td><td class="vfNum2">' + fmtNum(p.totalQty) + '</td><td class="vfNum2">' + p.poCount + '</td>' +
+            return '<tr class="' + (isBlocked(v) ? 'vfDim' : '') + '"><td>' + drillLink('vendor', v.vendorCode, v.vendorName) + vendorBadges(v) + '</td>' +
+              '<td style="white-space:nowrap;">' + esc(fmtDate(p.lastPoDate)) + '</td><td>' + drillLink('po', p.lastPoNo, p.lastPoNo) + '</td>' +
+              '<td class="vfNum2">' + fmtNum(p.lastRate) + '</td><td class="vfNum2">' + fmtNum(p.totalQty) + '</td><td class="vfNum2">' + drillLink('vendorPOs', v.vendorCode + '|' + it.ucsCode, countLabel(p.poCount), 'vfPoLink') + '</td>' +
               '<td>' + contactCell(v) + '</td></tr>';
           }).join('') + '</tbody></table></div>';
       }
@@ -733,72 +785,219 @@
     toast('Exported ' + list.length + ' vendor' + (list.length === 1 ? '' : 's'));
   }
 
-  // ====== VENDOR SUPPLY-HISTORY POPUP ======
+  // ====== DRILL-DOWN PANELS ======
+  // Same idea as Planning Stock's PR/PO/UCS panels: every PO No., PR No.,
+  // UCS Code and vendor name inside a panel is itself clickable, opening
+  // another panel on top (vendor -> its POs -> one PO -> its PR -> an item).
+  // Panels cascade, re-clicking an open one brings it to the front, Escape
+  // or Close pops them one at a time, and clicking the dim background closes all.
+  const DELIVERY_CLASS = { 'On time': 'ok', 'Late': 'late', 'Open': 'open', 'Partial': 'open', 'Received': 'rcv' };
+  const DRILL_KIND = { vendor: 'Vendor', vendorPOs: 'Purchase orders', po: 'Purchase order', pr: 'Purchase requisition', ucs: 'Item' };
+
   function contactField(label, value, html) {
     if (!value) return '';
     return '<div><div class="vfLabel">' + esc(label) + '</div><div class="vfValue">' + (html || esc(value)) + '</div></div>';
   }
 
-  async function openVendor(vc) {
-    currentVendorCode = vc;
-    $('vfVTitle').textContent = 'Loading…';
-    $('vfVSub').textContent = vc;
-    $('vfVBody').innerHTML = '';
-    $('vfVendorOverlay').style.display = 'flex';
-    $('vfVendorOverlay').querySelector('.vfCardHead button').focus();
+  function dataTable(rows, cols) {
+    return '<div class="vfTableWrap"><table><thead><tr>' +
+      cols.map(function (c) { return '<th' + (c.num ? ' class="vfNum2"' : '') + '>' + esc(c.label) + '</th>'; }).join('') +
+      '</tr></thead><tbody>' +
+      rows.map(function (r) {
+        return '<tr' + (r._cls ? ' class="' + r._cls + '"' : '') + '>' + cols.map(function (c) {
+          const v = c.html ? c.html(r) : esc(r[c.key] === null || r[c.key] === undefined || r[c.key] === '' ? '\u2014' : r[c.key]);
+          return '<td' + (c.num ? ' class="vfNum2"' : (c.nowrap ? ' style="white-space:nowrap;"' : '')) + '>' + v + '</td>';
+        }).join('') + '</tr>';
+      }).join('') + '</tbody></table></div>';
+  }
+  function deliveryHtml(r) {
+    return '<span class="vfDel ' + (DELIVERY_CLASS[r.delivery] || '') + '"' + (r.dueDate ? ' title="Promised ' + esc(fmtDate(r.dueDate)) + '"' : '') + '>' + esc(r.delivery || '') + '</span>';
+  }
+
+  function openDrill(type, key) {
+    if (!type || !key) return;
+    const existing = drillStack.find(function (p) { return p.type === type && p.key === key; });
+    if (existing) { drillToFront(existing); return; }
+    const id = 'vfDrill' + (++drillSeq);
+    const depth = drillStack.length;
+    const el = document.createElement('div');
+    el.className = 'vfDrill';
+    el.id = id;
+    el.setAttribute('role', 'dialog');
+    el.setAttribute('aria-modal', 'true');
+    el.style.top = (60 + depth * 26) + 'px';
+    if (depth === 0) { el.style.left = '50%'; el.style.transform = 'translateX(-50%)'; }
+    else el.style.left = 'calc(50% - 430px + ' + (depth * 26) + 'px)';
+    el.innerHTML =
+      '<div class="vfDrillHead"><div style="min-width:0;"><div class="vfDrillKind">' + esc(DRILL_KIND[type] || '') + '</div>' +
+      '<div class="vfDrillTitle" id="' + id + 'T"></div><div class="vfDrillSub" id="' + id + 'S"></div></div>' +
+      '<button type="button" class="secondary vfDrillClose" data-action="closeDrill" data-id="' + id + '">Close</button></div>' +
+      '<div class="vfDrillBody" id="' + id + 'B">Loading…</div>';
+    $('vfRoot').appendChild(el);
+    $('vfDrillBackdrop').style.display = 'block';
+    const panel = { id: id, type: type, key: key, el: el };
+    drillStack.push(panel);
+    drillToFront(panel);
+    $(id + 'T').textContent = key.split('|')[0];
+    el.querySelector('.vfDrillClose').focus();
+    loadDrill(panel);
+  }
+  function drillToFront(panel) {
+    drillStack = drillStack.filter(function (p) { return p.id !== panel.id; });
+    drillStack.push(panel);
+    drillStack.forEach(function (p, i) { p.el.style.zIndex = 41 + i; });
+  }
+  function closeDrill(id) {
+    const panel = drillStack.find(function (p) { return p.id === id; });
+    if (!panel) return;
+    panel.el.remove();
+    drillStack = drillStack.filter(function (p) { return p.id !== id; });
+    if (!drillStack.length) $('vfDrillBackdrop').style.display = 'none';
+  }
+  function closeAllDrills() {
+    drillStack.forEach(function (p) { p.el.remove(); });
+    drillStack = [];
+    const bd = $('vfDrillBackdrop');
+    if (bd) bd.style.display = 'none';
+  }
+  function drillAlive(panel) { return !!document.getElementById(panel.id); }
+
+  async function getVendorHistory(vc) {
+    if (vendorHistCache[vc]) return vendorHistCache[vc];
+    const d = await callApi({ action: 'getVendorSupplyHistory', vendorCode: vc });
+    if (d.success) vendorHistCache[vc] = d;
+    return d;
+  }
+
+  async function loadDrill(panel) {
+    const T = $(panel.id + 'T'), S = $(panel.id + 'S'), B = $(panel.id + 'B');
     try {
-      const d = await callApi({ action: 'getVendorSupplyHistory', vendorCode: vc });
-      if (currentVendorCode !== vc) return; // closed or switched while loading
-      if (!d.success) { $('vfVTitle').textContent = 'Vendor ' + vc; $('vfVBody').innerHTML = '<div class="vfMsg error">' + esc(d.message || 'Could not load this vendor.') + '</div>'; return; }
-      $('vfVTitle').textContent = d.vendorName;
-      $('vfVSub').innerHTML = esc(d.vendorCode) + vendorBadges({ status: d.status, contact: d.contact });
-
-      const c = d.contact;
-      let h = '';
-      if (c) {
-        const addr = [c.address, c.city, c.state, c.pin].filter(Boolean).join(', ');
-        h += '<div class="vfContactGrid">' +
-          contactField('Contact person', c.contactPerson + (c.designation ? ' (' + c.designation + ')' : '')) +
-          contactField('Email', c.email, c.email ? emailLinks(c.email) : '') +
-          contactField('Alternate email', c.altEmail, c.altEmail ? emailLinks(c.altEmail) : '') +
-          contactField('Mobile', c.mobile, c.mobile ? phoneLinks(c.mobile) : '') +
-          contactField('Landline', c.landline, c.landline ? phoneLinks(c.landline) : '') +
-          contactField('Address', addr) +
-          contactField('Country and currency', [c.country, c.currency].filter(Boolean).join(', ')) +
-          contactField('GSTIN', c.gstin) + contactField('Notes', c.notes) +
-          contactField('Also known as', c.otherNames) +
-          '</div>';
-        if (!c.email && !c.mobile && !c.contactPerson) h += '<div class="vfWarn" style="margin:-6px 0 12px;">No contact details yet. Add them in the Vendor tab of SMS3E PRs.</div>';
-      } else {
-        h += '<div class="vfNotice" style="margin-bottom:14px;">' + (d.vendorTabMissing ? 'The "Vendor" tab was not found in the SMS3E PRs sheet.' : 'This vendor is not in the Vendor tab of SMS3E PRs yet, so there are no contact details.') + '</div>';
+      if (panel.type === 'ucs') { renderUcsDrill(panel, T, S, B); return; }
+      if (panel.type === 'vendor' || panel.type === 'vendorPOs') {
+        const parts = panel.key.split('|');
+        const d = await getVendorHistory(parts[0]);
+        if (!drillAlive(panel)) return;
+        if (!d.success) { B.innerHTML = '<div class="vfMsg error">' + esc(d.message || 'Could not load this vendor.') + '</div>'; return; }
+        if (panel.type === 'vendor') renderVendorDrill(d, T, S, B);
+        else renderVendorPOsDrill(d, parts[1] || '', T, S, B);
+        return;
       }
-
-      const s = d.summary;
-      h += '<div style="font-size:14px;margin-bottom:8px;"><b>' + s.itemCount + '</b> item' + (s.itemCount === 1 ? '' : 's') + ' across <b>' + s.poCount + '</b> PO' + (s.poCount === 1 ? '' : 's') +
-        (s.lastPoDate ? ', last PO ' + esc(fmtDate(s.lastPoDate)) : '') +
-        (s.onTimePct !== null ? ', ' + s.onTimePct + '% delivered on time (' + s.onTimeJudged + ' lines)' : '') + '.' +
-        (basket.length ? ' <span class="vfMuted">Rows marked blue are in your list.</span>' : '') + '</div>';
-
-      if (!d.rows.length) {
-        h += '<div class="vfEmpty">No purchase lines found for this vendor.</div>';
+      // PO / PR -- the same backend actions Planning Stock's panels use.
+      const payload = panel.type === 'po' ? { action: 'getPOItems', poNo: panel.key } : { action: 'getPRItems', prNo: panel.key };
+      const d = await callApi(payload);
+      if (!drillAlive(panel)) return;
+      if (!d.success) { B.innerHTML = '<div class="vfMsg error">' + esc(d.message || 'Could not load this detail.') + '</div>'; return; }
+      const rows = (d.rows || []).map(function (r) { return Object.assign({ _cls: inBasket(String(r.ucsCode)) ? 'vfInBasket' : '' }, r); });
+      const n = rows.length;
+      if (panel.type === 'po') {
+        const v = rows.find(function (r) { return r.vendorName; });
+        T.textContent = 'PO ' + panel.key;
+        S.innerHTML = countLabel(n) + ' line' + (n === 1 ? '' : 's') + (rows[0] && rows[0].poDate ? ', dated ' + esc(fmtDate(rows[0].poDate)) : '') +
+          (v ? ', vendor ' + drillLink('vendor', String(v.vendorCode), v.vendorName) : '');
       } else {
-        const delClass = { 'On time': 'ok', 'Late': 'late', 'Open': 'open', 'Partial': 'open', 'Received': 'rcv' };
-        h += '<div class="vfTableWrap"><table><thead><tr><th>UCS Code</th><th>Item</th><th>PO No.</th><th>PO date</th><th class="vfNum2">PO qty</th><th class="vfNum2">Rate</th><th class="vfNum2">Received</th><th>Received on</th><th>Delivery</th></tr></thead><tbody>' +
-          d.rows.map(function (r) {
-            return '<tr class="' + (inBasket(r.ucsCode) ? 'vfInBasket' : '') + '"><td class="vfCode" style="white-space:nowrap;">' + esc(r.ucsCode) + '</td><td>' + esc(r.shortText) + '</td>' +
-              '<td>' + esc(r.poNo) + '</td><td style="white-space:nowrap;">' + esc(fmtDate(r.poDate)) + '</td>' +
-              '<td class="vfNum2">' + fmtNum(r.poQty) + '</td><td class="vfNum2">' + fmtNum(r.rate) + '</td><td class="vfNum2">' + fmtNum(r.qty105) + '</td>' +
-              '<td style="white-space:nowrap;">' + esc(fmtDate(r.receiptDate)) + '</td>' +
-              '<td><span class="vfDel ' + (delClass[r.delivery] || '') + '"' + (r.dueDate ? ' title="Promised ' + esc(fmtDate(r.dueDate)) + '"' : '') + '>' + esc(r.delivery) + '</span></td></tr>';
-          }).join('') + '</tbody></table></div>';
-        if (d.truncated) h += '<div class="vfSmall" style="margin-top:6px;">Showing the latest ' + d.rows.length + ' of ' + s.lineCount + ' lines.</div>';
+        T.textContent = 'PR ' + panel.key;
+        S.textContent = countLabel(n) + ' line' + (n === 1 ? '' : 's') + ' under this PR';
       }
-      $('vfVBody').innerHTML = h;
+      if (!n) { B.innerHTML = '<div class="vfEmpty">No line items found.</div>'; return; }
+      const cols = [
+        { label: 'UCS Code', nowrap: true, html: function (r) { return drillLink('ucs', String(r.ucsCode), r.ucsCode); } },
+        { label: 'Item', key: 'itemDescription' }
+      ];
+      if (panel.type === 'po') cols.push({ label: 'PR No.', nowrap: true, html: function (r) { return r.prNo ? drillLink('pr', String(r.prNo), r.prNo) : '\u2014'; } });
+      else cols.push({ label: 'PO No.', nowrap: true, html: function (r) { return r.poNo ? drillLink('po', String(r.poNo), r.poNo) : '<span class="vfMuted">No PO yet</span>'; } });
+      cols.push({ label: 'PO date', nowrap: true, html: function (r) { return esc(fmtDate(r.poDate)) || '\u2014'; } });
+      cols.push({ label: 'Qty', num: true, html: function (r) { return fmtNum(r.qty); } });
+      cols.push({ label: 'Received on', nowrap: true, html: function (r) { return esc(fmtDate(r.receiptDate)) || '\u2014'; } });
+      if (panel.type === 'pr') cols.push({ label: 'Vendor', html: function (r) { return r.vendorName ? drillLink('vendor', String(r.vendorCode), r.vendorName) : '\u2014'; } });
+      B.innerHTML = dataTable(rows, cols) + (rows.some(function (r) { return r._cls; }) ? '<div class="vfSmall" style="margin-top:6px;">Rows marked blue are in your list.</div>' : '');
     } catch (e) {
-      if (currentVendorCode === vc) $('vfVBody').innerHTML = '<div class="vfMsg error">Could not reach the server.</div>';
+      if (drillAlive(panel)) B.innerHTML = '<div class="vfMsg error">Could not reach the server.</div>';
     }
   }
-  function closeVendor() { $('vfVendorOverlay').style.display = 'none'; currentVendorCode = null; }
+
+  function renderUcsDrill(panel, T, S, B) {
+    const m = byCode[panel.key];
+    T.textContent = panel.key;
+    if (!m) { B.innerHTML = '<div class="vfNotice">This code is not in UCS_MasterList. It may have been bought before it was formally UCS-coded.</div>'; return; }
+    S.innerHTML = m.unit ? '<span class="vfUnit" style="margin-left:0;">' + esc(m.unit) + '</span>' : '';
+    const added = inBasket(panel.key);
+    B.innerHTML = '<div class="vfLabel" style="margin-top:0;">Short text</div><div class="vfValue">' + esc(m.shortText) + '</div>' +
+      '<div class="vfLabel">Long text</div><div class="vfValue">' + (m.longText ? esc(m.longText) : '<span class="vfMuted">(no long text recorded)</span>') + '</div>' +
+      '<div class="vfCardBtns" style="justify-content:flex-start;">' +
+      (added ? '<button type="button" disabled style="flex:0 0 auto;">Already in your list</button>'
+        : '<button type="button" data-action="add" data-code="' + esc(panel.key) + '" style="flex:0 0 auto;"' + (basket.length >= MAX_ITEMS ? ' disabled' : '') + '>Add to your list</button>') + '</div>';
+  }
+
+  function vendorHeader(d, T, S) {
+    T.innerHTML = esc(d.vendorName) + vendorBadges({ status: d.status, contact: d.contact });
+    const s = d.summary;
+    S.textContent = d.vendorCode + ' -- ' + countLabel(s.itemCount) + ' item' + (s.itemCount === 1 ? '' : 's') + ' across ' + countLabel(s.poCount) + ' PO' + (s.poCount === 1 ? '' : 's') +
+      (s.lastPoDate ? ', last PO ' + fmtDate(s.lastPoDate) : '') + (s.onTimePct !== null ? ', ' + s.onTimePct + '% on time' : '');
+  }
+
+  function lineCols() {
+    return [
+      { label: 'PO No.', nowrap: true, html: function (r) { return drillLink('po', r.poNo, r.poNo); } },
+      { label: 'PO date', nowrap: true, html: function (r) { return esc(fmtDate(r.poDate)) || '\u2014'; } },
+      { label: 'UCS Code', nowrap: true, html: function (r) { return drillLink('ucs', r.ucsCode, r.ucsCode); } },
+      { label: 'Item', key: 'shortText' },
+      { label: 'PO qty', num: true, html: function (r) { return fmtNum(r.poQty); } },
+      { label: 'Rate', num: true, html: function (r) { return fmtNum(r.rate); } },
+      { label: 'Received', num: true, html: function (r) { return fmtNum(r.qty105); } },
+      { label: 'Received on', nowrap: true, html: function (r) { return esc(fmtDate(r.receiptDate)) || '\u2014'; } },
+      { label: 'Delivery', html: deliveryHtml }
+    ];
+  }
+
+  function renderVendorDrill(d, T, S, B) {
+    vendorHeader(d, T, S);
+    const c = d.contact;
+    let h = '';
+    if (c) {
+      const addr = [c.address, c.city, c.state, c.pin].filter(Boolean).join(', ');
+      h += '<div class="vfContactGrid">' +
+        contactField('Contact person', c.contactPerson + (c.designation ? ' (' + c.designation + ')' : '')) +
+        contactField('Email', c.email, c.email ? emailLinks(c.email) : '') +
+        contactField('Alternate email', c.altEmail, c.altEmail ? emailLinks(c.altEmail) : '') +
+        contactField('Mobile', c.mobile, c.mobile ? phoneLinks(c.mobile) : '') +
+        contactField('Landline', c.landline, c.landline ? phoneLinks(c.landline) : '') +
+        contactField('Address', addr) +
+        contactField('Country and currency', [c.country, c.currency].filter(Boolean).join(', ')) +
+        contactField('GSTIN', c.gstin) + contactField('Notes', c.notes) +
+        contactField('Also known as', c.otherNames) +
+        '</div>';
+      if (!c.email && !c.mobile && !c.contactPerson) h += '<div class="vfWarn" style="margin:-6px 0 12px;">No contact details yet. Add them in the Vendor tab of SMS3E PRs.</div>';
+    } else {
+      h += '<div class="vfNotice" style="margin-bottom:14px;">' + (d.vendorTabMissing ? 'The "Vendor" tab was not found in the SMS3E PRs sheet.' : 'This vendor is not in the Vendor tab of SMS3E PRs yet, so there are no contact details.') + '</div>';
+    }
+    if (!d.rows.length) {
+      h += '<div class="vfEmpty">No purchase lines found for this vendor.</div>';
+    } else {
+      const rows = d.rows.map(function (r) { return Object.assign({ _cls: inBasket(r.ucsCode) ? 'vfInBasket' : '' }, r); });
+      h += '<div style="font-size:13px;margin-bottom:8px;">Everything this vendor has supplied, newest first. Click a PO No. for its PR and other lines.' +
+        (basket.length ? ' <span class="vfMuted">Rows marked blue are in your list.</span>' : '') + '</div>' + dataTable(rows, lineCols());
+      if (d.truncated) h += '<div class="vfSmall" style="margin-top:6px;">Showing the latest ' + d.rows.length + ' of ' + d.summary.lineCount + ' lines.</div>';
+    }
+    B.innerHTML = h;
+  }
+
+  /** The POs behind a "Five (5)" count: this vendor x the items in the last search (or one item). */
+  function renderVendorPOsDrill(d, onlyCode, T, S, B) {
+    const codes = onlyCode ? [onlyCode] : (lastResult ? lastResult.items.map(function (it) { return it.ucsCode; }) : []);
+    const since = lastResult ? Number(lastResult.sinceYears) || 0 : 0;
+    let cutoff = '';
+    if (since) { const t = new Date(); t.setFullYear(t.getFullYear() - since); cutoff = t.getFullYear() + '-' + String(t.getMonth() + 1).padStart(2, '0') + '-' + String(t.getDate()).padStart(2, '0'); }
+    const rows = d.rows.filter(function (r) { return codes.indexOf(r.ucsCode) !== -1 && (!cutoff || (r.poDate && r.poDate >= cutoff)); });
+    const poCount = rows.map(function (r) { return r.poNo; }).filter(function (x, i, a) { return a.indexOf(x) === i; }).length;
+    T.innerHTML = esc(d.vendorName) + vendorBadges({ status: d.status, contact: d.contact });
+    const scope = onlyCode ? ('item ' + onlyCode) : ('your ' + codes.length + ' item' + (codes.length === 1 ? '' : 's'));
+    S.innerHTML = countLabel(poCount) + ' PO' + (poCount === 1 ? '' : 's') + ' for ' + esc(scope) + periodText(since) + '. ' +
+      drillLink('vendor', d.vendorCode, 'See everything this vendor has supplied');
+    B.innerHTML = rows.length
+      ? '<div style="font-size:13px;margin-bottom:8px;">Click a PO No. to see all its lines and the PR it was raised against.</div>' + dataTable(rows, lineCols()) +
+        (d.truncated ? '<div class="vfSmall" style="margin-top:6px;">Only this vendor\u2019s latest ' + d.rows.length + ' lines are searched.</div>' : '')
+      : '<div class="vfEmpty">No matching PO lines found.</div>';
+  }
 
   // ====== EVENTS (delegated -- no codes/names spliced into inline JS) ======
   function handleAction(el) {
@@ -809,14 +1008,15 @@
     else if (a === 'info') openInfo(code);
     else if (a === 'infoAdd') { const c = infoCode; closeInfo(); if (c) addFromSearch(c); }
     else if (a === 'closeInfo') closeInfo();
-    else if (a === 'clearBasket') clearBasket();
+    else if (a === 'startOver') startOver();
     else if (a === 'togglePaste') togglePaste();
     else if (a === 'addPasted') addPasted();
     else if (a === 'find') findVendors();
     else if (a === 'refresh') findVendors(true);
     else if (a === 'tab') setTab(el.dataset.tab);
-    else if (a === 'vendor') openVendor(el.dataset.vc);
-    else if (a === 'closeVendor') closeVendor();
+    else if (a === 'drill') openDrill(el.dataset.type, el.dataset.key);
+    else if (a === 'closeDrill') closeDrill(el.dataset.id);
+    else if (a === 'closeAllDrills') closeAllDrills();
     else if (a === 'copyEmails') copyEmails();
     else if (a === 'exportCsv') exportCsv();
   }
@@ -824,7 +1024,7 @@
   const root = $('vfRoot');
   root.addEventListener('click', function (e) {
     if (e.target.classList && e.target.classList.contains('vfOverlay')) {
-      if (e.target.dataset.overlay === 'info') closeInfo(); else closeVendor();
+      closeInfo();
       return;
     }
     const el = e.target.closest('[data-action]');
@@ -853,7 +1053,7 @@
   document.addEventListener('keydown', function (e) {
     if (e.key !== 'Escape') return;
     if ($('vfInfoOverlay').style.display === 'flex') closeInfo();
-    else if ($('vfVendorOverlay').style.display === 'flex') closeVendor();
+    else if (drillStack.length) closeDrill(drillStack[drillStack.length - 1].id);
   });
 
   // ====== START ======
