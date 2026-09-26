@@ -118,6 +118,17 @@
   .drillPanel .detailLabel:first-child { margin-top: 0; }
   .drillPanel .detailValue { font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
   .drillPanel .detailUnit { display:inline-block; background:#f1f3f4; padding: 3px 10px; border-radius: 10px; font-size: 12px; margin-top: 4px; }
+  /* ---- Vendor Finder shortcuts (Planning staff excluding Store Incharge only) ---- */
+  .vendorFinderBtn { background:#5f6368; margin-top:16px; width:100%; }
+  .drillPanel .vendorFinderBtn { width:auto; margin-top:14px; }
+  .vendorContact { display:grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 2px 16px; background:#f8f9fa; border-radius:8px; padding: 4px 12px 10px; margin-bottom: 12px; }
+  .vendorContact .detailLabel { margin-top: 8px !important; }
+  .vendorContact .detailValue { font-size: 13px; }
+  .vendorBadge { display:inline-block; font-size:11px; font-weight:600; padding:1px 8px; border-radius:10px; margin-left:6px; font-family: Arial, sans-serif; }
+  .vendorBadge.imp { background:#e8f0fe; color:#1557b0; }
+  .vendorBadge.blk { background:#fce8e6; color:#c5221f; }
+  .vendorBadge.chk { background:#fef7e0; color:#7a5b00; }
+  .vendorDel.ok { color:#1e7e34; font-weight:600; } .vendorDel.late { color:#c5221f; font-weight:600; } .vendorDel.open { color:#7a5b00; font-weight:600; }
   @media (max-width: 700px) {
     .drillPanel { left: 16px !important; right: 16px; top: 16px !important; bottom: 16px; width: auto; max-width: none; max-height: none; }
   }
@@ -217,6 +228,8 @@
     <div class="detailLabel">Long Text</div>
     <div class="detailValue" id="infoLong"></div>
     <div id="infoStock"></div>
+    <!-- Planning staff (excluding Store Incharge) only -- shown by openInfo() -->
+    <button type="button" id="infoVendorBtn" class="vendorFinderBtn" style="display:none;" onclick="Page.findPastVendorsFromInfo()">Find past vendors for this item</button>
   </div>
 </div>
 
@@ -805,7 +818,7 @@
       { key: 'poNo', label: 'PO No.', render: renderPOCell },
       { key: 'poDate', label: 'PO Date' }, { key: 'qty', label: 'Qty' },
       { key: 'receiptDate', label: '105 Date' }, { key: 'vendorCode', label: 'Vendor Code' },
-      { key: 'vendorName', label: 'Vendor Name' }
+      { key: 'vendorName', label: 'Vendor Name', render: renderVendorCell }
     ]
   };
 
@@ -827,6 +840,15 @@
     const safe = escapeHtml(v).replace(/'/g, "\\'");
     return '<span class="clickableCode" onclick="Page.openDrillPanel(\'ucs\', \'' + safe + '\')" title="Click for Short/Long Text">' + escapeHtml(v) + '</span>';
   }
+  // Vendor name -> vendor supply-history panel. Clickable only for Planning
+  // staff excluding Store Incharge (the Vendor Finder audience); everyone
+  // else who can see this tab still sees the name as plain text.
+  function renderVendorCell(v, row) {
+    if (v === null || v === undefined || v === '') return '&mdash;';
+    const code = String((row && row.vendorCode) || '').trim().replace(/\.0+$/, '');
+    if (!/^\d{6,12}$/.test(code) || !Shell.canUseVendorFinder()) return escapeHtml(v);
+    return '<span class="clickableCode" onclick="Page.openDrillPanel(\'vendor\', \'' + code + '\')" title="Click for everything this vendor has supplied">' + escapeHtml(v) + '</span>';
+  }
 
   // Column sets for the PR and PO drill-down panels (built fresh per panel,
   // not stored in TAB_COLUMNS, since these tables are keyed by PR/PO No.
@@ -836,13 +858,13 @@
     { key: 'ucsCode', label: 'UCS Code', render: renderUCSCell }, { key: 'itemDescription', label: 'Item Description' },
     { key: 'poNo', label: 'PO No.', render: renderPOCell }, { key: 'poDate', label: 'PO Date' },
     { key: 'qty', label: 'Qty' }, { key: 'receiptDate', label: '105 Date' },
-    { key: 'vendorCode', label: 'Vendor Code' }, { key: 'vendorName', label: 'Vendor Name' }
+    { key: 'vendorCode', label: 'Vendor Code' }, { key: 'vendorName', label: 'Vendor Name', render: renderVendorCell }
   ];
   const PO_PANEL_COLUMNS = [
     { key: 'ucsCode', label: 'UCS Code', render: renderUCSCell }, { key: 'itemDescription', label: 'Item Description' },
     { key: 'prNo', label: 'PR No.', render: renderPRCell }, { key: 'poDate', label: 'PO Date' },
     { key: 'qty', label: 'Qty' }, { key: 'receiptDate', label: '105 Date' },
-    { key: 'vendorCode', label: 'Vendor Code' }, { key: 'vendorName', label: 'Vendor Name' }
+    { key: 'vendorCode', label: 'Vendor Code' }, { key: 'vendorName', label: 'Vendor Name', render: renderVendorCell }
   ];
 
   /** Shared by the history tab table and the drill-down panel tables. */
@@ -971,11 +993,35 @@
       '<span>Received: <b>' + Number(item.received || 0).toLocaleString() + '</b></span>' +
       '<span>Released: <b>' + Number(item.released || 0).toLocaleString() + '</b></span>' +
       '<span>Balance: <b>' + Number(item.balance || 0).toLocaleString() + '</b></span>';
+    currentInfoItem = item;
+    document.getElementById('infoVendorBtn').style.display = Shell.canUseVendorFinder() ? 'block' : 'none';
     document.getElementById('infoOverlay').style.display = 'flex';
   }
 
   function closeInfo() {
     document.getElementById('infoOverlay').style.display = 'none';
+  }
+
+  // ====== VENDOR FINDER SHORTCUTS ======
+  // Planning staff excluding Store Incharge only (Shell.canUseVendorFinder);
+  // Code.gs re-checks this on every vendor call regardless.
+  let currentInfoItem = null; // item shown in the (i) popup
+
+  function findPastVendorsForCode(code) {
+    const item = allItems.find(function (m) { return m.ucsCode === code; });
+    const result = Shell.addToVendorBasket({ ucsCode: code, shortText: item ? item.itemDescription : '', unit: item ? item.unit : '' });
+    if (result === 'full') { alert('Your Vendor Finder list already has 25 items. Remove one there before adding more.'); return; }
+    if (result === 'invalid') return;
+    // Drill panels live on document.body, outside this page's container, so
+    // they must be closed before leaving -- otherwise they'd float over the next page.
+    closeInfo();
+    closeAllDrillPanels();
+    document.getElementById('historyOverlay').style.display = 'none';
+    Shell.openPage('vendor-finder');
+  }
+
+  function findPastVendorsFromInfo() {
+    if (currentInfoItem) findPastVendorsForCode(currentInfoItem.ucsCode);
   }
 
   document.addEventListener('keydown', function (e) {
@@ -1001,6 +1047,7 @@
   const DRILL_CASCADE_BASE_LEFT = '50%'; // first panel centers; deeper ones cascade right/down from there
 
   function drillTypeLabel(type) {
+    if (type === 'vendor') return 'Vendor';
     return type === 'pr' ? 'Purchase Requisition' : (type === 'po' ? 'Purchase Order' : 'UCS Code');
   }
 
@@ -1070,6 +1117,10 @@
       renderUCSDrillPanel(panel, bodyEl);
       return;
     }
+    if (panel.type === 'vendor') {
+      renderVendorDrillPanel(panel, bodyEl);
+      return;
+    }
     try {
       const action = panel.type === 'pr' ? 'getPRItems' : 'getPOItems';
       const payload = { action: action };
@@ -1113,7 +1164,65 @@
     bodyEl.innerHTML =
       (item.unit ? '<span class="detailUnit">' + escapeHtml(item.unit) + '</span>' : '') +
       '<div class="detailLabel">Short Text</div><div class="detailValue">' + escapeHtml(item.itemDescription || '') + '</div>' +
-      '<div class="detailLabel">Long Text</div><div class="detailValue">' + escapeHtml(item.longText || '') + '</div>';
+      '<div class="detailLabel">Long Text</div><div class="detailValue">' + escapeHtml(item.longText || '') + '</div>' +
+      (Shell.canUseVendorFinder() && /^\d{14}$/.test(item.ucsCode)
+        ? '<button type="button" class="vendorFinderBtn" onclick="Page.findPastVendorsForCode(\'' + item.ucsCode + '\')">Find past vendors for this item</button>'
+        : '');
+  }
+
+  const VENDOR_PANEL_COLUMNS = [
+    { key: 'ucsCode', label: 'UCS Code', render: renderUCSCell }, { key: 'shortText', label: 'Item Description' },
+    { key: 'poNo', label: 'PO No.', render: renderPOCell }, { key: 'poDate', label: 'PO Date' },
+    { key: 'poQty', label: 'PO Qty' }, { key: 'rate', label: 'Rate' },
+    { key: 'qty105', label: 'Received' }, { key: 'receiptDate', label: '105 Date' },
+    { key: 'delivery', label: 'Delivery', render: function (v, r) {
+      const cls = v === 'On time' ? 'ok' : (v === 'Late' ? 'late' : ((v === 'Open' || v === 'Partial') ? 'open' : ''));
+      return '<span class="vendorDel ' + cls + '"' + (r.dueDate ? ' title="Promised ' + escapeHtml(r.dueDate) + '"' : '') + '>' + escapeHtml(v || '') + '</span>';
+    } }
+  ];
+
+  /** Vendor panel -- contact details (from the "Vendor" tab) + every PO line this vendor has supplied. */
+  async function renderVendorDrillPanel(panel, bodyEl) {
+    try {
+      const data = await callApi({ action: 'getVendorSupplyHistory', vendorCode: panel.key });
+      if (!document.getElementById(panel.id)) return; // closed while the request was in flight
+      if (!data.success) {
+        bodyEl.innerHTML = '<div class="naNotice">' + escapeHtml(data.message || 'Could not load this vendor.') + '</div>';
+        return;
+      }
+      const c = data.contact;
+      let badges = '';
+      if (c && c.vendorType === 'Import') badges += '<span class="vendorBadge imp">Import' + (c.currency ? ' ' + escapeHtml(c.currency) : '') + '</span>';
+      if (data.status === 'Blocked' || data.status === 'Blacklisted') badges += '<span class="vendorBadge blk">' + escapeHtml(data.status) + '</span>';
+      else if (data.status && data.status !== 'Active' && data.status !== 'Unknown') badges += '<span class="vendorBadge chk">' + escapeHtml(data.status) + '</span>';
+      document.getElementById(panel.id + '-title').innerHTML = escapeHtml(data.vendorName) + badges;
+      const s = data.summary;
+      document.getElementById(panel.id + '-subtitle').textContent = panel.key + ' -- ' + s.itemCount + ' item(s), ' + s.poCount + ' PO(s)' +
+        (s.onTimePct !== null ? ', ' + s.onTimePct + '% on time' : '');
+
+      function field(label, value, html) {
+        return value ? '<div><div class="detailLabel">' + escapeHtml(label) + '</div><div class="detailValue">' + (html || escapeHtml(value)) + '</div></div>' : '';
+      }
+      let h = '';
+      if (c) {
+        const inner =
+          field('Contact person', c.contactPerson + (c.designation ? ' (' + c.designation + ')' : '')) +
+          field('Email', c.email, c.email ? '<a href="mailto:' + escapeHtml(c.email) + '">' + escapeHtml(c.email) + '</a>' : '') +
+          field('Alternate email', c.altEmail) + field('Mobile', c.mobile) + field('Landline', c.landline) +
+          field('Address', [c.address, c.city, c.state, c.pin].filter(Boolean).join(', ')) +
+          field('Country / currency', [c.country, c.currency].filter(Boolean).join(', '));
+        h += inner ? '<div class="vendorContact">' + inner + '</div>' : '';
+      } else {
+        h += '<div class="naNotice" style="margin-bottom:12px;">No contact details -- this vendor is not in the Vendor tab yet.</div>';
+      }
+      const rows = data.rows || [];
+      h += rows.length ? renderDataTable(rows, VENDOR_PANEL_COLUMNS) : '<div class="naNotice">No purchase lines found for this vendor.</div>';
+      if (data.truncated) h += '<div style="font-size:12px;color:#666;margin-top:6px;">Showing the latest ' + rows.length + ' of ' + s.lineCount + ' lines.</div>';
+      bodyEl.innerHTML = h;
+    } catch (e) {
+      if (!document.getElementById(panel.id)) return;
+      bodyEl.innerHTML = '<div class="naNotice">Could not reach the server.</div>';
+    }
   }
 
   // ====== CSV EXPORT (Planning staff only -- button itself is hidden otherwise) ======
@@ -1172,6 +1281,8 @@
     closeDrillPanel: { get: function(){ return closeDrillPanel; }, set: function(v){ closeDrillPanel = v; }, enumerable: true, configurable: true },
     closeHistory: { get: function(){ return closeHistory; }, set: function(v){ closeHistory = v; }, enumerable: true, configurable: true },
     closeInfo: { get: function(){ return closeInfo; }, set: function(v){ closeInfo = v; }, enumerable: true, configurable: true },
+    findPastVendorsForCode: { get: function(){ return findPastVendorsForCode; }, set: function(v){ findPastVendorsForCode = v; }, enumerable: true, configurable: true },
+    findPastVendorsFromInfo: { get: function(){ return findPastVendorsFromInfo; }, set: function(v){ findPastVendorsFromInfo = v; }, enumerable: true, configurable: true },
     openInfo: { get: function(){ return openInfo; }, set: function(v){ openInfo = v; }, enumerable: true, configurable: true },
     csvEscape: { get: function(){ return csvEscape; }, set: function(v){ csvEscape = v; }, enumerable: true, configurable: true },
     currentPage: { get: function(){ return currentPage; }, set: function(v){ currentPage = v; }, enumerable: true, configurable: true },

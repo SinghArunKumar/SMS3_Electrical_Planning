@@ -87,6 +87,8 @@
     <div class="detailLabel">Long Text</div>
     <div class="detailValue" id="detailLong"></div>
 
+    <!-- Planning staff (excluding Store Incharge) only -- shown by openDetail() via Shell.canUseVendorFinder() -->
+    <button id="detailVendorBtn" class="secondary" style="display:none; margin-top:22px; width:100%;" onclick="findPastVendorsForDetail()">Find past vendors for this item</button>
     <button id="detailOkBtn" onclick="closeDetail()">OK</button>
   </div>
 </div>
@@ -355,11 +357,26 @@
     document.getElementById('detailUnit').textContent = m.unit || '—';
     document.getElementById('detailShort').innerHTML = highlight(m.shortText, tokens);
     document.getElementById('detailLong').innerHTML = highlight(m.longText, tokens);
+    // Remembered for findPastVendorsForDetail(); the button itself only
+    // appears for Planning staff excluding Store Incharge.
+    window.currentDetailItem = m;
+    document.getElementById('detailVendorBtn').style.display = Shell.canUseVendorFinder() ? 'block' : 'none';
     document.getElementById('detailOverlay').style.display = 'flex';
   }
 
   function closeDetail() {
     document.getElementById('detailOverlay').style.display = 'none';
+  }
+
+  // Drops this item into the Vendor Finder list and opens that page.
+  // Code.gs re-checks access on the vendor lookup itself.
+  function findPastVendorsForDetail() {
+    const m = window.currentDetailItem;
+    if (!m) return;
+    const result = Shell.addToVendorBasket({ ucsCode: m.ucsCode, shortText: m.shortText, unit: m.unit });
+    if (result === 'full') { alert('Your Vendor Finder list already has 25 items. Remove one there before adding more.'); return; }
+    closeDetail();
+    Shell.openPage('vendor-finder');
   }
 
   document.addEventListener('keydown', function (e) {

@@ -1,0 +1,871 @@
+<style>
+  .vf h2 { margin-bottom: 4px; }
+  .vf .vfSub { color: #666; font-size: 13px; margin-bottom: 18px; }
+  .vf button { padding: 8px 14px; font-size: 14px; border: none; border-radius: 4px; background: #1a73e8; color: #fff; cursor: pointer; }
+  .vf button.secondary { background: #5f6368; }
+  .vf button:disabled { background: #b0b4b8; cursor: not-allowed; }
+  .vf button:focus-visible, .vf a:focus-visible, .vf input:focus-visible, .vf select:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
+  .vf input[type=text], .vf textarea, .vf select { width: 100%; padding: 8px; box-sizing: border-box; font-size: 14px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit; }
+  .vf input[type=checkbox] { width: auto; margin: 0; cursor: pointer; }
+  .vf a { color: #1a73e8; cursor: pointer; text-decoration: none; }
+  .vf a:hover { text-decoration: underline; }
+  .vf mark { background: #fff3a0; padding: 0 1px; border-radius: 2px; }
+  .vfNotice { padding: 18px; background: #f1f3f4; border-radius: 8px; color: #444; font-size: 14px; }
+
+  /* ---- search + list side by side ---- */
+  .vfGrid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+  @media (max-width: 900px) { .vfGrid { grid-template-columns: minmax(0, 1fr); } }
+  .vfPanel { border: 1px solid #e0e0e0; border-radius: 8px; padding: 14px; background: #fff; }
+  .vfPanelHead { font-weight: 600; font-size: 15px; margin-bottom: 10px; display: flex; align-items: baseline; gap: 8px; }
+  .vfPanelHead .vfGrow { flex: 1; }
+  .vfPanelHead a { font-weight: normal; font-size: 12px; }
+  #vfBasketPanel { border-color: #1a73e8; border-width: 2px; }
+  #vfSearch { font-size: 16px; padding: 11px; }
+  .vfMeta { font-size: 12px; color: #666; margin-top: 6px; min-height: 16px; }
+
+  .vfRow { display: flex; align-items: center; gap: 8px; padding: 9px 10px; border: 1px solid #eee; border-radius: 6px; margin-top: 6px; }
+  .vfRowMain { flex: 1; min-width: 0; }
+  .vfCode { font-family: 'Courier New', monospace; font-weight: bold; color: #1a73e8; font-size: 13px; }
+  .vfUnit { font-family: Arial, sans-serif; font-weight: normal; font-size: 11px; color: #777; background: #f1f3f4; padding: 1px 7px; border-radius: 10px; margin-left: 4px; }
+  .vfShort { font-size: 13px; margin-top: 2px; color: #1f2430; overflow-wrap: anywhere; }
+  .vf .vfInfoBtn { width: 24px; height: 24px; padding: 0; border-radius: 50%; background: #fff; color: #1a73e8; border: 1.5px solid #1a73e8; font: italic bold 13px Georgia, serif; flex-shrink: 0; }
+  .vf .vfInfoBtn:hover { background: #1a73e8; color: #fff; }
+  .vf .vfAddBtn { padding: 6px 12px; font-size: 13px; flex-shrink: 0; }
+  .vf .vfAddBtn.added { background: #e6f4ea; color: #1e7e34; }
+  .vf .vfRemoveBtn { width: 26px; height: 26px; padding: 0; background: transparent; color: #999; font-size: 15px; flex-shrink: 0; }
+  .vf .vfRemoveBtn:hover { background: #fce8e6; color: #c5221f; }
+  .vfEmpty { padding: 16px 6px; color: #777; font-size: 13px; text-align: center; }
+  .vfPasteToggle { margin-top: 12px; font-size: 13px; }
+  #vfPasteBox { margin-top: 8px; }
+  #vfPasteBox button { margin-top: 6px; }
+
+  .vfBasketList { list-style: none; margin: 0; padding: 0; max-height: 420px; overflow-y: auto; }
+  .vfBasketList li { display: flex; align-items: center; gap: 8px; padding: 8px 4px; border-bottom: 1px solid #eee; }
+  .vfBasketList li:last-child { border-bottom: none; }
+  .vfNum { width: 22px; height: 22px; border-radius: 50%; background: #e8f0fe; color: #1557b0; font-size: 12px; font-weight: bold; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .vfEmptyBasket { padding: 22px 8px; color: #666; font-size: 13px; text-align: center; line-height: 1.5; }
+  .vfFindRow { display: flex; gap: 8px; margin-top: 12px; align-items: center; }
+  .vfFindRow select { width: auto; flex: 0 0 auto; }
+  .vfFindRow button { flex: 1; font-weight: 600; }
+
+  .vfMsg { margin-top: 14px; padding: 10px; border-radius: 4px; font-size: 14px; }
+  .vfMsg.error { background: #fce8e6; color: #c5221f; }
+  .vfMsg.info { background: #e8f0fe; color: #1557b0; }
+
+  /* ---- results ---- */
+  #vfResultsSection { margin-top: 24px; }
+  .vfStale { background: #fef7e0; color: #7a5b00; padding: 9px 12px; border-radius: 6px; font-size: 13px; margin-bottom: 12px; }
+  .vfResHead { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 10px; margin-bottom: 10px; }
+  #vfSummary { font-size: 14px; }
+  .vfWarn { font-size: 12px; color: #7a5b00; margin-top: 4px; }
+  .vfTabs { display: flex; gap: 4px; }
+  .vf .vfTab { background: #f1f3f4; color: #333; padding: 7px 14px; font-size: 13px; }
+  .vf .vfTab.active { background: #1a73e8; color: #fff; }
+  .vfToolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 0 10px; font-size: 13px; }
+  .vfToolbar .vfSpacer { flex: 1; }
+  .vfToolbar button { padding: 6px 12px; font-size: 13px; }
+  .vfChk { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+
+  .vfTableWrap { overflow-x: auto; border: 1px solid #e0e0e0; border-radius: 8px; }
+  .vf table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  .vf th { background: #f8f9fa; text-align: left; padding: 8px; border-bottom: 1px solid #e0e0e0; white-space: nowrap; font-weight: 600; color: #444; }
+  .vf td { padding: 8px; border-bottom: 1px solid #f0f0f0; vertical-align: top; }
+  .vf tr:last-child td { border-bottom: none; }
+  .vf th.vfItemCol, .vf td.vfItemCol { text-align: center; padding: 8px 4px; min-width: 26px; }
+  .vf th.vfItemCol { cursor: help; color: #1557b0; }
+  .vfTick { color: #1e7e34; font-weight: bold; cursor: help; }
+  .vfDot { color: #ccc; }
+  .vf tr.vfDim td { color: #999; }
+  .vf tr.vfDim a { color: #8aa9d6; }
+  .vfSmall { font-size: 11px; color: #777; margin-top: 2px; }
+  .vfBadge { display: inline-block; font-size: 10.5px; padding: 1px 7px; border-radius: 10px; margin-left: 4px; font-weight: 600; white-space: nowrap; }
+  .vfBadge.imp { background: #e8f0fe; color: #1557b0; }
+  .vfBadge.blk { background: #fce8e6; color: #c5221f; }
+  .vfBadge.chk { background: #fef7e0; color: #7a5b00; }
+  .vfBadge.unk { background: #f1f3f4; color: #666; }
+  .vfMuted { color: #999; font-size: 12px; }
+  .vfNum2 { text-align: right; white-space: nowrap; }
+
+  .vfItemCard { border: 1px solid #e0e0e0; border-radius: 8px; margin-bottom: 14px; overflow: hidden; }
+  .vfItemCardHead { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; background: #f8f9fa; border-bottom: 1px solid #e0e0e0; }
+  .vfItemCard .vfTableWrap { border: none; border-radius: 0; }
+
+  /* ---- overlays ---- */
+  .vfOverlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.45); align-items: flex-start; justify-content: center; padding: 50px 16px; z-index: 40; overflow-y: auto; }
+  .vfCard { background: #fff; border-radius: 10px; max-width: 580px; width: 100%; padding: 20px 22px; box-shadow: 0 8px 30px rgba(0,0,0,0.3); }
+  .vfCard.vfWide { max-width: 980px; }
+  .vfCardHead { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; margin-bottom: 12px; }
+  .vfLabel { font-weight: bold; font-size: 12px; color: #888; margin-top: 14px; margin-bottom: 4px; }
+  .vfValue { font-size: 14px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .vfCardBtns { display: flex; gap: 8px; margin-top: 20px; }
+  .vfCardBtns button { flex: 1; }
+  #vfVTitle { font-size: 18px; font-weight: 600; }
+  .vfContactGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 4px 18px; background: #f8f9fa; border-radius: 8px; padding: 6px 14px 12px; margin-bottom: 14px; }
+  .vfContactGrid .vfLabel { margin-top: 8px; }
+  .vfInBasket td:first-child { box-shadow: inset 3px 0 0 #1a73e8; }
+  .vfDel { font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+  .vfDel.ok { color: #1e7e34; } .vfDel.late { color: #c5221f; } .vfDel.open { color: #7a5b00; } .vfDel.rcv { color: #555; }
+
+  #vfToast { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); background: #323232; color: #fff; padding: 10px 18px; border-radius: 6px; font-size: 13px; z-index: 60; opacity: 0; pointer-events: none; transition: opacity 0.2s; max-width: 90vw; text-align: center; }
+  #vfToast.show { opacity: 1; }
+  @media (prefers-reduced-motion: reduce) { #vfToast { transition: none; } }
+</style>
+
+<div class="vf" id="vfRoot">
+  <h2>Vendor Finder</h2>
+  <div class="vfSub">Build a list of items for a budgetary enquiry and see every vendor who has supplied them before.</div>
+
+  <div id="vfNotAuth" class="vfNotice" style="display:none;">Vendor Finder is available to Planning staff only (excluding Store Incharge). You can still look up materials in <b>Search UCS Codes</b>.</div>
+
+  <div id="vfMain" style="display:none;">
+    <div class="vfGrid">
+      <section class="vfPanel" aria-labelledby="vfSearchHead">
+        <div class="vfPanelHead" id="vfSearchHead">Find an item</div>
+        <input type="text" id="vfSearch" placeholder="UCS code digits or any words, e.g. motor 0.18 kw" autocomplete="off" aria-describedby="vfSearchMeta">
+        <div id="vfSearchMeta" class="vfMeta"></div>
+        <div id="vfResults"></div>
+        <div class="vfPasteToggle"><a data-action="togglePaste" role="button" tabindex="0">Paste a list of UCS codes instead</a></div>
+        <div id="vfPasteBox" style="display:none;">
+          <textarea id="vfPasteText" rows="4" placeholder="14-digit codes separated by spaces, commas or new lines"></textarea>
+          <button type="button" data-action="addPasted">Add these codes</button>
+          <div id="vfPasteMsg" class="vfMeta"></div>
+        </div>
+      </section>
+
+      <section class="vfPanel" id="vfBasketPanel" aria-labelledby="vfBasketHead">
+        <div class="vfPanelHead"><span id="vfBasketHead">Your items</span> <span id="vfBasketCount" class="vfMuted"></span><span class="vfGrow"></span><a id="vfClearLink" data-action="clearBasket" role="button" tabindex="0">Clear all</a></div>
+        <div id="vfBasket"></div>
+        <div class="vfFindRow">
+          <select id="vfSince" aria-label="Purchase history period">
+            <option value="0" selected>All history</option>
+            <option value="1">Last 1 year</option>
+            <option value="2">Last 2 years</option>
+            <option value="3">Last 3 years</option>
+            <option value="5">Last 5 years</option>
+            <option value="10">Last 10 years</option>
+          </select>
+          <button type="button" id="vfFindBtn" data-action="find">Find vendors</button>
+        </div>
+      </section>
+    </div>
+
+    <div id="vfMsg"></div>
+
+    <section id="vfResultsSection" style="display:none;">
+      <div id="vfStale" class="vfStale" style="display:none;">Your item list or period has changed since this search. <a data-action="find" role="button" tabindex="0">Find vendors again</a></div>
+      <div class="vfResHead">
+        <div id="vfSummary"></div>
+        <div class="vfTabs" role="tablist">
+          <button type="button" class="vfTab active" data-action="tab" data-tab="vendor" role="tab">By vendor</button>
+          <button type="button" class="vfTab" data-action="tab" data-tab="item" role="tab">By item</button>
+        </div>
+      </div>
+      <div class="vfToolbar">
+        <label class="vfChk" title="Hides every vendor whose Status in the Vendor tab is not Active"><input type="checkbox" id="vfHideBlocked"> Hide Blocked and Check vendors</label>
+        <span class="vfSpacer"></span>
+        <span id="vfSelCount" class="vfMuted"></span>
+        <button type="button" class="secondary" data-action="copyEmails">Copy emails for BCC</button>
+        <button type="button" class="secondary" data-action="exportCsv">Export CSV</button>
+      </div>
+      <div id="vfTabVendor"></div>
+      <div id="vfTabItem" style="display:none;"></div>
+    </section>
+  </div>
+
+  <!-- Long text popup -->
+  <div id="vfInfoOverlay" class="vfOverlay" data-overlay="info">
+    <div class="vfCard" role="dialog" aria-modal="true" aria-labelledby="vfInfoCode">
+      <div class="vfCode" id="vfInfoCode" style="font-size:17px;"></div>
+      <div id="vfInfoUnit" style="margin-top:6px;"></div>
+      <div class="vfLabel">Short text</div>
+      <div class="vfValue" id="vfInfoShort"></div>
+      <div class="vfLabel">Long text</div>
+      <div class="vfValue" id="vfInfoLong"></div>
+      <div class="vfCardBtns">
+        <button type="button" id="vfInfoAddBtn" data-action="infoAdd">Add to list</button>
+        <button type="button" class="secondary" data-action="closeInfo">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Vendor supply-history popup -->
+  <div id="vfVendorOverlay" class="vfOverlay" data-overlay="vendor">
+    <div class="vfCard vfWide" role="dialog" aria-modal="true" aria-labelledby="vfVTitle">
+      <div class="vfCardHead">
+        <div><div id="vfVTitle"></div><div id="vfVSub" class="vfSmall"></div></div>
+        <button type="button" class="secondary" data-action="closeVendor">Close</button>
+      </div>
+      <div id="vfVBody"></div>
+    </div>
+  </div>
+
+  <div id="vfToast" role="status" aria-live="polite"></div>
+</div>
+
+<script>
+(function () {
+  const API = Shell.APPS_SCRIPT_URL;
+  const user = Shell.getUser() || {};
+  const MAX_ITEMS = 25;
+  const MAX_SHOWN = 5;
+  const BASKET_KEY = 'smsCache:vendorBasket';  // same key Search UCS / Planning Stock write to; cleared on logout with every smsCache: key
+  const UCS_CACHE_KEY = 'smsCache:ucsSearch';  // shared with Search UCS Codes -- same shape, so each page warms the other
+
+  let allMaterials = [];
+  let byCode = {};
+  let basket = loadBasket();
+  let shownMatches = [];
+  let lastResult = null;
+  let lastQueryKey = '';
+  let activeTab = 'vendor';
+  let selected = {};
+  let infoCode = null;
+  let currentVendorCode = null;
+  let searchTimer = null;
+  let toastTimer = null;
+
+  const $ = function (id) { return document.getElementById(id); };
+
+  function hasComma(str, target) {
+    if (!str) return false;
+    return String(str).split(',').map(function (s) { return s.trim().toLowerCase(); }).indexOf(String(target).toLowerCase()) !== -1;
+  }
+  // UI convenience only -- getPastVendors / getVendorSupplyHistory re-check this server-side.
+  const canUse = hasComma(user.authorizedArea, 'Planning') && !hasComma(user.role, 'Store Incharge');
+
+  function esc(s) {
+    return String(s === null || s === undefined ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  // Same single-pass highlighter as search-ucs.html (see the bug note there).
+  function highlight(text, tokens) {
+    const escaped = esc(text);
+    const valid = (tokens || []).filter(Boolean);
+    if (!valid.length) return escaped;
+    const pattern = valid.slice().sort(function (a, b) { return b.length - a.length; })
+      .map(function (t) { return t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }).join('|');
+    return escaped.replace(new RegExp('(' + pattern + ')', 'ig'), '<mark>$1</mark>');
+  }
+
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  function fmtDate(iso) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''));
+    return m ? (m[3] + '-' + MONTHS[Number(m[2]) - 1] + '-' + m[1]) : (iso || '');
+  }
+  function fmtTime(ms) {
+    const d = new Date(Number(ms));
+    if (isNaN(d.getTime())) return '';
+    return String(d.getDate()).padStart(2, '0') + '-' + MONTHS[d.getMonth()] + '-' + d.getFullYear() + ', ' +
+      String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  }
+  function fmtNum(n) {
+    const v = Number(n);
+    return isFinite(v) ? v.toLocaleString('en-IN', { maximumFractionDigits: 2 }) : '';
+  }
+
+  async function callApi(payload) {
+    const res = await fetch(API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(Object.assign({ email: user.email, password: user.password }, payload))
+    });
+    return res.json();
+  }
+
+  function showMsg(text, type) {
+    const el = $('vfMsg');
+    el.textContent = text || '';
+    el.className = text ? ('vfMsg ' + (type || 'error')) : '';
+  }
+
+  function toast(text) {
+    const el = $('vfToast');
+    el.textContent = text;
+    el.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { el.classList.remove('show'); }, 2600);
+  }
+
+  // ====== BASKET (persists across pages for this tab) ======
+  function loadBasket() {
+    try {
+      const arr = JSON.parse(sessionStorage.getItem(BASKET_KEY) || '[]');
+      return Array.isArray(arr) ? arr.filter(function (b) { return b && /^[1-9]\d{13}$/.test(String(b.ucsCode)); }).slice(0, MAX_ITEMS) : [];
+    } catch (e) { return []; }
+  }
+  function saveBasket() {
+    try { sessionStorage.setItem(BASKET_KEY, JSON.stringify(basket)); } catch (e) { /* storage disabled -- list just won't survive navigation */ }
+  }
+  function inBasket(code) { return basket.some(function (b) { return b.ucsCode === code; }); }
+  function basketKey() { return basket.map(function (b) { return b.ucsCode; }).join(',') + '|' + $('vfSince').value; }
+
+  function addCode(code) {
+    if (inBasket(code)) return 'dup';
+    if (basket.length >= MAX_ITEMS) return 'full';
+    const m = byCode[code];
+    if (!m) return 'unknown';
+    basket.push({ ucsCode: code, shortText: m.shortText, unit: m.unit });
+    saveBasket();
+    return 'ok';
+  }
+
+  function addFromSearch(code) {
+    const r = addCode(code);
+    if (r === 'full') { toast('Your list already has ' + MAX_ITEMS + ' items. Remove one to add another.'); return; }
+    if (r !== 'ok') return;
+    toast('Added ' + code + ' to your list');
+    const box = $('vfSearch');
+    box.value = '';
+    renderBasket();
+    runSearch();
+    markStale();
+    box.focus();
+  }
+
+  function removeCode(code) {
+    basket = basket.filter(function (b) { return b.ucsCode !== code; });
+    saveBasket();
+    renderBasket();
+    runSearch();
+    markStale();
+  }
+
+  function clearBasket() {
+    if (!basket.length) return;
+    if (!confirm('Remove all ' + basket.length + ' item(s) from your list?')) return;
+    basket = [];
+    saveBasket();
+    renderBasket();
+    runSearch();
+    markStale();
+  }
+
+  function renderBasket() {
+    $('vfBasketCount').textContent = basket.length + ' of ' + MAX_ITEMS;
+    $('vfClearLink').style.display = basket.length ? 'inline' : 'none';
+    $('vfFindBtn').disabled = basket.length === 0;
+    const el = $('vfBasket');
+    if (!basket.length) {
+      el.innerHTML = '<div class="vfEmptyBasket">No items yet. Search on the left, check the long text with <b>i</b>, then click <b>Add</b>. Items stay here while you search for the next one.</div>';
+      return;
+    }
+    el.innerHTML = '<ol class="vfBasketList">' + basket.map(function (b, i) {
+      return '<li>' +
+        '<span class="vfNum">' + (i + 1) + '</span>' +
+        '<div class="vfRowMain"><div class="vfCode">' + esc(b.ucsCode) + (b.unit ? '<span class="vfUnit">' + esc(b.unit) + '</span>' : '') + '</div>' +
+        '<div class="vfShort">' + esc(b.shortText || '') + '</div></div>' +
+        '<button type="button" class="vfInfoBtn" data-action="info" data-code="' + esc(b.ucsCode) + '" title="View long text" aria-label="View long text for ' + esc(b.ucsCode) + '">i</button>' +
+        '<button type="button" class="vfRemoveBtn" data-action="remove" data-code="' + esc(b.ucsCode) + '" title="Remove" aria-label="Remove ' + esc(b.ucsCode) + '">&#10005;</button>' +
+        '</li>';
+    }).join('') + '</ol>';
+  }
+
+  // ====== MATERIAL LIST + SEARCH (client-side, same rules as Search UCS Codes) ======
+  function setMaterials(list) {
+    allMaterials = (list || []).map(function (m) {
+      const code = String(m.ucsCode || '');
+      const shortText = String(m.shortText || '');
+      const longText = String(m.longText || '');
+      return { ucsCode: code, shortText: shortText, longText: longText, unit: String(m.unit || ''), haystack: (code + ' ' + shortText + ' ' + longText).toLowerCase() };
+    });
+    byCode = {};
+    allMaterials.forEach(function (m) { byCode[m.ucsCode] = m; });
+  }
+
+  function onMaterialsReady() {
+    if ($('vfSearchMeta').dataset.loading) { $('vfSearchMeta').textContent = ''; delete $('vfSearchMeta').dataset.loading; }
+    basket.forEach(function (b) { const m = byCode[b.ucsCode]; if (m) { b.shortText = m.shortText; b.unit = m.unit; } });
+    saveBasket();
+    renderBasket();
+    runSearch();
+  }
+
+  async function loadMaterials() {
+    try {
+      const cached = JSON.parse(sessionStorage.getItem(UCS_CACHE_KEY) || 'null');
+      if (cached && cached.materials && cached.materials.length) { setMaterials(cached.materials); onMaterialsReady(); }
+    } catch (e) { /* no cache -- fine */ }
+    if (!allMaterials.length) { $('vfSearchMeta').textContent = 'Loading material list…'; $('vfSearchMeta').dataset.loading = '1'; }
+    try {
+      const data = await callApi({ action: 'getUCSSearchData' });
+      if (data.success) {
+        setMaterials(data.items);
+        try { sessionStorage.setItem(UCS_CACHE_KEY, JSON.stringify({ materials: allMaterials, ts: Date.now() })); } catch (e) {}
+        onMaterialsReady();
+      } else if (!allMaterials.length) {
+        showMsg(data.message || 'Could not load the material list.');
+      }
+    } catch (e) {
+      if (!allMaterials.length) showMsg('Could not reach the server. Check your connection and reload the page.');
+    }
+  }
+
+  function currentTokens() {
+    return $('vfSearch').value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  }
+
+  function runSearch() {
+    const tokens = currentTokens();
+    const res = $('vfResults');
+    const meta = $('vfSearchMeta');
+    if (!tokens.length) {
+      res.innerHTML = '';
+      shownMatches = [];
+      if (!meta.dataset.loading) meta.textContent = allMaterials.length ? 'Word order and spacing don\u2019t matter. Every word must appear in the code, short text or long text.' : '';
+      return;
+    }
+    const matches = allMaterials.filter(function (m) { return tokens.every(function (t) { return m.haystack.indexOf(t) !== -1; }); });
+    shownMatches = matches.slice(0, MAX_SHOWN);
+    if (!matches.length) {
+      meta.textContent = '';
+      res.innerHTML = '<div class="vfEmpty">No materials match all of those words. Try fewer or different words.</div>';
+      return;
+    }
+    meta.textContent = matches.length > MAX_SHOWN
+      ? 'Showing ' + MAX_SHOWN + ' of ' + matches.length + ' matches. Type another word to narrow it down.'
+      : matches.length + (matches.length === 1 ? ' match. Press Enter to add it.' : ' matches');
+    const full = basket.length >= MAX_ITEMS;
+    res.innerHTML = shownMatches.map(function (m) {
+      const added = inBasket(m.ucsCode);
+      return '<div class="vfRow">' +
+        '<div class="vfRowMain"><div class="vfCode">' + highlight(m.ucsCode, tokens) + (m.unit ? '<span class="vfUnit">' + esc(m.unit) + '</span>' : '') + '</div>' +
+        '<div class="vfShort">' + highlight(m.shortText, tokens) + '</div></div>' +
+        '<button type="button" class="vfInfoBtn" data-action="info" data-code="' + esc(m.ucsCode) + '" title="View long text" aria-label="View long text for ' + esc(m.ucsCode) + '">i</button>' +
+        (added
+          ? '<button type="button" class="vfAddBtn added" disabled>Added</button>'
+          : '<button type="button" class="vfAddBtn" data-action="add" data-code="' + esc(m.ucsCode) + '"' + (full ? ' disabled title="Your list is full"' : '') + '>Add</button>') +
+        '</div>';
+    }).join('');
+  }
+
+  function togglePaste() {
+    const box = $('vfPasteBox');
+    const open = box.style.display === 'none';
+    box.style.display = open ? 'block' : 'none';
+    if (open) $('vfPasteText').focus();
+  }
+
+  function addPasted() {
+    const msg = $('vfPasteMsg');
+    if (!allMaterials.length) { msg.textContent = 'The material list is still loading. Try again in a moment.'; return; }
+    const found = ($('vfPasteText').value.match(/\d{14}/g) || []).filter(function (c, i, a) { return a.indexOf(c) === i; });
+    if (!found.length) { msg.textContent = 'No 14-digit codes found in what you pasted.'; return; }
+    let added = 0, dup = 0;
+    const unknown = [], skipped = [];
+    found.forEach(function (c) {
+      const r = addCode(c);
+      if (r === 'ok') added++;
+      else if (r === 'dup') dup++;
+      else if (r === 'full') skipped.push(c);
+      else unknown.push(c);
+    });
+    const parts = [added + ' added'];
+    if (dup) parts.push(dup + ' already in your list');
+    if (unknown.length) parts.push('not found in UCS master: ' + unknown.join(', '));
+    if (skipped.length) parts.push(skipped.length + ' skipped because the list is full');
+    msg.textContent = parts.join('. ') + '.';
+    if (!unknown.length && !skipped.length) $('vfPasteText').value = '';
+    renderBasket();
+    runSearch();
+    markStale();
+  }
+
+  // ====== LONG-TEXT POPUP ======
+  function openInfo(code) {
+    const m = byCode[code] || basket.find(function (b) { return b.ucsCode === code; });
+    if (!m) return;
+    infoCode = code;
+    const tokens = currentTokens();
+    $('vfInfoCode').innerHTML = highlight(code, tokens);
+    $('vfInfoUnit').innerHTML = m.unit ? '<span class="vfUnit" style="margin-left:0;">' + esc(m.unit) + '</span>' : '';
+    $('vfInfoShort').innerHTML = highlight(m.shortText || '', tokens) || '<span class="vfMuted">(none)</span>';
+    $('vfInfoLong').innerHTML = m.longText ? highlight(m.longText, tokens) : '<span class="vfMuted">(no long text recorded)</span>';
+    const btn = $('vfInfoAddBtn');
+    if (inBasket(code)) { btn.disabled = true; btn.textContent = 'Already in your list'; }
+    else if (basket.length >= MAX_ITEMS) { btn.disabled = true; btn.textContent = 'Your list is full'; }
+    else { btn.disabled = false; btn.textContent = 'Add to list'; }
+    $('vfInfoOverlay').style.display = 'flex';
+    btn.disabled ? $('vfInfoOverlay').querySelector('.secondary').focus() : btn.focus();
+  }
+  function closeInfo() { $('vfInfoOverlay').style.display = 'none'; infoCode = null; }
+
+  // ====== FIND VENDORS ======
+  function markStale() {
+    if (!lastResult) return;
+    $('vfStale').style.display = basketKey() !== lastQueryKey ? 'block' : 'none';
+  }
+
+  async function findVendors(refresh) {
+    if (!basket.length) return;
+    const btn = $('vfFindBtn');
+    btn.disabled = true;
+    btn.textContent = 'Searching…';
+    showMsg('');
+    const key = basketKey();
+    try {
+      const payload = { action: 'getPastVendors', ucsCodes: basket.map(function (b) { return b.ucsCode; }), sinceYears: Number($('vfSince').value) };
+      if (refresh === true) payload.refresh = true; // re-read SMS3E PRs now instead of using the 10-minute copy
+      const data = await callApi(payload);
+      if (!data.success) { showMsg(data.message || 'Could not load vendors.'); return; }
+      lastResult = data;
+      lastQueryKey = key;
+      selected = {};
+      data.vendors.forEach(function (v) { selected[v.vendorCode] = !isBlocked(v); });
+      $('vfResultsSection').style.display = 'block';
+      $('vfStale').style.display = 'none';
+      renderResults();
+      $('vfResultsSection').scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+    } catch (e) {
+      showMsg('Could not reach the server. Check your connection and try again.');
+    } finally {
+      btn.disabled = basket.length === 0;
+      btn.textContent = 'Find vendors';
+    }
+  }
+
+  function isBlocked(v) { return !!v.status && v.status !== 'Active' && v.status !== 'Unknown'; }
+  function visibleVendors() {
+    const hide = $('vfHideBlocked').checked;
+    return lastResult.vendors.filter(function (v) { return !(hide && isBlocked(v)); });
+  }
+
+  function vendorBadges(v) {
+    let b = '';
+    const c = v.contact || {};
+    if (c.vendorType === 'Import') b += '<span class="vfBadge imp">Import' + (c.currency ? ' \u00b7 ' + esc(c.currency) : '') + '</span>';
+    if (v.status === 'Blocked' || v.status === 'Blacklisted') b += '<span class="vfBadge blk">' + esc(v.status) + '</span>';
+    else if (v.status === 'Unknown') b += '<span class="vfBadge unk">Not in Vendor tab</span>';
+    else if (v.status === 'Check') b += '<span class="vfBadge chk" title="Marked Check in the Vendor tab: verify this vendor code in SAP before contacting">Check</span>';
+    else if (v.status !== 'Active') b += '<span class="vfBadge chk">' + esc(v.status) + '</span>';
+    return b;
+  }
+
+  function contactCell(v) {
+    const c = v.contact;
+    if (!c) return '<span class="vfMuted">No contact on file</span>';
+    const lines = [];
+    if (c.contactPerson) lines.push(esc(c.contactPerson));
+    if (c.email) lines.push(emailLinks(c.email));
+    if (c.mobile) lines.push(phoneLinks(c.mobile));
+    return lines.length ? lines.join('<br>') : '<span class="vfMuted">No contact on file</span>';
+  }
+
+  // Email / Mobile cells may hold several values ("a@x.com; b@y.com",
+  // "98261xxxxx, 07882xxxxxx"). Split on commas, semicolons, slashes or spaces.
+  function splitEmails(str) {
+    return String(str || '').split(/[\s,;\/]+/).map(function (e) { return e.trim(); })
+      .filter(function (e) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e); });
+  }
+  function splitPhones(str) {
+    return String(str || '').split(/[,;\/]+/).map(function (p) { return p.trim(); })
+      .filter(function (p) { return p.replace(/[^\d]/g, '').length >= 6; });
+  }
+  function emailLinks(str) {
+    const list = splitEmails(str);
+    return list.length ? list.map(function (e) { return '<a href="mailto:' + esc(e) + '">' + esc(e) + '</a>'; }).join('<br>') : esc(str);
+  }
+  function phoneLinks(str) {
+    const list = splitPhones(str);
+    return list.length ? list.map(function (p) { return '<a href="tel:' + esc(p.replace(/[^\d+]/g, '')) + '">' + esc(p) + '</a>'; }).join('<br>') : esc(str);
+  }
+
+  function periodText(y) { return y ? ' in the last ' + y + ' year' + (y === 1 ? '' : 's') : ''; }
+
+  function renderResults() {
+    const d = lastResult;
+    const n = d.items.length;
+    const noHist = [];
+    d.items.forEach(function (it, i) { if (!it.hasHistory) noHist.push('#' + (i + 1) + ' ' + it.ucsCode); });
+    let html = d.vendors.length
+      ? '<b>' + d.vendors.length + '</b> vendor' + (d.vendors.length === 1 ? ' has' : 's have') + ' supplied ' + (n - noHist.length) + ' of your ' + n + ' item' + (n === 1 ? '' : 's') + periodText(d.sinceYears) + '.'
+      : 'No vendor has supplied any of these items' + periodText(d.sinceYears) + '.';
+    if (noHist.length && d.vendors.length) html += '<div class="vfWarn">No purchase history for ' + esc(noHist.join(', ')) + '. Try a similar code or a longer period.</div>';
+    if (d.vendorTabMissing) html += '<div class="vfWarn">The "Vendor" tab was not found in the SMS3E PRs sheet, so contact details are not shown.</div>';
+    if (d.dataAsOfMs) html += '<div class="vfSmall">Data read from SMS3E PRs at ' + esc(fmtTime(d.dataAsOfMs)) + '. Refreshes every 10 minutes, or <a data-action="refresh" role="button" tabindex="0">refresh now</a> after editing the Vendor tab.</div>';
+    $('vfSummary').innerHTML = html;
+    renderVendorTab();
+    renderItemTab();
+    setTab(activeTab);
+    updateSelCount();
+  }
+
+  function renderVendorTab() {
+    const d = lastResult;
+    const list = visibleVendors();
+    if (!list.length) {
+      $('vfTabVendor').innerHTML = '<div class="vfEmpty">' + (d.vendors.length ? 'Every matching vendor is marked Blocked or Check. Untick "Hide Blocked and Check vendors" to see them.' : 'Nothing to show for this period. Try "All history".') + '</div>';
+      return;
+    }
+    const n = d.items.length;
+    const allSel = list.every(function (v) { return selected[v.vendorCode]; });
+    let h = '<div class="vfTableWrap"><table><thead><tr>' +
+      '<th><input type="checkbox" data-action="selAll" aria-label="Select all vendors"' + (allSel ? ' checked' : '') + '></th>' +
+      '<th>Vendor</th><th>Covers</th>';
+    d.items.forEach(function (it, i) {
+      h += '<th class="vfItemCol" title="' + esc('#' + (i + 1) + ' ' + it.ucsCode + ' ' + it.shortText) + '">' + (i + 1) + '</th>';
+    });
+    h += '<th class="vfNum2">POs</th><th>Last PO</th><th title="Share of fully received lines delivered on or before the promised date">On time</th><th>Contact</th></tr></thead><tbody>';
+    list.forEach(function (v) {
+      const vc = esc(v.vendorCode);
+      h += '<tr class="' + (isBlocked(v) ? 'vfDim' : '') + '">' +
+        '<td><input type="checkbox" data-action="sel" data-vc="' + vc + '" aria-label="Select ' + esc(v.vendorName) + '"' + (selected[v.vendorCode] ? ' checked' : '') + '></td>' +
+        '<td><a data-action="vendor" data-vc="' + vc + '" role="button" tabindex="0">' + esc(v.vendorName) + '</a>' + vendorBadges(v) +
+        '<div class="vfSmall">' + vc + (v.contact && v.contact.city ? ', ' + esc(v.contact.city) : '') + '</div></td>' +
+        '<td class="vfNum2"><b>' + v.itemCount + '</b> / ' + n + '</td>';
+      d.items.forEach(function (it, i) {
+        const p = v.perItem[it.ucsCode];
+        h += p
+          ? '<td class="vfItemCol"><span class="vfTick" title="' + esc('#' + (i + 1) + ' ' + it.ucsCode + ': last PO ' + fmtDate(p.lastPoDate) + ', rate ' + fmtNum(p.lastRate) + ', ' + p.poCount + ' PO(s), total qty ' + fmtNum(p.totalQty)) + '">&#10003;</span></td>'
+          : '<td class="vfItemCol"><span class="vfDot">&middot;</span></td>';
+      });
+      h += '<td class="vfNum2">' + v.poCount + '</td>' +
+        '<td style="white-space:nowrap;">' + esc(fmtDate(v.lastPoDate)) + '</td>' +
+        '<td class="vfNum2">' + (v.onTimePct === null ? '<span class="vfMuted">&mdash;</span>' : v.onTimePct + '%<div class="vfSmall">of ' + v.onTimeJudged + '</div>') + '</td>' +
+        '<td>' + contactCell(v) + '</td></tr>';
+    });
+    h += '</tbody></table></div>';
+    $('vfTabVendor').innerHTML = h;
+  }
+
+  function renderItemTab() {
+    const d = lastResult;
+    const list = visibleVendors();
+    $('vfTabItem').innerHTML = d.items.map(function (it, i) {
+      const rows = list.filter(function (v) { return v.perItem[it.ucsCode]; })
+        .sort(function (a, b) { return String(b.perItem[it.ucsCode].lastPoDate).localeCompare(String(a.perItem[it.ucsCode].lastPoDate)); });
+      let body;
+      if (!rows.length) {
+        body = '<div class="vfEmpty">' + (it.hasHistory ? 'Only vendors marked Blocked or Check have supplied this item.' : 'No purchase history for this item' + periodText(d.sinceYears) + '.') + '</div>';
+      } else {
+        body = '<div class="vfTableWrap"><table><thead><tr><th>Vendor</th><th>Last PO</th><th>Last PO No.</th><th class="vfNum2">Last rate</th><th class="vfNum2">Total qty</th><th class="vfNum2">POs</th><th>Contact</th></tr></thead><tbody>' +
+          rows.map(function (v) {
+            const p = v.perItem[it.ucsCode];
+            return '<tr class="' + (isBlocked(v) ? 'vfDim' : '') + '"><td><a data-action="vendor" data-vc="' + esc(v.vendorCode) + '" role="button" tabindex="0">' + esc(v.vendorName) + '</a>' + vendorBadges(v) + '</td>' +
+              '<td style="white-space:nowrap;">' + esc(fmtDate(p.lastPoDate)) + '</td><td>' + esc(p.lastPoNo) + '</td>' +
+              '<td class="vfNum2">' + fmtNum(p.lastRate) + '</td><td class="vfNum2">' + fmtNum(p.totalQty) + '</td><td class="vfNum2">' + p.poCount + '</td>' +
+              '<td>' + contactCell(v) + '</td></tr>';
+          }).join('') + '</tbody></table></div>';
+      }
+      return '<div class="vfItemCard"><div class="vfItemCardHead"><span class="vfNum">' + (i + 1) + '</span>' +
+        '<div class="vfRowMain"><div class="vfCode">' + esc(it.ucsCode) + '</div><div class="vfShort">' + esc(it.shortText) + '</div></div>' +
+        '<button type="button" class="vfInfoBtn" data-action="info" data-code="' + esc(it.ucsCode) + '" title="View long text" aria-label="View long text">i</button></div>' + body + '</div>';
+    }).join('');
+  }
+
+  function setTab(tab) {
+    activeTab = tab;
+    document.querySelectorAll('#vfRoot .vfTab').forEach(function (b) {
+      const on = b.dataset.tab === tab;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    $('vfTabVendor').style.display = tab === 'vendor' ? 'block' : 'none';
+    $('vfTabItem').style.display = tab === 'item' ? 'block' : 'none';
+  }
+
+  function selectedVendors() {
+    return visibleVendors().filter(function (v) { return selected[v.vendorCode]; });
+  }
+  function updateSelCount() {
+    if (!lastResult) return;
+    const n = selectedVendors().length;
+    $('vfSelCount').textContent = n + ' of ' + visibleVendors().length + ' selected';
+  }
+
+  // ====== COPY / EXPORT ======
+  async function copyText(text) {
+    try { await navigator.clipboard.writeText(text); return true; } catch (e) {
+      const ta = document.createElement('textarea');
+      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      let ok = false;
+      try { ok = document.execCommand('copy'); } catch (e2) {}
+      document.body.removeChild(ta);
+      return ok;
+    }
+  }
+
+  async function copyEmails() {
+    const sel = selectedVendors();
+    if (!sel.length) { toast('Tick at least one vendor first.'); return; }
+    const emails = [], missing = [];
+    sel.forEach(function (v) {
+      const list = splitEmails(v.contact && v.contact.email);
+      if (!list.length) { missing.push(v.vendorName); return; }
+      list.forEach(function (e) { if (emails.map(function (x) { return x.toLowerCase(); }).indexOf(e.toLowerCase()) === -1) emails.push(e); });
+    });
+    if (!emails.length) { showMsg('None of the selected vendors has an email on file yet. Add emails in the Vendor tab of SMS3E PRs.', 'info'); return; }
+    const ok = await copyText(emails.join('; '));
+    if (!ok) { showMsg('Could not copy automatically. Emails: ' + emails.join('; '), 'info'); return; }
+    toast('Copied ' + emails.length + ' email' + (emails.length === 1 ? '' : 's') + '. Paste into BCC so vendors don\u2019t see each other.');
+    if (missing.length) showMsg('No valid email in the Vendor tab for: ' + missing.join(', ') + '.', 'info'); else showMsg('');
+  }
+
+  function csvCell(v) {
+    const s = String(v === null || v === undefined ? '' : v);
+    return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+
+  function exportCsv() {
+    const d = lastResult;
+    let list = selectedVendors();
+    if (!list.length) list = visibleVendors();
+    const head = ['Vendor Code', 'Vendor Name', 'Status', 'Vendor Type', 'Currency', 'City', 'State', 'Country', 'Contact Person', 'Designation', 'Email', 'Alt Email', 'Mobile', 'Landline', 'Items Covered', 'Covered UCS Codes', 'POs', 'Last PO Date', 'On-time %'];
+    const lines = [head.map(csvCell).join(',')];
+    list.forEach(function (v) {
+      const c = v.contact || {};
+      const covered = d.items.filter(function (it) { return v.perItem[it.ucsCode]; }).map(function (it) { return it.ucsCode; });
+      lines.push([
+        v.vendorCode, v.vendorName, v.status, c.vendorType || '', c.currency || '', c.city || '', c.state || '', c.country || '',
+        c.contactPerson || '', c.designation || '', c.email || '', c.altEmail || '', c.mobile || '', c.landline || '',
+        covered.length + ' of ' + d.items.length, covered.join('; '), v.poCount, fmtDate(v.lastPoDate), v.onTimePct === null ? '' : v.onTimePct
+      ].map(csvCell).join(','));
+    });
+    const now = new Date();
+    const stamp = now.getFullYear() + String(now.getMonth() + 1).padStart(2, '0') + String(now.getDate()).padStart(2, '0') + '_' + String(now.getHours()).padStart(2, '0') + String(now.getMinutes()).padStart(2, '0');
+    const blob = new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'Vendor_Finder_' + stamp + '.csv';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+    toast('Exported ' + list.length + ' vendor' + (list.length === 1 ? '' : 's'));
+  }
+
+  // ====== VENDOR SUPPLY-HISTORY POPUP ======
+  function contactField(label, value, html) {
+    if (!value) return '';
+    return '<div><div class="vfLabel">' + esc(label) + '</div><div class="vfValue">' + (html || esc(value)) + '</div></div>';
+  }
+
+  async function openVendor(vc) {
+    currentVendorCode = vc;
+    $('vfVTitle').textContent = 'Loading…';
+    $('vfVSub').textContent = vc;
+    $('vfVBody').innerHTML = '';
+    $('vfVendorOverlay').style.display = 'flex';
+    $('vfVendorOverlay').querySelector('.vfCardHead button').focus();
+    try {
+      const d = await callApi({ action: 'getVendorSupplyHistory', vendorCode: vc });
+      if (currentVendorCode !== vc) return; // closed or switched while loading
+      if (!d.success) { $('vfVTitle').textContent = 'Vendor ' + vc; $('vfVBody').innerHTML = '<div class="vfMsg error">' + esc(d.message || 'Could not load this vendor.') + '</div>'; return; }
+      $('vfVTitle').textContent = d.vendorName;
+      $('vfVSub').innerHTML = esc(d.vendorCode) + vendorBadges({ status: d.status, contact: d.contact });
+
+      const c = d.contact;
+      let h = '';
+      if (c) {
+        const addr = [c.address, c.city, c.state, c.pin].filter(Boolean).join(', ');
+        h += '<div class="vfContactGrid">' +
+          contactField('Contact person', c.contactPerson + (c.designation ? ' (' + c.designation + ')' : '')) +
+          contactField('Email', c.email, c.email ? emailLinks(c.email) : '') +
+          contactField('Alternate email', c.altEmail, c.altEmail ? emailLinks(c.altEmail) : '') +
+          contactField('Mobile', c.mobile, c.mobile ? phoneLinks(c.mobile) : '') +
+          contactField('Landline', c.landline, c.landline ? phoneLinks(c.landline) : '') +
+          contactField('Address', addr) +
+          contactField('Country and currency', [c.country, c.currency].filter(Boolean).join(', ')) +
+          contactField('GSTIN', c.gstin) + contactField('Notes', c.notes) +
+          contactField('Also known as', c.otherNames) +
+          '</div>';
+        if (!c.email && !c.mobile && !c.contactPerson) h += '<div class="vfWarn" style="margin:-6px 0 12px;">No contact details yet. Add them in the Vendor tab of SMS3E PRs.</div>';
+      } else {
+        h += '<div class="vfNotice" style="margin-bottom:14px;">' + (d.vendorTabMissing ? 'The "Vendor" tab was not found in the SMS3E PRs sheet.' : 'This vendor is not in the Vendor tab of SMS3E PRs yet, so there are no contact details.') + '</div>';
+      }
+
+      const s = d.summary;
+      h += '<div style="font-size:14px;margin-bottom:8px;"><b>' + s.itemCount + '</b> item' + (s.itemCount === 1 ? '' : 's') + ' across <b>' + s.poCount + '</b> PO' + (s.poCount === 1 ? '' : 's') +
+        (s.lastPoDate ? ', last PO ' + esc(fmtDate(s.lastPoDate)) : '') +
+        (s.onTimePct !== null ? ', ' + s.onTimePct + '% delivered on time (' + s.onTimeJudged + ' lines)' : '') + '.' +
+        (basket.length ? ' <span class="vfMuted">Rows marked blue are in your list.</span>' : '') + '</div>';
+
+      if (!d.rows.length) {
+        h += '<div class="vfEmpty">No purchase lines found for this vendor.</div>';
+      } else {
+        const delClass = { 'On time': 'ok', 'Late': 'late', 'Open': 'open', 'Partial': 'open', 'Received': 'rcv' };
+        h += '<div class="vfTableWrap"><table><thead><tr><th>UCS Code</th><th>Item</th><th>PO No.</th><th>PO date</th><th class="vfNum2">PO qty</th><th class="vfNum2">Rate</th><th class="vfNum2">Received</th><th>Received on</th><th>Delivery</th></tr></thead><tbody>' +
+          d.rows.map(function (r) {
+            return '<tr class="' + (inBasket(r.ucsCode) ? 'vfInBasket' : '') + '"><td class="vfCode" style="white-space:nowrap;">' + esc(r.ucsCode) + '</td><td>' + esc(r.shortText) + '</td>' +
+              '<td>' + esc(r.poNo) + '</td><td style="white-space:nowrap;">' + esc(fmtDate(r.poDate)) + '</td>' +
+              '<td class="vfNum2">' + fmtNum(r.poQty) + '</td><td class="vfNum2">' + fmtNum(r.rate) + '</td><td class="vfNum2">' + fmtNum(r.qty105) + '</td>' +
+              '<td style="white-space:nowrap;">' + esc(fmtDate(r.receiptDate)) + '</td>' +
+              '<td><span class="vfDel ' + (delClass[r.delivery] || '') + '"' + (r.dueDate ? ' title="Promised ' + esc(fmtDate(r.dueDate)) + '"' : '') + '>' + esc(r.delivery) + '</span></td></tr>';
+          }).join('') + '</tbody></table></div>';
+        if (d.truncated) h += '<div class="vfSmall" style="margin-top:6px;">Showing the latest ' + d.rows.length + ' of ' + s.lineCount + ' lines.</div>';
+      }
+      $('vfVBody').innerHTML = h;
+    } catch (e) {
+      if (currentVendorCode === vc) $('vfVBody').innerHTML = '<div class="vfMsg error">Could not reach the server.</div>';
+    }
+  }
+  function closeVendor() { $('vfVendorOverlay').style.display = 'none'; currentVendorCode = null; }
+
+  // ====== EVENTS (delegated -- no codes/names spliced into inline JS) ======
+  function handleAction(el) {
+    const a = el.dataset.action;
+    const code = el.dataset.code;
+    if (a === 'add') addFromSearch(code);
+    else if (a === 'remove') removeCode(code);
+    else if (a === 'info') openInfo(code);
+    else if (a === 'infoAdd') { const c = infoCode; closeInfo(); if (c) addFromSearch(c); }
+    else if (a === 'closeInfo') closeInfo();
+    else if (a === 'clearBasket') clearBasket();
+    else if (a === 'togglePaste') togglePaste();
+    else if (a === 'addPasted') addPasted();
+    else if (a === 'find') findVendors();
+    else if (a === 'refresh') findVendors(true);
+    else if (a === 'tab') setTab(el.dataset.tab);
+    else if (a === 'vendor') openVendor(el.dataset.vc);
+    else if (a === 'closeVendor') closeVendor();
+    else if (a === 'copyEmails') copyEmails();
+    else if (a === 'exportCsv') exportCsv();
+  }
+
+  const root = $('vfRoot');
+  root.addEventListener('click', function (e) {
+    if (e.target.classList && e.target.classList.contains('vfOverlay')) {
+      if (e.target.dataset.overlay === 'info') closeInfo(); else closeVendor();
+      return;
+    }
+    const el = e.target.closest('[data-action]');
+    if (!el || !root.contains(el) || el.type === 'checkbox') return;
+    if (el.tagName === 'A') e.preventDefault();
+    if (el.disabled) return;
+    handleAction(el);
+  });
+  // Links styled as buttons: Enter/Space should work from the keyboard too.
+  root.addEventListener('keydown', function (e) {
+    const el = e.target;
+    if (el.tagName === 'A' && el.dataset.action && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); handleAction(el); }
+  });
+  root.addEventListener('change', function (e) {
+    const el = e.target;
+    if (el.dataset.action === 'sel') { selected[el.dataset.vc] = el.checked; renderVendorTab(); updateSelCount(); }
+    else if (el.dataset.action === 'selAll') { visibleVendors().forEach(function (v) { selected[v.vendorCode] = el.checked; }); renderVendorTab(); updateSelCount(); }
+    else if (el.id === 'vfHideBlocked') { if (lastResult) { renderVendorTab(); renderItemTab(); updateSelCount(); } }
+    else if (el.id === 'vfSince') markStale();
+  });
+  $('vfSearch').addEventListener('input', function () { clearTimeout(searchTimer); searchTimer = setTimeout(runSearch, 120); });
+  $('vfSearch').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && shownMatches.length === 1 && !inBasket(shownMatches[0].ucsCode)) { e.preventDefault(); addFromSearch(shownMatches[0].ucsCode); }
+  });
+  // Tracked by the shell and removed on navigation (see Shell._wrapAddEventListenerOnce).
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape') return;
+    if ($('vfInfoOverlay').style.display === 'flex') closeInfo();
+    else if ($('vfVendorOverlay').style.display === 'flex') closeVendor();
+  });
+
+  // ====== START ======
+  if (!user.email) return;
+  if (!canUse) { $('vfNotAuth').style.display = 'block'; return; }
+  $('vfMain').style.display = 'block';
+  renderBasket();
+  loadMaterials();
+  if (basket.length && sessionStorage.getItem('smsCache:vendorBasketJustAdded')) {
+    toast('Item added from another page. Your list has ' + basket.length + ' item' + (basket.length === 1 ? '' : 's') + '.');
+    sessionStorage.removeItem('smsCache:vendorBasketJustAdded');
+  }
+  setTimeout(function () { $('vfSearch').focus(); }, 0);
+})();
+</script>
