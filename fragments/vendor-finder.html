@@ -33,6 +33,7 @@
   .vfPeriodBar button { padding: 6px 12px; font-size: 13px; }
   .vfMeta { font-size: 12px; color: #666; margin-top: 6px; min-height: 16px; }
 
+  #vfResults.vfExpanded { max-height: 470px; overflow-y: auto; padding-right: 4px; } /* long "Show all" lists scroll inside the panel */
   .vfRow { display: flex; align-items: center; gap: 8px; padding: 9px 10px; border: 1px solid #eee; border-radius: 6px; margin-top: 6px; }
   .vfRowMain { flex: 1; min-width: 0; }
   .vfCode { font-family: 'Courier New', monospace; font-weight: bold; color: #1a73e8; font-size: 13px; }
@@ -241,7 +242,8 @@
   const API = Shell.APPS_SCRIPT_URL;
   const user = Shell.getUser() || {};
   const MAX_ITEMS = 25;
-  const MAX_SHOWN = 5;
+  const MAX_SHOWN = 5;          // matches shown at first
+  const MAX_SHOWN_ALL = 100;     // cap when the user clicks "Show all"
   const BASKET_KEY = 'smsCache:vendorBasket';  // same key Search UCS / Planning Stock write to; cleared on logout with every smsCache: key
   const UCS_CACHE_KEY = 'smsCache:ucsSearch';  // shared with Search UCS Codes -- same shape, so each page warms the other
 
@@ -264,6 +266,8 @@
   const MAX_VENDORS_SHOWN = 8;
   let drillDataCache = {};  // 'po|<no>' / 'pr|<no>' -> response, so reopening a panel is instant
   let searchTimer = null;
+  let showAllMatches = false;  // "Show all N" clicked for the CURRENT search words; resets when the words change
+  let lastSearchKey = '';
   let toastTimer = null;
 
   const $ = function (id) { return document.getElementById(id); };
@@ -352,17 +356,37 @@
     return 'ok';
   }
 
-  function addFromSearch(code) {
+  function addFromSearch(code, fromPanel) {
     const r = addCode(code);
     if (r === 'full') { toast('Your list already has ' + MAX_ITEMS + ' items. Remove one to add another.'); return; }
     if (r !== 'ok') return;
     toast('Added ' + code + ' to your list');
-    const box = $('vfSearch');
-    box.value = '';
+    // Keep the search and its results exactly as they are -- the added row
+    // just flips to "Added", so several matches (e.g. 5 kinds of panel) can
+    // be picked one after another without retyping.
     renderBasket();
     runSearch();
     markStale();
-    box.focus();
+    // The clicked button was re-drawn, so move focus to the next "Add" in the
+    // list (or back to the search box) -- keyboard users keep their place.
+    if (fromPanel) return; // added from inside a drill-down panel -- leave focus there
+    const nextAdd = $('vfResults').querySelector('button[data-action="add"]:not([disabled])');
+    (nextAdd || $('vfSearch')).focus({ preventScroll: true });
+  }
+
+  /** "Add all shown": every match currently visible that isn't already in the list. */
+  function addAllShown() {
+    let added = 0, full = false;
+    shownMatches.forEach(function (m) {
+      const r = addCode(m.ucsCode);
+      if (r === 'ok') added++;
+      else if (r === 'full') full = true;
+    });
+    renderBasket();
+    runSearch();
+    markStale();
+    toast(added + ' item' + (added === 1 ? '' : 's') + ' added' + (full ? '. Your list is full (' + MAX_ITEMS + '), so the rest were skipped.' : '.'));
+    $('vfSearch').focus({ preventScroll: true });
   }
 
   function removeCode(code) {
@@ -481,16 +505,29 @@
       return;
     }
     const matches = allMaterials.filter(function (m) { return tokens.every(function (t) { return m.haystack.indexOf(t) !== -1; }); });
-    shownMatches = matches.slice(0, MAX_SHOWN);
+    const searchKey = tokens.join(' ');
+    if (searchKey !== lastSearchKey) { showAllMatches = false; lastSearchKey = searchKey; } // new words -> back to the short list
+    const limit = showAllMatches ? MAX_SHOWN_ALL : MAX_SHOWN;
+    shownMatches = matches.slice(0, limit);
+    res.classList.toggle('vfExpanded', shownMatches.length > MAX_SHOWN);
     if (!matches.length) {
       meta.textContent = '';
       res.innerHTML = '<div class="vfEmpty">No materials match all of those words. Try fewer or different words.</div>';
       return;
     }
-    meta.textContent = matches.length > MAX_SHOWN
-      ? 'Showing ' + MAX_SHOWN + ' of ' + matches.length + ' matches. Type another word to narrow it down.'
-      : matches.length + (matches.length === 1 ? ' match. Press Enter to add it.' : ' matches');
     const full = basket.length >= MAX_ITEMS;
+    const addable = shownMatches.filter(function (m) { return !inBasket(m.ucsCode); }).length;
+    let metaText;
+    if (matches.length <= shownMatches.length) {
+      metaText = matches.length + (matches.length === 1 ? (addable ? ' match. Press Enter to add it.' : ' match.') : ' matches, all shown.');
+    } else {
+      metaText = 'Showing ' + shownMatches.length + ' of ' + matches.length + ' matches.' + (showAllMatches ? ' Type another word to narrow it down.' : '');
+    }
+    const showAllLink = (!showAllMatches && matches.length > MAX_SHOWN)
+      ? ' <a data-action="showAll" role="button" tabindex="0">' + (matches.length <= MAX_SHOWN_ALL ? 'Show all ' + matches.length : 'Show first ' + MAX_SHOWN_ALL) + '</a>'
+      : '';
+    const addAllLink = (addable >= 2 && !full) ? ' <a data-action="addShown" role="button" tabindex="0">Add all ' + addable + ' shown</a>' : '';
+    meta.innerHTML = esc(metaText) + showAllLink + (showAllLink && addAllLink ? ' &middot;' : '') + addAllLink;
     res.innerHTML = shownMatches.map(function (m) {
       const added = inBasket(m.ucsCode);
       return '<div class="vfRow">' +
@@ -1159,7 +1196,9 @@
   function handleAction(el) {
     const a = el.dataset.action;
     const code = el.dataset.code;
-    if (a === 'add') addFromSearch(code);
+    if (a === 'add') addFromSearch(code, !!el.closest('.vfDrill'));
+    else if (a === 'addShown') addAllShown();
+    else if (a === 'showAll') { showAllMatches = true; runSearch(); }
     else if (a === 'remove') removeCode(code);
     else if (a === 'info') openInfo(code);
     else if (a === 'infoAdd') { const c = infoCode; closeInfo(); if (c) addFromSearch(c); }
