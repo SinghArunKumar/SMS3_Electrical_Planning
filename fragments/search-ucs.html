@@ -18,6 +18,13 @@
   #searchBox { font-size: 16px; padding: 12px; }
   #resultCount { font-size: 12px; color:#666; margin-top: 6px; }
 
+  /* ---- Export to CSV bar (Planning staff only, excluding Store Incharge) ---- */
+  #exportBar { display: none; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0 6px; padding: 10px 12px; background: #e8f0fe; border: 1px solid #c6dafc; border-radius: 8px; font-size: 13px; }
+  #exportBar input[type=number] { width: 80px; margin: 0; padding: 6px 8px; }
+  #exportBar button { margin: 0; padding: 7px 12px; font-size: 13px; }
+  #exportBar .exportAllBtn { background: #fff; color: #1a73e8; border: 1px solid #1a73e8; }
+  #exportBar #exportOf { color: #555; }
+
   /* ---- Results list ---- */
   #resultsList { margin-top: 14px; border: 1px solid #e0e0e0; border-radius: 8px; overflow: hidden; }
   .resultRow { padding: 10px 14px; border-bottom: 1px solid #eee; cursor: pointer; }
@@ -66,6 +73,16 @@
   </div>
   <div id="resultCount"></div>
 
+  <!-- Hidden unless the logged-in user is Planning staff (not Store Incharge).
+       getUCSPOExportData() in Code.gs re-checks this server-side. -->
+  <div id="exportBar">
+    <span>Export first</span>
+    <input type="number" id="exportCount" min="1" step="1" inputmode="numeric">
+    <span id="exportOf"></span>
+    <button type="button" class="exportAllBtn" onclick="setExportAll()">All</button>
+    <button type="button" id="exportBtn" onclick="exportCsv()">Export CSV</button>
+  </div>
+
   <div id="resultsList" style="display:none;"></div>
   <div id="moreNotice" style="display:none;"></div>
   <div id="hintState">Start typing a few words &mdash; word order and spacing don't matter. Every word you type has to match somewhere in the code, short text, or long text (e.g. typing <b>cable 1100 v copper</b> will find a 1100V copper cable even though none of those exact words appear together in the description).</div>
@@ -87,8 +104,6 @@
     <div class="detailLabel">Long Text</div>
     <div class="detailValue" id="detailLong"></div>
 
-    <!-- Planning staff (excluding Store Incharge) only -- shown by openDetail() via Shell.canUseVendorFinder() -->
-    <button id="detailVendorBtn" class="secondary" style="display:none; margin-top:22px; width:100%;" onclick="findPastVendorsForDetail()">Find past vendors for this item</button>
     <button id="detailOkBtn" onclick="closeDetail()">OK</button>
   </div>
 </div>
@@ -106,6 +121,14 @@
 
   const MAX_RESULTS_SHOWN = 150; // guard against rendering thousands of rows for a very loose query
   let searchDebounceTimer = null;
+
+  // ====== EXPORT STATE ======
+  // Declared up here (not next to the export functions) so it is initialized
+  // before login()/runSearch() can ever touch it.
+  const EXPORT_MAX = 500;      // must match UCS_EXPORT_MAX_CODES in Code.gs
+  const EXPORT_DEFAULT = 50;
+  let canExport = false;       // UI convenience only -- Code.gs re-checks on every export
+  let exportMatches = [];      // FULL match list of the current search, not just the 150 drawn
 
   // ====== DEVICE-LOCAL SESSION CACHE ======
   // This is separate from (and much smaller in scope than) the server-side
@@ -142,6 +165,17 @@
     el.className = '';
   }
 
+  /**
+   * Case-insensitive on purpose, mirroring Code.gs's hasCommaValue() exactly
+   * -- a case-sensitive version previously broke Planning access on several
+   * other pages once Authorized_Area was standardized to 'PLANNING'.
+   */
+  function hasCommaValueClient(str, target) {
+    if (!str) return false;
+    const targetLower = String(target).toLowerCase();
+    return String(str).split(',').map(function (s) { return s.trim().toLowerCase(); }).indexOf(targetLower) !== -1;
+  }
+
   async function callApi(payload) {
     const res = await fetch(APPS_SCRIPT_URL, {
       method: 'POST',
@@ -175,11 +209,15 @@
 
       if (data.success) {
         currentUser = { email, password };
+        // Same rule as canManageSTO() in Code.gs: Planning staff, excluding
+        // Store Incharge. Only controls whether the export bar is shown.
+        canExport = hasCommaValueClient(data.authorizedArea, 'Planning') &&
+          !hasCommaValueClient(data.role, 'Store Incharge');
         document.getElementById('loginSection').style.display = 'none';
         document.getElementById('searchSection').style.display = 'block';
         const bar = document.getElementById('loggedInBar');
         bar.style.display = 'block';
-        bar.innerHTML = 'Logged in as <b>' + data.name + '</b> (' + data.role + ')' +
+        bar.innerHTML = 'Logged in as <b>' + escapeHtml(data.name) + '</b> (' + escapeHtml(data.role) + ')' +
           '<button id="logoutBtn" onclick="logout()">Log out</button>';
         loadMaterials();
       } else {
@@ -196,6 +234,8 @@
   function logout() {
     currentUser = { email: '', password: '' };
     allMaterials = [];
+    canExport = false;
+    updateExportBar([]);
     clearCache();
     document.getElementById('searchSection').style.display = 'none';
     document.getElementById('loginSection').style.display = 'block';
@@ -262,7 +302,7 @@
   }
 
   function escapeHtml(str) {
-    return String(str)
+    return String(str == null ? '' : str)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
@@ -303,6 +343,7 @@
       countEl.textContent = '';
       hintEl.style.display = allMaterials.length ? 'block' : 'none';
       window.currentSearchTokens = [];
+      updateExportBar([]);
       return;
     }
     hintEl.style.display = 'none';
@@ -321,9 +362,13 @@
       resultsEl.style.display = 'none';
       moreEl.style.display = 'none';
       emptyEl.style.display = 'block';
+      updateExportBar([]);
       return;
     }
     emptyEl.style.display = 'none';
+
+    // Export works on EVERY match, not just the first MAX_RESULTS_SHOWN drawn below.
+    updateExportBar(matches);
 
     const shown = matches.slice(0, MAX_RESULTS_SHOWN);
     resultsEl.innerHTML = shown.map(function (m, idx) {
@@ -337,7 +382,8 @@
     window.currentShownMatches = shown; // referenced by openDetail(idx)
 
     if (matches.length > MAX_RESULTS_SHOWN) {
-      moreEl.textContent = 'Showing first ' + MAX_RESULTS_SHOWN + ' of ' + matches.length + ' matches — type a few more words to narrow it down.';
+      moreEl.textContent = 'Showing first ' + MAX_RESULTS_SHOWN + ' of ' + matches.length + ' matches — type a few more words to narrow it down.' +
+        (canExport ? ' The export can still include all of them.' : '');
       moreEl.style.display = 'block';
     } else {
       moreEl.style.display = 'none';
@@ -357,10 +403,6 @@
     document.getElementById('detailUnit').textContent = m.unit || '—';
     document.getElementById('detailShort').innerHTML = highlight(m.shortText, tokens);
     document.getElementById('detailLong').innerHTML = highlight(m.longText, tokens);
-    // Remembered for findPastVendorsForDetail(); the button itself only
-    // appears for Planning staff excluding Store Incharge.
-    window.currentDetailItem = m;
-    document.getElementById('detailVendorBtn').style.display = Shell.canUseVendorFinder() ? 'block' : 'none';
     document.getElementById('detailOverlay').style.display = 'flex';
   }
 
@@ -368,20 +410,128 @@
     document.getElementById('detailOverlay').style.display = 'none';
   }
 
-  // Drops this item into the Vendor Finder list and opens that page.
-  // Code.gs re-checks access on the vendor lookup itself.
-  function findPastVendorsForDetail() {
-    const m = window.currentDetailItem;
-    if (!m) return;
-    const result = Shell.addToVendorBasket({ ucsCode: m.ucsCode, shortText: m.shortText, unit: m.unit });
-    if (result === 'full') { alert('Your Vendor Finder list already has 25 items. Remove one there before adding more.'); return; }
-    closeDetail();
-    Shell.openPage('vendor-finder');
-  }
-
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') closeDetail();
   });
+
+  // ====== EXPORT TO CSV (Planning staff only, excluding Store Incharge) ======
+  // Sends the chosen UCS Codes to getUCSPOExportData(), which looks up each
+  // code's LATEST PO in the external Material List and returns PO No., PO
+  // Date, PO DP, Alt DP, PO Qty, rate and vendor. The CSV itself is built
+  // here in the browser -- nothing is stored anywhere.
+
+  function exportLimit() { return Math.min(exportMatches.length, EXPORT_MAX); }
+
+  function updateExportBar(matches) {
+    exportMatches = matches || [];
+    const bar = document.getElementById('exportBar');
+    if (!canExport || !exportMatches.length) { bar.style.display = 'none'; return; }
+    const max = exportLimit();
+    const input = document.getElementById('exportCount');
+    input.max = max;
+    input.value = Math.min(EXPORT_DEFAULT, max);
+    const n = exportMatches.length;
+    document.getElementById('exportOf').textContent =
+      'of ' + n + ' match' + (n === 1 ? '' : 'es') + (n > EXPORT_MAX ? ' (max ' + EXPORT_MAX + ' per export)' : '');
+    bar.style.display = 'flex';
+  }
+
+  function setExportAll() {
+    document.getElementById('exportCount').value = exportLimit();
+  }
+
+  async function exportCsv() {
+    if (!canExport) return; // defensive -- bar is hidden otherwise, and the server re-checks anyway
+    const max = exportLimit();
+    const n = parseInt(document.getElementById('exportCount').value, 10);
+    if (!(n >= 1 && n <= max)) {
+      showMessage('Enter a number from 1 to ' + max + '.', 'error');
+      return;
+    }
+    const picked = exportMatches.slice(0, n);
+    const unitByCode = {};
+    picked.forEach(function (m) { unitByCode[m.ucsCode] = m.unit; });
+
+    const btn = document.getElementById('exportBtn');
+    btn.disabled = true;
+    btn.textContent = 'Preparing...';
+    clearMessage();
+    try {
+      const data = await callApi({
+        action: 'getUCSPOExportData',
+        ucsCodes: picked.map(function (m) { return m.ucsCode; }),
+        searchText: document.getElementById('searchBox').value.trim()
+      });
+      if (!data.success) { showMessage(data.message || 'Export failed.', 'error'); return; }
+      data.rows.forEach(function (r) { r.unit = unitByCode[r.ucsCode] || ''; });
+      downloadCsv(buildCsv(data.rows), buildExportFileName());
+      const without = data.rows.length - data.withPO;
+      showMessage('Exported ' + data.rows.length + ' UCS Code' + (data.rows.length === 1 ? '' : 's') +
+        ' (' + data.withPO + ' with a PO' + (without ? ', ' + without + ' without' : '') + ').' +
+        (data.dataAsOfMs ? ' PO data as of ' + new Date(data.dataAsOfMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + '.' : ''), 'success');
+    } catch (err) {
+      showMessage('Could not reach the server. Check your connection and try again.', 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Export CSV';
+    }
+  }
+
+  const CSV_COLUMNS = [
+    { key: 'ucsCode',    label: 'UCS Code',        asText: true },
+    { key: 'shortText',  label: 'Short Text' },
+    { key: 'unit',       label: 'Unit' },
+    { key: 'poNo',       label: 'Latest PO No.',   asText: true },
+    { key: 'poDate',     label: 'PO Date' },
+    { key: 'poDP',       label: 'PO DP' },
+    { key: 'altDP',      label: 'Alt DP' },
+    { key: 'poQty',      label: 'PO Qty' },
+    { key: 'rate',       label: 'Rate (per unit)' },
+    { key: 'vendorCode', label: 'Vendor Code',     asText: true },
+    { key: 'vendorName', label: 'Vendor Name' },
+    { key: 'note',       label: 'Note' }
+  ];
+
+  function csvCell(value, asText) {
+    let s = value == null ? '' : String(value);
+    // Long numeric codes: written as ="..." so Excel keeps them as text
+    // instead of showing 5.13E+13 or dropping digits.
+    if (asText && s) return '"=""' + s.replace(/"/g, '') + '"""';
+    // Formula-injection guard for free text (short text, vendor name...).
+    if (/^[=+\-@\t\r]/.test(s) && isNaN(Number(s))) s = "'" + s;
+    if (/[",\r\n]/.test(s)) s = '"' + s.replace(/"/g, '""') + '"';
+    return s;
+  }
+
+  function buildCsv(rows) {
+    const lines = [CSV_COLUMNS.map(function (c) { return csvCell(c.label); }).join(',')];
+    rows.forEach(function (r) {
+      lines.push(CSV_COLUMNS.map(function (c) { return csvCell(r[c.key], c.asText); }).join(','));
+    });
+    return lines.join('\r\n');
+  }
+
+  function buildExportFileName() {
+    const q = document.getElementById('searchBox').value.trim()
+      .replace(/[^0-9A-Za-z]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40) || 'search';
+    const d = new Date(); // device clock -- IST for the team
+    const pad = function (x) { return String(x).padStart(2, '0'); };
+    return 'UCS_LatestPO_' + q + '_' + d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) +
+      '_' + pad(d.getHours()) + pad(d.getMinutes()) + '.csv';
+  }
+
+  function downloadCsv(csv, filename) {
+    // BOM so Excel opens it as UTF-8 (keeps symbols like °, µ, Ø intact).
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  }
 
   // ---- shell auto-login: fill the page's OWN hidden login form and
   // submit it through the page's OWN unmodified login() function, so its
